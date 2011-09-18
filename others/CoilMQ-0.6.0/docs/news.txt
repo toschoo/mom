@@ -1,0 +1,42 @@
+News: CoilMQ
+============
+
+.. contents::
+
+0.6.0
+-----
+* Added a new diagnostic thread that will run when --debug option
+  is passed on the commandline.
+* Added method to QueueManager API  to support tracking subscriber count. 
+* Improved unit and functional test coverage of storage engines.
+* Fixed bug in engine.commit() and updated tests to catch previous 
+  failure (issue 28).
+
+0.5.0
+-----
+* Added support for RECEIPT header and server messages (issue 26). 
+
+0.4.4
+-----
+
+* Fixed packaging (MANIFEST.in) to include defaults.cfg and config.cfg-sample
+  (issue 23).
+* Fixed socket recv loop to appropriately handle client DISCONNECT messages
+  (issue 24).
+
+0.4.3
+-----
+* Fixed bug in requeuing of pending frames when client is disconnected
+  (issue 22).
+* Fixed bug in unit test for dbm on windows (issue 21).
+
+0.4.2
+-----
+* Added allow_socket_reuse (SO_REUSEADDR) option to SocketServer subclass
+  to avoid having to wait to restart server after unclean client 
+  disconnect. 
+
+0.4.1
+-----
+* Added a changelog ;)
+* Added socket timeouts so that the server can be interrupted (e.g. CTRL-C)

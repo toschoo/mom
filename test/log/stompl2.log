@@ -1,0 +1,174 @@
+[2011-09-03 13:59:32.325 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 13:59:32.326 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 13:59:32.326 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 13:59:32.326 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-03 13:59:32.326 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:2:0", subExt = "0", subCid = 2, subQueue = "/queue/test"}]
+[2011-09-03 13:59:32.326 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 13:59:32.327 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 13:59:32.327 WEST : Test.Session-2 : INFO] Terminating Connection
+[2011-09-03 13:59:32.327 WEST : Test.Session-2 : DEBUG] Cleaning Session: 0
+[2011-09-03 13:59:32.327 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-03 13:59:32.327 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:05:46.575 WEST : Test.Sender : INFO] Sender up and running...
+[2011-09-03 14:06:02.115 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:02.116 WEST : Test.Session-2 : INFO] New Connection
+[2011-09-03 14:06:02.117 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 14:06:02.118 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 14:06:02.120 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:02.120 WEST : Test.Sender : DEBUG] Handle Subscription
+[2011-09-03 14:06:02.120 WEST : Test.Sender : DEBUG] []
+[2011-09-03 14:06:02.120 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-03 14:06:02.157 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 14:06:02.158 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 14:06:02.158 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:02.158 WEST : Test.Sender : DEBUG] Sending
+[2011-09-03 14:06:02.158 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 14:06:02.159 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:02.159 WEST : Test.Sender : DEBUG] Sending
+[2011-09-03 14:06:06.646 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:06.646 WEST : Test.Sender : DEBUG] Changing Broker name to 'TEST'
+[2011-09-03 14:06:15.398 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 14:06:15.398 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 14:06:15.398 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:15.399 WEST : TEST.Sender : DEBUG] Handle Unsubscribe
+[2011-09-03 14:06:15.399 WEST : TEST.Sender : DEBUG] [Subscription {subId = "/queue/test:2:0", subExt = "0", subCid = 2, subQueue = "/queue/test"}]
+[2011-09-03 14:06:15.399 WEST : TEST.Session-2 : DEBUG] Start parsing message
+[2011-09-03 14:06:15.399 WEST : TEST.Session-2 : DEBUG] Got complete result
+[2011-09-03 14:06:15.399 WEST : TEST.Session-2 : INFO] Terminating Connection
+[2011-09-03 14:06:15.399 WEST : TEST.Session-2 : DEBUG] Cleaning Session: 0
+[2011-09-03 14:06:15.400 WEST : TEST.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-03 14:06:15.400 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:20.548 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:20.548 WEST : TEST.Session-3 : INFO] New Connection
+[2011-09-03 14:06:20.550 WEST : TEST.Session-3 : DEBUG] Start parsing message
+[2011-09-03 14:06:20.551 WEST : TEST.Session-3 : DEBUG] Got complete result
+[2011-09-03 14:06:20.551 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:20.551 WEST : TEST.Sender : DEBUG] Handle Subscription
+[2011-09-03 14:06:20.551 WEST : TEST.Sender : DEBUG] []
+[2011-09-03 14:06:20.552 WEST : TEST.Sender : DEBUG] [Connection {  3,   []}]
+[2011-09-03 14:06:20.589 WEST : TEST.Session-3 : DEBUG] Start parsing message
+[2011-09-03 14:06:20.589 WEST : TEST.Session-3 : DEBUG] Got complete result
+[2011-09-03 14:06:20.590 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:20.590 WEST : TEST.Sender : DEBUG] Sending
+[2011-09-03 14:06:20.590 WEST : TEST.Session-3 : DEBUG] Got complete result
+[2011-09-03 14:06:20.590 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:20.591 WEST : TEST.Sender : DEBUG] Sending
+[2011-09-03 14:06:26.699 WEST : TEST.Sender : DEBUG] request...
+[2011-09-03 14:06:26.699 WEST : TEST.Sender : DEBUG] Changing Broker name to 'Test'
+[2011-09-03 14:06:31.418 WEST : TEST.Session-3 : DEBUG] Start parsing message
+[2011-09-03 14:06:31.418 WEST : TEST.Session-3 : DEBUG] Got complete result
+[2011-09-03 14:06:31.418 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 14:06:31.418 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-03 14:06:31.419 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:3:0", subExt = "0", subCid = 3, subQueue = "/queue/test"}]
+[2011-09-03 14:06:31.419 WEST : Test.Session-3 : DEBUG] Start parsing message
+[2011-09-03 14:06:31.419 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-03 14:06:31.419 WEST : Test.Session-3 : INFO] Terminating Connection
+[2011-09-03 14:06:31.419 WEST : Test.Session-3 : DEBUG] Cleaning Session: 0
+[2011-09-03 14:06:31.419 WEST : Test.Sender : DEBUG] [Connection {  3,   []}]
+[2011-09-03 14:06:31.420 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:02.216 WEST : Test.Sender : INFO] Sender up and running...
+[2011-09-03 18:18:04.900 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:04.900 WEST : Test.Session-2 : INFO] New Connection
+[2011-09-03 18:18:04.902 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 18:18:04.903 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 18:18:04.909 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:04.910 WEST : Test.Sender : DEBUG] Handle Subscription
+[2011-09-03 18:18:04.910 WEST : Test.Sender : DEBUG] []
+[2011-09-03 18:18:04.910 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-03 18:18:04.941 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 18:18:04.942 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 18:18:04.942 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:04.942 WEST : Test.Sender : DEBUG] Sending
+[2011-09-03 18:18:04.943 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 18:18:04.943 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:04.943 WEST : Test.Sender : DEBUG] Sending
+[2011-09-03 18:18:12.637 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 18:18:12.638 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 18:18:12.638 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-03 18:18:12.638 WEST : Test.Sender : DEBUG] request...
+[2011-09-03 18:18:12.638 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-03 18:18:12.638 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-03 18:18:12.639 WEST : Test.Session-2 : INFO] Terminating Connection
+[2011-09-03 18:18:12.639 WEST : Test.Session-2 : DEBUG] Cleaning Session: 0
+[2011-09-03 18:18:12.639 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:2:0", subExt = "0", subCid = 2, subQueue = "/queue/test"}]
+[2011-09-03 18:18:12.639 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-03 18:18:12.640 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:17:50.746 WEST : Test.Sender : INFO] Sender up and running...
+[2011-09-04 01:17:58.370 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:17:58.370 WEST : Test.Session-2 : INFO] New Connection
+[2011-09-04 01:17:58.372 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 01:17:58.372 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 01:17:58.374 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:17:58.374 WEST : Test.Sender : DEBUG] Handle Subscription
+[2011-09-04 01:17:58.374 WEST : Test.Sender : DEBUG] []
+[2011-09-04 01:17:58.374 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-04 01:17:58.409 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 01:17:58.409 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 01:17:58.410 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:17:58.410 WEST : Test.Sender : DEBUG] Sending
+[2011-09-04 01:17:58.410 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 01:17:58.410 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:17:58.411 WEST : Test.Sender : DEBUG] Sending
+[2011-09-04 01:18:02.485 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 01:18:02.485 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 01:18:02.486 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 01:18:02.486 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 01:18:02.486 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-04 01:18:02.486 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:2:0", subExt = "0", subCid = 2, subQueue = "/queue/test"}]
+[2011-09-04 01:18:02.486 WEST : Test.Sender : DEBUG] [Connection {  2,   []}]
+[2011-09-04 01:18:02.487 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 01:18:02.487 WEST : Test.Session-2 : INFO] Terminating Connection
+[2011-09-04 01:18:02.487 WEST : Test.Session-2 : DEBUG] Cleaning Session: 0
+[2011-09-04 01:18:02.487 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:19:21.469 WEST : Test.Sender : INFO] Sender up and running...
+[2011-09-04 22:20:06.974 WEST : Test.Session-2 : INFO] New Connection
+[2011-09-04 22:20:06.974 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:06.978 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 22:20:06.979 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 22:20:06.981 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:06.982 WEST : Test.Sender : DEBUG] Handle Subscription
+[2011-09-04 22:20:06.982 WEST : Test.Sender : DEBUG] []
+[2011-09-04 22:20:06.982 WEST : Test.Sender : DEBUG] [Connection {  2,   Up,   []}]
+[2011-09-04 22:20:07.016 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 22:20:07.016 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 22:20:07.017 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:07.017 WEST : Test.Sender : DEBUG] Sending Send Frame
+[2011-09-04 22:20:07.017 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 22:20:07.017 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:07.018 WEST : Test.Sender : DEBUG] Sending Send Frame
+[2011-09-04 22:20:40.096 WEST : Test.Session-2 : DEBUG] Start parsing message
+[2011-09-04 22:20:40.097 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 22:20:40.097 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:40.097 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-04 22:20:40.097 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:2:0", subExt = "0", subCid = 2, subQueue = "/queue/test", subMode = auto}]
+[2011-09-04 22:20:40.097 WEST : Test.Session-2 : DEBUG] Got complete result
+[2011-09-04 22:20:40.097 WEST : Test.Session-2 : INFO] Terminating Connection
+[2011-09-04 22:20:40.097 WEST : Test.Session-2 : DEBUG] Cleaning Session: 0
+[2011-09-04 22:20:40.097 WEST : Test.Sender : DEBUG] [Connection {  2,   Up,   []}]
+[2011-09-04 22:20:40.097 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:43.277 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:43.277 WEST : Test.Session-3 : INFO] New Connection
+[2011-09-04 22:20:43.278 WEST : Test.Session-3 : DEBUG] Start parsing message
+[2011-09-04 22:20:43.279 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-04 22:20:43.279 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:43.279 WEST : Test.Sender : DEBUG] Handle Subscription
+[2011-09-04 22:20:43.279 WEST : Test.Sender : DEBUG] []
+[2011-09-04 22:20:43.279 WEST : Test.Sender : DEBUG] [Connection {  3,   Up,   []}]
+[2011-09-04 22:20:43.315 WEST : Test.Session-3 : DEBUG] Start parsing message
+[2011-09-04 22:20:43.316 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-04 22:20:43.316 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:43.316 WEST : Test.Sender : DEBUG] Sending Send Frame
+[2011-09-04 22:20:43.317 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-04 22:20:43.317 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:43.317 WEST : Test.Sender : DEBUG] Sending Send Frame
+[2011-09-04 22:20:48.820 WEST : Test.Session-3 : DEBUG] Start parsing message
+[2011-09-04 22:20:48.820 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-04 22:20:48.820 WEST : Test.Session-3 : DEBUG] Start parsing message
+[2011-09-04 22:20:48.821 WEST : Test.Sender : DEBUG] request...
+[2011-09-04 22:20:48.821 WEST : Test.Sender : DEBUG] Handle Unsubscribe
+[2011-09-04 22:20:48.821 WEST : Test.Sender : DEBUG] [Subscription {subId = "/queue/test:3:0", subExt = "0", subCid = 3, subQueue = "/queue/test", subMode = auto}]
+[2011-09-04 22:20:48.821 WEST : Test.Sender : DEBUG] [Connection {  3,   Up,   []}]
+[2011-09-04 22:20:48.821 WEST : Test.Session-3 : DEBUG] Got complete result
+[2011-09-04 22:20:48.822 WEST : Test.Session-3 : INFO] Terminating Connection
+[2011-09-04 22:20:48.822 WEST : Test.Session-3 : DEBUG] Cleaning Session: 0
+[2011-09-04 22:20:48.822 WEST : Test.Sender : DEBUG] request...

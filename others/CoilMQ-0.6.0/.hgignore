@@ -1,0 +1,13 @@
+syntax: glob
+*.pyc
+.project
+.pydevproject
+build
+env
+data
+dist
+.settings
+.coverage
+*.egg*
+*.log
+coilmq.cfg
