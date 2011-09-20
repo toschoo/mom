@@ -17,7 +17,6 @@ where
   import System.Locale
   import Text.Printf
 
-  import Control.Concurrent
   import Control.Monad
   import Control.Monad.State
 
@@ -58,13 +57,8 @@ where
 
   waitRequest :: Logger LogMsg
   waitRequest = do
-    c <- getChan 
-    liftIO $ readChan c
-
-  getChan :: Logger (Chan LogMsg)
-  getChan = do
     c <- get
-    return $ getLogChan c
+    liftIO $ readLog c
 
   logMessage :: LogMsg -> Logger ()
   logMessage (LogMsg name prio msg) = do
@@ -97,7 +91,7 @@ where
       else
         liftIO $ Log.updateGlobalLogger Log.rootLoggerName $ Log.setLevel new_prio
 
-  logX :: Chan LogMsg -> String -> Log.Priority -> String -> IO ()
-  logX c n p m = 
-    writeChan c $ LogMsg n p m
+  logX :: (LogMsg -> IO ()) -> String -> Log.Priority -> String -> IO ()
+  logX wLog n p m = 
+    wLog $ LogMsg n p m
 

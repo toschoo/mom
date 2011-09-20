@@ -436,11 +436,6 @@ where
         delCon c
         delSubsOfCon cid
 
-  getChannel :: Sender (Chan SubMsg)
-  getChannel = do
-    b <- get
-    return $ getSndChan $ bookCfg b
-
   getCount :: Sender Int
   getCount = do
     b <- get
@@ -450,26 +445,26 @@ where
     put b {bookCount = i}
     return i
 
-  registerCon :: Chan SubMsg -> Int -> S.Socket -> IO ()
-  registerCon ch cid s = 
-    writeChan ch $ RegMsg cid s
+  registerCon :: (SubMsg -> IO()) -> Int -> S.Socket -> IO ()
+  registerCon wSnd cid s = 
+    wSnd $ RegMsg cid s
 
-  unRegisterCon :: Chan SubMsg -> Int -> IO ()
-  unRegisterCon ch cid = 
-    writeChan ch $ UnRegMsg cid 
+  unRegisterCon :: (SubMsg -> IO ()) -> Int -> IO ()
+  unRegisterCon wSnd cid = 
+    wSnd $ UnRegMsg cid 
 
-  bookFrame :: Chan SubMsg -> Int -> Frame -> IO ()
-  bookFrame ch cid f = 
-    writeChan ch $ FrameMsg cid f
+  bookFrame :: (SubMsg -> IO ()) -> Int -> Frame -> IO ()
+  bookFrame wSnd cid f = 
+    wSnd $ FrameMsg cid f
 
   logS :: Priority -> String -> Sender ()
   logS p s = do
     b <- get
-    liftIO $ logX (getLogChan $ bookCfg b) (bookLog b) p s 
+    liftIO $ logX (writeLog $ bookCfg b) (bookLog b) p s 
 
   logIO :: Book -> Priority -> String -> IO ()
   logIO b p s = do
-    logX (getLogChan $ bookCfg b) (bookLog b) p s 
+    logX (writeLog $ bookCfg b) (bookLog b) p s 
 
   startSender :: Config -> IO ()
   startSender c = do
@@ -486,8 +481,9 @@ where
 
   waitRequest :: Sender SubMsg
   waitRequest = do
-    ch <- getChannel
-    liftIO $ readChan ch
+    b <- get
+    let brk = bookCfg b
+    liftIO $ readSender brk
 
   handleRequest :: SubMsg -> Sender ()
   handleRequest msg = do

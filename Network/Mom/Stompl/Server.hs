@@ -54,8 +54,7 @@ where
   startSession srv s = do
     let cid  = srvCount srv
     let brk  = getBroker  $ srvCfg srv
-    let ch   = getSndChan brk
-    registerCon ch cid s
+    registerCon (writeSender brk) cid s
     _ <- forkIO (handleSession cid brk s)
     return ()
 
@@ -121,8 +120,7 @@ where
         then do
           let l' = setName n l
           let s' = setName n s 
-          let c  = getSndChan  s'
-          writeChan c (CfgSndMsg n)
+          writeSender s' (CfgSndMsg n)
           return $ (setLogger l' . setSender s') cfg
         else 
           return cfg)
@@ -130,9 +128,9 @@ where
   onLoggerChange :: ChangeAction
   onLoggerChange v = do
     cfg <- readMVar v
-    let l = getLogger cfg
-    let f = getLogFile  l
-    let p = getLogLevel l
-    let n = getName     l
-    let c = getLogChan  l
-    writeChan c (CfgLogMsg n f p) 
+    let l    = getLogger cfg
+    let f    = getLogFile  l
+    let p    = getLogLevel l
+    let n    = getName     l
+    let wLog = writeLog $ getBroker cfg
+    wLog (CfgLogMsg n f p) 

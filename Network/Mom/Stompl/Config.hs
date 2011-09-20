@@ -3,9 +3,10 @@ module Config (
                            getBroker, getLogger, getSender,
                            setBroker, setLogger, setSender,
                            getName, setName, getMName, getSharedName,
-                           getLogFile, getLogLevel, getLogChan,
+                           getLogFile, getLogLevel, 
                            setLogFile, setLogLevel, 
-                           getSndChan,
+                           readLog, writeLog,
+                           readSender, writeSender,
                            getHost, getPort, getSocks, getCons, 
                            getMCons, getSharedCons, setSharedCons,
                            incCons, decCons,
@@ -25,38 +26,40 @@ where
 
   data Config = EmptyCfg 
                  | MainCfg {
-                   cfgBroker :: Config,
-                   cfgLogger :: Config,
-                   cfgSender :: Config,
-                   cfgSubs   :: Config}
+                   cfgBroker      :: Config,
+                   cfgLogger      :: Config,
+                   cfgSender      :: Config,
+                   cfgSubs        :: Config}
                  | BrokerCfg {
-                     cfgName    :: String,
-                     cfgHost    :: String,
-                     cfgPort    :: Int,
-                     cfgUser    :: String,
-                     cfgSocks   :: Int,
-                     cfgCons    :: Int,
-                     cfgMax     :: Int,
-                     cfgMCons   :: MVar Int,
-                     cfgMName   :: MVar String,
-                     cfgSndChan :: Chan SubMsg, 
-                     cfgLogChan :: Chan LogMsg 
-                     -- cfgProts :: [Protocol]
+                     cfgName      :: String,
+                     cfgHost      :: String,
+                     cfgPort      :: Int,
+                     cfgUser      :: String,
+                     cfgSocks     :: Int,
+                     cfgCons      :: Int,
+                     cfgMax       :: Int,
+                     cfgMCons     :: MVar Int,
+                     cfgMName     :: MVar String,
+                     cfgWriteSnd  :: SubMsg -> IO (),
+                     cfgReadSnd   :: IO SubMsg,
+                     cfgWriteLog  :: LogMsg -> IO (),
+                     cfgReadLog   :: IO LogMsg 
                     }
                   | LoggerCfg {
                       cfgName     :: String,
                       cfgLogFile  :: FilePath,
                       cfgLogLevel :: Log.Priority,
-                      cfgLogChan  :: Chan LogMsg
+                      cfgReadLog  :: IO LogMsg
                     }
                   | SenderCfg {
-                      cfgName    :: String,
-                      cfgSndChan :: Chan SubMsg,
-                      cfgLogChan :: Chan LogMsg
+                      cfgName     :: String,
+                      cfgWriteSnd :: SubMsg -> IO (),
+                      cfgReadSnd  :: IO SubMsg,
+                      cfgWriteLog :: LogMsg -> IO ()
                     }
                   | SubCfg {
-                      cfgName    :: String,
-                      cfgSubSubs :: String}
+                      cfgName     :: String,
+                      cfgSubSubs  :: String}
 
   getBroker, getLogger, getSender :: Config -> Config
   getBroker EmptyCfg = EmptyCfg
@@ -126,8 +129,11 @@ where
   modifyCons :: (Int -> IO Int) -> Config -> IO ()
   modifyCons m cfg = modifyMVar_ (getMCons cfg) m
 
-  getSndChan :: Config -> Chan SubMsg
-  getSndChan = cfgSndChan
+  readSender :: Config -> IO SubMsg
+  readSender = cfgReadSnd
+
+  writeSender :: Config -> SubMsg -> IO ()
+  writeSender = cfgWriteSnd
 
   getLogFile :: Config -> FilePath
   getLogFile = cfgLogFile
@@ -141,8 +147,11 @@ where
   setLogLevel :: Log.Priority -> Config -> Config
   setLogLevel p cfg = cfg {cfgLogLevel = p}
 
-  getLogChan :: Config -> Chan LogMsg
-  getLogChan = cfgLogChan
+  writeLog :: Config -> LogMsg -> IO ()
+  writeLog = cfgWriteLog
+
+  readLog :: Config -> IO LogMsg
+  readLog = cfgReadLog
 
   getMaxRcv :: Config -> Int
   getMaxRcv = cfgMax
@@ -164,13 +173,15 @@ where
   buildConfig :: Config -> CfgT.Config -> IO Config
   buildConfig old cfg = do
     brk <- buildBroker old cfg
-    l <- buildLogger old cfg (getLogChan brk)
-    snd <- buildSender old cfg (getSndChan brk) (getLogChan brk)
+    l   <- buildLogger old cfg (cfgReadLog brk)
+    sd  <- buildSender old cfg (cfgReadSnd brk) 
+                               (cfgWriteSnd brk) 
+                               (cfgWriteLog brk)
     sub <- buildSubs   old cfg
     return MainCfg {
              cfgBroker = brk,
              cfgLogger = l,
-             cfgSender = snd,
+             cfgSender = sd,
              cfgSubs   = sub}
 
   onErr :: SomeException -> IO ()
@@ -200,12 +211,14 @@ where
              cfgMax     = m,
              cfgMCons   = ss,
              cfgMName   = nm,
-             cfgSndChan = snc,
-             cfgLogChan = lgc
+             cfgReadSnd = readChan snc,
+             cfgWriteSnd = writeChan snc,
+             cfgReadLog  = readChan lgc,
+             cfgWriteLog = writeChan lgc
            }
 
-  buildLogger :: Config -> CfgT.Config -> Chan LogMsg -> IO Config
-  buildLogger old cfg lgc = do
+  buildLogger :: Config -> CfgT.Config -> IO LogMsg -> IO Config
+  buildLogger old cfg rLgc = do
     let l = getLogger old
     n <- Cfg.lookupDefault (cfgName l)            cfg (pack "Broker.name")
     f <- Cfg.lookupDefault (cfgLogFile l)         cfg (pack "Logging.file")
@@ -214,19 +227,21 @@ where
              cfgName     = n,
              cfgLogFile  = f,
              cfgLogLevel = read p,
-             cfgLogChan  = lgc}
+             cfgReadLog  = rLgc}
 
   buildSender :: Config      -> 
                  CfgT.Config -> 
-                 Chan SubMsg -> 
-                 Chan LogMsg -> IO Config
-  buildSender old cfg snc lgc = do
+                 IO SubMsg   -> 
+                 (SubMsg -> IO ())   -> 
+                 (LogMsg -> IO ())   -> IO Config
+  buildSender old cfg rSnd wSnd wLgc = do
     let b = getBroker old
     n <- Cfg.lookupDefault (cfgName b) cfg (pack "Broker.name")
     return SenderCfg {
              cfgName    = n,
-             cfgSndChan = snc,
-             cfgLogChan = lgc}
+             cfgReadSnd = rSnd,
+             cfgWriteSnd = wSnd,
+             cfgWriteLog = wLgc}
 
   buildSubs :: Config -> CfgT.Config -> IO Config
   buildSubs old cfg = do

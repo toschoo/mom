@@ -41,11 +41,8 @@ where
                       conCfg  :: Config,
                       conPend :: Maybe Result}
 
-  getSndChannel :: Connection -> Chan SubMsg
-  getSndChannel = getSndChan . conCfg
-
-  getLogChannel :: Connection -> Chan LogMsg
-  getLogChannel = getLogChan . conCfg
+  getLog :: Connection -> (LogMsg -> IO())
+  getLog = writeLog . conCfg
 
   buildName :: String -> Int -> String
   buildName b cid = b ++ "." ++ "Session-" ++ (show cid)
@@ -83,8 +80,7 @@ where
 
   cleanSender :: Int -> Config -> IO ()
   cleanSender cid cfg = do
-    let ch = getSndChan cfg
-    unRegisterCon ch cid
+    unRegisterCon (writeSender cfg) cid
 
   dbgClean :: Int -> Config -> IO ()
   dbgClean cid cfg = do
@@ -97,11 +93,11 @@ where
   logS :: Priority -> String -> Session ()
   logS p s = do
     c <- get
-    liftIO $ logX (getLogChannel c) (conName c) p s 
+    liftIO $ logX (getLog c) (conName c) p s 
   
   logIO :: Config -> String -> Priority -> String -> IO ()
   logIO c n p s = do
-    logX (getLogChan c) n p s
+    logX (writeLog c) n p s
 
   updConnection :: Session ()
   updConnection = do
@@ -186,7 +182,7 @@ where
       then disconnect f 
       else do
         c <- get
-        liftIO $ bookFrame (getSndChannel c) (conId c) f
+        liftIO $ bookFrame (writeSender $ conCfg c) (conId c) f
 
   disconnectMe :: Session ()
   disconnectMe = 
@@ -211,8 +207,7 @@ where
       Left  er -> 
         logIO cfg nm CRITICAL ("Can't send Error Frame: " ++ er)
       Right f -> do
-        let ch = getSndChan cfg
-        bookFrame ch cid f
+        bookFrame (writeSender cfg) cid f
 
   getCon :: Int -> S.Socket -> String -> Config -> Frame -> IO (Either SessionError Connection)
   getCon cid s nm cfg f = 
