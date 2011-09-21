@@ -3,15 +3,19 @@ where
 
   import Test
 
-  import Network.Mom.Stompl.Types
+  import Types
+  import Config
+  import Sender
+
   import Network.Mom.Stompl.Frame
-  import Network.Mom.Stompl.Config
-  import Network.Mom.Stompl.Sender
 
   import Control.Concurrent
   import Control.Monad.State
 
   import System.Exit
+  import System.Environment
+  import System.FilePath (FilePath, (</>))
+
   import qualified Network.Socket as S
   import           Network.BSD (getProtocolNumber) 
 
@@ -21,7 +25,11 @@ where
   import Data.List (delete, insert)
 
   main :: IO ()
-  main = tSender
+  main = do
+    os <- getArgs
+    case os of
+      [p] -> tSender p
+      _   -> putStrLn "I need a Stompl Server Configuration File."
 
   cid1 :: Int
   cid1 = 1
@@ -100,19 +108,19 @@ where
                   mkGroup "Send Tx Abort      "              (Stop $ Fail "") t8,
                   mkGroup "Send Tx Commit     "              (Stop $ Fail "") t9]
 
-  tSender :: IO ()
-  tSender = do
+  tSender :: FilePath -> IO ()
+  tSender dir = do
     s   <- mkSocket "127.0.0.1" 5432
-    v   <- mkConfig "test/cfg/stompl.cfg" dummyChange dummyChange
+    v   <- mkConfig (dir </> "stompl.cfg") dummyChange dummyChange
     cfg <- readMVar v
     let g = mkTests s
     (r, s) <- evalStateT (execGroup g) $ mkBook (getSender cfg) 
     putStrLn s
     case r of
       Pass -> do
-        exitFailure
-      Fail _ -> do
         exitSuccess
+      Fail _ -> do
+        exitFailure
 
   mkSocket :: String -> S.PortNumber -> IO S.Socket
   mkSocket h p = do

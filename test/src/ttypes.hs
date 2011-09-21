@@ -1,13 +1,15 @@
 module Main 
 where
 
-  import Network.Mom.Stompl.Types
+  import Types
   import Test.QuickCheck
   import Data.List (foldl')
 
-  deepCheck :: (Testable p) => p -> IO ()
-  deepCheck = quickCheckWith stdArgs{maxSuccess=1000,
-                                     maxDiscard=5000}
+  import System.Exit
+
+  deepCheck :: (Testable p) => p -> IO Result
+  deepCheck = quickCheckWithResult stdArgs{maxSuccess=1000,
+                                           maxDiscard=5000}
 
   -- dropNothing --
   type Mayflower = (Maybe Int, Int)
@@ -49,5 +51,9 @@ where
                         Just _  ->     acc
 
   main :: IO ()
-  main = deepCheck testNothing
+  main = do
+    r <- deepCheck testNothing
+    case r of
+      Success _ -> exitSuccess
+      _         -> exitFailure
   

@@ -41,3 +41,8 @@ Executable stomplb
   Main-Is:         stompl.hs
   ghc-options:     -Wall
 
+Test-Suite stompl-test
+  type: exitcode-stdio-1.0
+  main-is: runTests.hs
+  build-depends: base
+
