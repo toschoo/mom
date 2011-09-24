@@ -1,23 +1,30 @@
 module Network.Mom.Stompl.Frame (
-                       Frame, Header, Body, AckMode(..), FrameType (..),
+                       Frame, Header, Body, Heart, Version,
+                       AckMode(..), FrameType (..),
                        mkConFrame, mkCondFrame, 
                        mkSubFrame, mkUSubFrame, mkMsgFrame,
                        mkSndFrame, mkDisFrame,  mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
                        mkAckFrame, mkRecFrame,
                        sndToMsg,
+                       valToVer, valToVers, verToVal, versToVal,
+                       beatToVal, valToBeat,
                        typeOf, putFrame, toString,
                        upString, numeric,
                        getLen, getAck, isValidAck,
                        getLogin, getPasscode, getDest,
                        getLength, getTrans, getReceipt,
                        getSelector, getId, getAcknow,
-                       getSession, getMsg, getBody,
+                       getHost, getVersions, getVersion,
+                       getSession, getMsg, getBody, getMime,
+                       getBeat, getHeaders,
                        resetTrans,
-                       mkLogHdr, mkPassHdr, mkDestHdr, 
-                       mkLenHdr, mkTrnHdr,  mkRecHdr, 
-                       mkSelHdr, mkIdHdr,   mkAckHdr, 
-                       mkSesHdr, mkMsgHdr, mkMIdHdr,  
+                       mkLogHdr,   mkPassHdr, mkDestHdr, 
+                       mkLenHdr,   mkTrnHdr,  mkRecHdr, 
+                       mkSelHdr,   mkIdHdr,   mkAckHdr, 
+                       mkSesHdr,   mkMsgHdr,  mkMIdHdr,
+                       mkAcVerHdr, mkVerHdr,  mkHostHdr,
+                       mkBeatHdr,  mkMimeHdr,
                        (|>), (<|), (>|<))
 where
 
@@ -25,50 +32,80 @@ where
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
   import           Data.List (find)
+  import           Data.List.Split (splitWhen)
+  import           Data.Maybe (catMaybes)
+  -- import qualified Codec.MIME.Type as Mi
 
   type Header = (String, String)
   type Body   = B.ByteString
 
+  type Version = (Int, Int)
+  type Heart   = (Int, Int)
+
+  noBeat :: Heart
+  noBeat = (0,0)
+
+  defMime :: String
+  defMime = "text/plain"
+
   hdrLog, hdrPass, hdrDest, hdrLen, hdrTrn, hdrRec,
-    hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId :: String
-  hdrLog  = "login"
-  hdrPass = "passcode"
-  hdrDest = "destination"
-  hdrLen  = "content-length"
-  hdrTrn  = "transaction"
-  hdrRec  = "receipt"
-  hdrSel  = "selector"
-  hdrId   = "id"
-  hdrAck  = "ack"
-  hdrSes  = "session-id"
-  hdrMsg  = "message"
-  hdrMId  = "message-id"
+    hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, 
+    hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime :: String
+  hdrLog   = "login"
+  hdrPass  = "passcode"
+  hdrDest  = "destination"
+  hdrLen   = "content-length"
+  hdrMime  = "content-type"
+  hdrTrn   = "transaction"
+  hdrRec   = "receipt"
+  hdrSel   = "selector"
+  hdrId    = "id"
+  hdrAck   = "ack"
+  hdrSes   = "session-id"
+  hdrMsg   = "message"
+  hdrMId   = "message-id"
+  hdrAcVer = "accept-version"
+  hdrVer   = "version"
+  hdrHost  = "host"
+  hdrBeat  = "heart-beat"
 
   mkHeader :: String -> String -> Header
   mkHeader k v = (k, v)
 
-  mkLogHdr, mkPassHdr, mkDestHdr, mkLenHdr, mkTrnHdr, mkMsgHdr, 
+  mkLogHdr, mkPassHdr, mkDestHdr, mkLenHdr, mkMimeHdr, mkTrnHdr, mkMsgHdr, 
     mkRecHdr, mkSelHdr, mkMIdHdr, mkIdHdr, 
-    mkAckHdr, mkSesHdr :: String -> Header
-  mkLogHdr = mkHeader hdrLog
-  mkPassHdr = mkHeader hdrPass
-  mkDestHdr = mkHeader hdrDest
-  mkLenHdr  = mkHeader hdrLen
-  mkTrnHdr  = mkHeader hdrTrn
-  mkRecHdr  = mkHeader hdrRec
-  mkSelHdr  = mkHeader hdrSel
-  mkIdHdr   = mkHeader hdrId
-  mkMIdHdr  = mkHeader hdrMId
-  mkAckHdr  = mkHeader hdrAck
-  mkSesHdr  = mkHeader hdrSes
-  mkMsgHdr  = mkHeader hdrMsg
+    mkAckHdr, mkSesHdr, mkAcVerHdr, mkVerHdr, 
+    mkHostHdr, mkBeatHdr :: String -> Header
+  mkLogHdr   = mkHeader hdrLog
+  mkPassHdr  = mkHeader hdrPass
+  mkDestHdr  = mkHeader hdrDest
+  mkLenHdr   = mkHeader hdrLen
+  mkMimeHdr  = mkHeader hdrMime
+  mkTrnHdr   = mkHeader hdrTrn
+  mkRecHdr   = mkHeader hdrRec
+  mkSelHdr   = mkHeader hdrSel
+  mkIdHdr    = mkHeader hdrId
+  mkMIdHdr   = mkHeader hdrMId
+  mkAckHdr   = mkHeader hdrAck
+  mkSesHdr   = mkHeader hdrSes
+  mkMsgHdr   = mkHeader hdrMsg
+  mkVerHdr   = mkHeader hdrVer
+  mkAcVerHdr = mkHeader hdrAcVer
+  mkHostHdr  = mkHeader hdrHost
+  mkBeatHdr  = mkHeader hdrBeat
 
   data Frame = ConFrame {
                    frmLogin :: String,
-                   frmPass  :: String
+                   frmPass  :: String,
+                   frmHost  :: String,
+                   frmBeat  :: Heart,
+                   frmAcVer :: [Version] -- 1.1
                  }
                | CondFrame {
-                   frmSes   :: String
+                   frmSes   :: String,
+                   frmBeat  :: Heart,
+                   frmVer   :: Version -- 1.1
+                   -- server name: what for?
                  }
                | SubFrame {
                    frmDest  :: String,
@@ -86,6 +123,7 @@ where
                    frmTrans :: String,
                    frmRec   :: String,
                    frmLen   :: Int,
+                   frmMime  :: String, -- MimeType?
                    frmBody  :: Body}
                | DisFrame {
                    frmRec   :: String
@@ -109,6 +147,7 @@ where
                    frmDest  :: String,
                    frmId    :: String,
                    frmLen   :: Int,
+                   frmMime  :: String, -- MimeType?
                    frmBody  :: Body}
                | RecFrame {
                    frmRec   :: String
@@ -116,15 +155,20 @@ where
                | ErrFrame {
                    frmMsg  :: String,
                    frmLen  :: Int,
+                   frmMime :: String, -- MimeType?
                    frmBody :: Body}
     deriving (Show, Eq)
 
   getLogin, getPasscode, getSession, getId,
     getDest,  getTrans,    getReceipt, getMsg,
-    getSelector :: Frame -> String
+    getSelector, getHost, getMime :: Frame -> String
   getLength     :: Frame -> Int
   getAcknow     :: Frame -> AckMode
   getBody       :: Frame -> B.ByteString
+  getVersion    :: Frame -> Version
+  getVersions   :: Frame -> [Version]
+  getBeat       :: Frame -> Heart
+  getHeaders    :: Frame -> [Header]
   getLogin    = frmLogin 
   getPasscode = frmPass
   getSession  = frmSes
@@ -137,6 +181,12 @@ where
   getReceipt  = frmRec
   getBody     = frmBody
   getLength   = frmLen
+  getMime     = frmMime
+  getVersion  = frmVer
+  getVersions = frmAcVer
+  getHost     = frmHost
+  getBeat     = frmBeat
+  getHeaders  = frmHdrs
 
   resetTrans :: Frame -> Frame
   resetTrans f = f {frmTrans = ""}
@@ -148,32 +198,34 @@ where
 
   typeOf :: Frame -> FrameType
   typeOf f = case f of
-              (ConFrame  _ _        ) -> Connect
-              (CondFrame _          ) -> Connected
-              (DisFrame  _          ) -> Disconnect
-              (SubFrame  _ _ _ _    ) -> Subscribe
-              (USubFrame _ _        ) -> Unsubscribe
-              (SndFrame  _ _ _ _ _ _) -> Send
-              (BgnFrame  _          )  -> Begin
-              (CmtFrame  _          ) -> Commit
-              (AbrtFrame _          ) -> Abort
-              (AckFrame  _ _ _      ) -> Ack
-              (MsgFrame  _ _ _ _ _  ) -> Message
-              (RecFrame  _          ) -> Receipt
-              (ErrFrame  _ _ _      ) -> Error
+              (ConFrame  _ _ _ _ _     ) -> Connect
+              (CondFrame _ _ _         ) -> Connected
+              (DisFrame  _             ) -> Disconnect
+              (SubFrame  _ _ _ _       ) -> Subscribe
+              (USubFrame _ _           ) -> Unsubscribe
+              (SndFrame  _ _ _ _ _ _ _ ) -> Send
+              (BgnFrame  _             ) -> Begin
+              (CmtFrame  _             ) -> Commit
+              (AbrtFrame _             ) -> Abort
+              (AckFrame  _ _ _         ) -> Ack
+              (MsgFrame  _ _ _ _ _ _   ) -> Message
+              (RecFrame  _             ) -> Receipt
+              (ErrFrame  _ _ _ _       ) -> Error
 
-  data AckMode = Auto | Client
+  data AckMode = Auto | Client | ClientIndi
     deriving (Eq)
 
   instance Show AckMode where
-    show Auto   = "auto"
-    show Client = "client"
+    show Auto       = "auto"
+    show Client     = "client"
+    show ClientIndi = "client-individual"
 
   instance Read AckMode where
     readsPrec _ s = case upString s of
-                     "AUTO"   -> [(Auto, "")]
-                     "CLIENT" -> [(Client, "")]
-                     _        -> error $ "Can't parse AckMode: " ++ s
+                     "AUTO"              -> [(Auto, "")]
+                     "CLIENT"            -> [(Client, "")]
+                     "CLIENT-INDIVIDUAL" -> [(ClientIndi, "")]
+                     _                   -> error $ "Can't parse AckMode: " ++ s
 
   infixr >|<, |>, <| 
   (>|<) :: B.ByteString -> B.ByteString -> B.ByteString
@@ -196,7 +248,7 @@ where
 
   cleanWhite :: String -> String
   cleanWhite = 
-    dropWhile (== ' ') . takeWhile (/= ' ')
+    takeWhile (/= ' ') . dropWhile (== ' ')
 
   getLen :: [Header] -> Either String Int
   getLen hs = 
@@ -214,6 +266,39 @@ where
                    then Right $ read a 
                    else Left  $ "Invalid ack header in Subscribe Frame: " ++ a
 
+  versToVal :: [Version] -> String
+  versToVal = foldr addVer "" . map verToVal 
+    where addVer v vs = if not $ null vs
+                          then v ++ "," ++ vs
+                          else v
+
+  verToVal :: Version -> String
+  verToVal (major, minor) = (show major) ++ "." ++ (show minor)
+
+  valToVers :: String -> Maybe [Version]
+  valToVers s = case find (== Nothing) vs of
+                  Nothing -> Just $ catMaybes vs
+                  Just x  -> Nothing
+    where ss = splitWhen (== ',') s 
+          vs = map valToVer ss
+
+  valToVer :: String -> Maybe Version
+  valToVer v = if numeric major && numeric minor 
+                 then Just (read major, read minor)
+                 else Nothing
+    where major = cleanWhite $ takeWhile (/= '.') v
+          minor = cleanWhite $ (drop 1 . dropWhile (/= '.')) v
+
+  beatToVal :: Heart -> String
+  beatToVal (x, y) = (show x) ++ "," ++ (show y)
+
+  valToBeat :: String -> Maybe Heart
+  valToBeat s = if numeric send && numeric recv
+                  then Just (read send, read recv)
+                  else Nothing
+    where send = (cleanWhite . takeWhile (/= ',')) s
+          recv = (cleanWhite . drop 1 . dropWhile (/= ',')) s
+
   putFrame :: Frame -> B.ByteString
   putFrame f = 
     putCommand f >|<
@@ -226,19 +311,19 @@ where
   putCommand :: Frame -> B.ByteString
   putCommand f = 
     let s = case f of
-              ConFrame  _ _         -> "CONNECT"
-              CondFrame _           -> "CONNECTED"
-              DisFrame  _           -> "DISCONNECT"
-              SndFrame  _ _ _ _ _ _ -> "SEND"
-              SubFrame  _ _ _ _     -> "SUBSCRIBE"
-              USubFrame _ _         -> "UNSUBSCRIBE"
-              BgnFrame  _           -> "BEGIN"
-              CmtFrame  _           -> "COMMIT"
-              AbrtFrame _           -> "ABORT"
-              AckFrame  _ _ _       -> "ACK"
-              MsgFrame  _ _ _ _ _   -> "MESSAGE"
-              RecFrame  _           -> "RECEIPT"
-              ErrFrame  _ _ _       -> "ERROR"
+              ConFrame  _ _ _ _ _     -> "CONNECT"
+              CondFrame _ _ _         -> "CONNECTED"
+              DisFrame  _             -> "DISCONNECT"
+              SndFrame  _ _ _ _ _ _ _ -> "SEND"
+              SubFrame  _ _ _ _       -> "SUBSCRIBE"
+              USubFrame _ _           -> "UNSUBSCRIBE"
+              BgnFrame  _             -> "BEGIN"
+              CmtFrame  _             -> "COMMIT"
+              AbrtFrame _             -> "ABORT"
+              AckFrame  _ _ _         -> "ACK"
+              MsgFrame  _ _ _ _ _ _   -> "MESSAGE"
+              RecFrame  _             -> "RECEIPT"
+              ErrFrame  _ _ _ _       -> "ERROR"
     in B.pack (s ++ "\n")
 
   putHeaders :: Frame -> B.ByteString
@@ -254,10 +339,15 @@ where
     in B.pack $ k ++ ":" ++ v ++ "\n"
 
   toHeaders :: Frame -> [Header]
-  toHeaders (ConFrame l p) = 
-    [mkLogHdr l, mkPassHdr p]
-  toHeaders (CondFrame s) =
-    [mkSesHdr s]
+  toHeaders (ConFrame l p h b v) = 
+    [mkLogHdr l, mkPassHdr p, 
+     mkAcVerHdr $ versToVal v, 
+     mkBeatHdr  $ beatToVal b,
+     mkHostHdr h]
+  toHeaders (CondFrame s b v) =
+    [mkSesHdr s, 
+     mkVerHdr  $ verToVal v,
+     mkBeatHdr $ beatToVal v]
   toHeaders (DisFrame r) =
     if null r then [] else [mkRecHdr r]
   toHeaders (SubFrame d a s i) =
@@ -269,7 +359,7 @@ where
     let ih = if null i then [] else [mkIdHdr i]
         dh = if null i then [] else [mkDestHdr d]
     in dh ++ ih
-  toHeaders (SndFrame h _ _ _ _ _) = h
+  toHeaders (SndFrame h _ _ _ _ _ _) = h
   toHeaders (BgnFrame  t) = [mkTrnHdr t]
   toHeaders (CmtFrame  t) = [mkTrnHdr t]
   toHeaders (AbrtFrame t) = [mkTrnHdr t]
@@ -277,19 +367,20 @@ where
     let ih = if null i then [] else [mkIdHdr i]
         sh = if null s then [] else [mkDestHdr s]
     in mkTrnHdr t : (ih ++ sh)
-  toHeaders (MsgFrame h _ _ _ _)  = h
+  toHeaders (MsgFrame h _ _ _ _ _)  = h
   toHeaders (RecFrame  r) = [mkRecHdr r]
-  toHeaders (ErrFrame m l _) = 
+  toHeaders (ErrFrame m l t _) = 
     let mh = if null m then [] else [mkMsgHdr m]
+        th = if null t then [] else [mkMimeHdr t]
         lh = if l <  0 then [] else [mkLenHdr (show l)]
     in  mh ++ lh 
 
   putBody :: Frame -> Body
   putBody f =
     case f of 
-      SndFrame _ _ _ _ _ b -> b |> '\x00'
-      ErrFrame _ _       b -> b |> '\x00'
-      MsgFrame _ _ _ _   b -> b |> '\x00'
+      SndFrame _ _ _ _ _ _ b -> b |> '\x00'
+      ErrFrame _ _ _       b -> b |> '\x00'
+      MsgFrame _ _ _ _ _   b -> b |> '\x00'
       _                    -> B.pack "\x00"
 
   mkConFrame :: [Header] -> Either String Frame
@@ -298,7 +389,26 @@ where
       Nothing -> Left "Missing login header in Connection Frame"
       Just l  -> case lookup hdrPass hs of
                    Nothing -> Left "Missing passcode header in Connection Frame"
-                   Just p  -> Right $ ConFrame l p
+                   Just p  -> 
+                     let eiVs = case lookup hdrAcVer hs of
+                                  Nothing -> Right []
+                                  Just v  -> 
+                                    case valToVers v of
+                                      Nothing -> Left $ "Not a valid version: " ++ v
+                                      Just x  -> Right x
+                         eiB  = case lookup hdrBeat hs of
+                                  Nothing -> Right noBeat
+                                  Just  b -> case valToBeat b of
+                                               Nothing -> Left $ "Not a valid heart-beat: " ++ b
+                                               Just x  -> Right x
+                         h    = case lookup hdrHost hs of
+                                  Nothing -> ""
+                                  Just x  -> x 
+                     in case eiVs of
+                          Left  e  -> Left e
+                          Right vs -> case eiB of
+                                        Left e  -> Left e
+                                        Right b -> Right $ ConFrame l p h b vs 
 
   mkDisFrame :: [Header] -> Either String Frame
   mkDisFrame hs = 
@@ -312,9 +422,12 @@ where
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in SEND Frame"
       Just d  -> Right $ SndFrame {
-                           frmHdrs = hs,
-                           frmDest = d,
-                           frmLen  = l,
+                           frmHdrs  = hs,
+                           frmDest  = d,
+                           frmLen   = l,
+                           frmMime  = case lookup hdrMime hs of
+                                        Nothing -> ""
+                                        Just t  -> t,
                            frmTrans = case lookup hdrTrn hs of
                                         Nothing -> ""
                                         Just t  ->  t,
@@ -398,6 +511,9 @@ where
                                frmDest = d,
                                frmId   = i, 
                                frmLen  = l,
+                               frmMime = case lookup hdrMime hs of
+                                           Nothing -> ""
+                                           Just t  -> t,
                                frmBody = b
                              }
 
@@ -409,9 +525,22 @@ where
 
   mkCondFrame :: [Header] -> Either String Frame
   mkCondFrame hs =
-    case lookup hdrSes hs of
-      Nothing -> Left "No session-id header in Connected Frame"
-      Just s  -> Right $ CondFrame s
+    let s   = case lookup hdrSes hs of
+                Nothing -> "0"
+                Just x  -> x
+        v   = case lookup hdrVer hs of
+                Nothing -> "1.0"
+                Just x  -> x 
+        eiB = case lookup hdrBeat hs of
+                Nothing -> Right noBeat
+                Just x  -> case valToBeat x of
+                             Nothing -> Left $ "Not a valid heart-beat: " ++ x
+                             Just b  -> Right b
+    in case valToVer v of
+         Nothing -> Left $ "Not a valid version: " ++ v
+         Just v' -> case eiB of 
+                      Left  e -> Left e
+                      Right b -> Right $ CondFrame s b v'
 
   mkErrFrame :: [Header] -> Int -> Body -> Either String Frame
   mkErrFrame hs l b =
@@ -420,6 +549,9 @@ where
       Just m  -> Right $ ErrFrame {
                            frmMsg  = m,
                            frmLen  = l,
+                           frmMime = case lookup hdrMime hs of
+                                       Nothing -> defMime
+                                       Just t  -> t,
                            frmBody = b}
 
   sndToMsg :: String -> Frame -> Maybe Frame
@@ -428,6 +560,7 @@ where
                                frmHdrs = frmHdrs f,
                                frmDest = frmDest f,
                                frmLen  = frmLen  f,
+                               frmMime = frmMime f,
                                frmId   = i,
                                frmBody = frmBody f
                              }

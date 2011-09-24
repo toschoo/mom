@@ -33,6 +33,7 @@ where
     t <- msgType
     case t of
       "CONNECT"     -> connect
+      "CONNECTED"   -> connected
       "DISCONNECT"  -> disconnect
       "SEND"        -> send
       "SUBSCRIBE"   -> subscribe
@@ -75,6 +76,9 @@ where
 
   connect :: Parser Frame
   connect = genericFrame mkConFrame
+
+  connected :: Parser Frame
+  connected = genericFrame mkCondFrame
 
   disconnect :: Parser Frame
   disconnect = genericFrame mkDisFrame

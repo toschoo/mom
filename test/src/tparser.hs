@@ -39,6 +39,17 @@ where
             Connect Pass 
             [("login", "guest"),
              ("passcode", "guest")], "con.txt"),
+     (TDesc "Connect 1.1" 
+            Connect Pass 
+            [("accept-version", "1.0,1.1"),
+             ("login", "guest"),
+             ("passcode", "guest"),
+             ("heart-beat", "500,500"),
+             ("host", "Test-1")], "con-1.1.txt"),
+     (TDesc "Connected 1.1" 
+            Connected Pass 
+            [("version", "1.1"),
+             ("heart-beat", "500,500")], "cond-1.1.txt"),
      (TDesc "Simple begin" 
             Begin Pass 
             [("transaction", "trn-12345")], "begin.txt"),
@@ -58,7 +69,9 @@ where
      (TDesc "send with content-length and receipt" 
             Send Pass 
             [("destination", "/queue/test"),
-             ("receipt", "msg-123")], "send.txt"),
+             ("content-length", "13"),
+             ("content-type", "text/plain"),
+             ("receipt", "msg-123")], "send1-1.1.txt"),
      (TDesc "send with content-length and many NULs" 
             Send Pass 
             [("destination", "/queue/test"),
@@ -73,11 +86,12 @@ where
      (TDesc "Empty send" 
             Send Pass 
             [("destination", "/queue/test")], "send5.txt"),
-     (TDesc "Simple Message" 
+     (TDesc "Message 1.1" 
             Message Pass
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
-             ("content-length", "13")], "msg.txt"),
+             ("content-length", "13"),
+             ("content-type", "text/plain")], "msg1-1.1.txt"),
      (TDesc "Message with some NULs in body" 
             Message Pass
             [("destination", "/queue/test"),
@@ -96,9 +110,10 @@ where
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
              ("content-length", "22")], "msg5.txt"),
-     (TDesc "Error without content-length" 
+     (TDesc "Error 1.1 without content-length" 
             Error Pass
-            [("message", "Malformed package received")], "err1.txt")
+            [("message", "Malformed package received"),
+             ("content-type", "text/plain")], "err1-1.1.txt")
     ]
 
   frmOk :: FrameType -> TestDesc -> Bool
@@ -106,21 +121,34 @@ where
 
   headerOk :: String -> Frame -> TestDesc -> Bool
   headerOk k f d = 
-    let acc= case k of
-               "login"          -> getLogin
-               "passcode"       -> getPasscode
-               "destination"    -> getDest
-               "content-length" -> show . getLength
-               "transaction"    -> getTrans
-               "id"             -> getId
-               "message-id"     -> getId
-               "message"        -> getMsg
-               "receipt"        -> getReceipt
-               _                -> (\_ -> "unknown")
-    in if acc f == value then True else False
-    where value = case lookup k $ dscHdrs d of
+    if acc f == value then True else False
+    where acc   = getAccess k
+          value = case lookup k $ dscHdrs d of
                     Nothing -> ""
                     Just v  -> v
+
+  getValue :: String -> Frame -> String
+  getValue s f = acc f
+    where acc = getAccess s
+
+  getAccess :: String -> (Frame -> String)
+  getAccess k =  
+    case k of
+      "login"          -> getLogin
+      "passcode"       -> getPasscode
+      "destination"    -> getDest
+      "content-length" -> show . getLength
+      "content-type"   -> getMime
+      "transaction"    -> getTrans
+      "id"             -> getId
+      "message-id"     -> getId
+      "message"        -> getMsg
+      "receipt"        -> getReceipt
+      "heart-beat"     -> beatToVal . getBeat
+      "accept-version" -> versToVal . getVersions
+      "version"        -> verToVal  . getVersion
+      "host"           -> getHost
+      _                -> (\_ -> "unknown")
 
   type Tester a = Writer String a
 
@@ -162,7 +190,7 @@ where
         tell $ "Header '" ++ h ++ "' is correct.\n"
         return True
       else do
-        tell $ "Header '" ++ h ++ "' is not correct.\n"
+        tell $ "Header '" ++ h ++ "' is not correct: " ++ (getValue h f) ++ "\n"
         return False
 
   testHeaders :: Frame -> TestDesc -> Tester Bool
