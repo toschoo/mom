@@ -30,6 +30,7 @@ all:
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
+	rm -f $(TDIR)/tframe
 	rm -f $(TDIR)/tsender2
 	rm -f $(TDIR)/tparser
 	rm -f $(TDIR)/ttypes
