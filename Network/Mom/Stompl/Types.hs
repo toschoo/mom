@@ -6,6 +6,12 @@ where
   import Network.Socket
   import Data.List (foldl')
 
+  myVersion :: String
+  myVersion = "Stompl/0.0.1"
+
+  myBeat :: Heart
+  myBeat = (500, 500)
+
   data LogMsg = LogMsg {
                   logName :: String,
                   logPrio :: Priority,

@@ -6,9 +6,10 @@ module Network.Mom.Stompl.Frame (
                        mkSndFrame, mkDisFrame,  mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
                        mkAckFrame, mkRecFrame,
-                       sndToMsg,
+                       sndToMsg, conToCond,
                        valToVer, valToVers, verToVal, versToVal,
                        beatToVal, valToBeat,
+                       strToSrv, srvToStr,
                        typeOf, putFrame, toString,
                        upString, numeric,
                        getLen, getAck, isValidAck,
@@ -17,14 +18,14 @@ module Network.Mom.Stompl.Frame (
                        getSelector, getId, getAcknow,
                        getHost, getVersions, getVersion,
                        getSession, getMsg, getBody, getMime,
-                       getBeat, getHeaders,
+                       getBeat, getServer, getHeaders,
                        resetTrans,
                        mkLogHdr,   mkPassHdr, mkDestHdr, 
                        mkLenHdr,   mkTrnHdr,  mkRecHdr, 
                        mkSelHdr,   mkIdHdr,   mkAckHdr, 
                        mkSesHdr,   mkMsgHdr,  mkMIdHdr,
                        mkAcVerHdr, mkVerHdr,  mkHostHdr,
-                       mkBeatHdr,  mkMimeHdr,
+                       mkBeatHdr,  mkMimeHdr, mkSrvHdr,
                        (|>), (<|), (>|<))
 where
 
@@ -40,13 +41,58 @@ where
   type Body   = B.ByteString
 
   type Version = (Int, Int)
+  
+  maxVers :: [Version] -> Version
+  maxVers = foldr maxVer (1,0)
+
+  maxVer :: Version -> Version -> Version
+  maxVer v1 v2 = 
+    if major1 > major2        then v1
+      else if major1 < major2 then v2
+             else if minor1 >= minor2 then v1 
+                                      else v2 
+    where major1 = fst v1
+          minor1 = snd v1
+          major2 = fst v2
+          minor2 = snd v2
+
   type Heart   = (Int, Int)
+
+  type SrvDesc = (String, String, String)
+
+  getSrvName :: SrvDesc -> String
+  getSrvName (n, _, _) = n
+
+  getSrvVer :: SrvDesc -> String
+  getSrvVer  (_, v, _) = v
+
+  getSrvCmts :: SrvDesc -> String
+  getSrvCmts (_, _, c) = c
+
+  srvToStr :: SrvDesc -> String
+  srvToStr (n, v, c) = n ++ "/" ++ v ++ c'
+    where c' = if null c then "" else " " ++ c
+
+  strToSrv :: String -> SrvDesc
+  strToSrv s = (n, v, c)
+    where n = takeWhile (/= '/') s
+          v = takeWhile (/= ' ') $ drop (length n + 1) s
+          c = drop 1 $ dropWhile (/= ' ') s
 
   noBeat :: Heart
   noBeat = (0,0)
 
   defMime :: String
   defMime = "text/plain"
+
+  defVerStr :: String
+  defVerStr = "1.1"
+
+  defVersion :: Version
+  defVersion = (1, 1)
+
+  noSrvDesc :: SrvDesc
+  noSrvDesc = ("","","")
 
   hdrLog, hdrPass, hdrDest, hdrLen, hdrTrn, hdrRec,
     hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, 
@@ -68,6 +114,7 @@ where
   hdrVer   = "version"
   hdrHost  = "host"
   hdrBeat  = "heart-beat"
+  hdrSrv   = "server"
 
   mkHeader :: String -> String -> Header
   mkHeader k v = (k, v)
@@ -93,6 +140,7 @@ where
   mkAcVerHdr = mkHeader hdrAcVer
   mkHostHdr  = mkHeader hdrHost
   mkBeatHdr  = mkHeader hdrBeat
+  mkSrvHdr   = mkHeader hdrSrv
 
   data Frame = ConFrame {
                    frmLogin :: String,
@@ -104,7 +152,8 @@ where
                | CondFrame {
                    frmSes   :: String,
                    frmBeat  :: Heart,
-                   frmVer   :: Version -- 1.1
+                   frmVer   :: Version, -- 1.1
+                   frmSrv   :: SrvDesc
                    -- server name: what for?
                  }
                | SubFrame {
@@ -168,10 +217,12 @@ where
   getVersion    :: Frame -> Version
   getVersions   :: Frame -> [Version]
   getBeat       :: Frame -> Heart
+  getServer     :: Frame -> SrvDesc
   getHeaders    :: Frame -> [Header]
   getLogin    = frmLogin 
   getPasscode = frmPass
   getSession  = frmSes
+  getServer   = frmSrv
   getSelector = frmSel
   getTrans    = frmTrans 
   getMsg      = frmMsg
@@ -199,7 +250,7 @@ where
   typeOf :: Frame -> FrameType
   typeOf f = case f of
               (ConFrame  _ _ _ _ _     ) -> Connect
-              (CondFrame _ _ _         ) -> Connected
+              (CondFrame _ _ _ _       ) -> Connected
               (DisFrame  _             ) -> Disconnect
               (SubFrame  _ _ _ _       ) -> Subscribe
               (USubFrame _ _           ) -> Unsubscribe
@@ -312,7 +363,7 @@ where
   putCommand f = 
     let s = case f of
               ConFrame  _ _ _ _ _     -> "CONNECT"
-              CondFrame _ _ _         -> "CONNECTED"
+              CondFrame _ _ _ _       -> "CONNECTED"
               DisFrame  _             -> "DISCONNECT"
               SndFrame  _ _ _ _ _ _ _ -> "SEND"
               SubFrame  _ _ _ _       -> "SUBSCRIBE"
@@ -344,10 +395,11 @@ where
      mkAcVerHdr $ versToVal v, 
      mkBeatHdr  $ beatToVal b,
      mkHostHdr h]
-  toHeaders (CondFrame s b v) =
+  toHeaders (CondFrame s b v d) =
     [mkSesHdr s, 
-     mkVerHdr  $ verToVal v,
-     mkBeatHdr $ beatToVal v]
+     mkVerHdr  $ verToVal  v,
+     mkBeatHdr $ beatToVal b,
+     mkSrvHdr  $ srvToStr  d]
   toHeaders (DisFrame r) =
     if null r then [] else [mkRecHdr r]
   toHeaders (SubFrame d a s i) =
@@ -529,8 +581,11 @@ where
                 Nothing -> "0"
                 Just x  -> x
         v   = case lookup hdrVer hs of
-                Nothing -> "1.0"
+                Nothing -> defVerStr
                 Just x  -> x 
+        d   = case lookup hdrSrv hs of
+                Nothing -> noSrvDesc
+                Just x  -> strToSrv x
         eiB = case lookup hdrBeat hs of
                 Nothing -> Right noBeat
                 Just x  -> case valToBeat x of
@@ -540,7 +595,7 @@ where
          Nothing -> Left $ "Not a valid version: " ++ v
          Just v' -> case eiB of 
                       Left  e -> Left e
-                      Right b -> Right $ CondFrame s b v'
+                      Right b -> Right $ CondFrame s b v' d
 
   mkErrFrame :: [Header] -> Int -> Body -> Either String Frame
   mkErrFrame hs l b =
@@ -555,8 +610,9 @@ where
                            frmBody = b}
 
   sndToMsg :: String -> Frame -> Maybe Frame
-  sndToMsg i f = if typeOf f == Send
-                   then Just MsgFrame {
+  sndToMsg i f = case typeOf f of
+                   Send ->
+                     Just MsgFrame {
                                frmHdrs = frmHdrs f,
                                frmDest = frmDest f,
                                frmLen  = frmLen  f,
@@ -564,6 +620,32 @@ where
                                frmId   = i,
                                frmBody = frmBody f
                              }
-                   else Nothing
+                   _ -> Nothing
+
+  conToCond :: String -> String -> Heart -> Frame -> Maybe Frame
+  conToCond s i b f = case typeOf f of
+                        Connect ->
+                          Just CondFrame {
+                                 frmSes  = i,
+                                 frmBeat = negoBeat (frmBeat f) b,
+                                 frmVer  = negoVer $ frmAcVer f,
+                                 frmSrv  = strToSrv s
+                               }
+                        _ -> Nothing
+
+  negoVer :: [Version] -> Version
+  negoVer vs = maxVer defVersion v
+    where v = maxVers vs
+
+  negoBeat :: Heart -> Heart -> Heart
+  negoBeat hc hs = 
+    let x = if sndC == 0 then 0 else max sndC sndS
+        y = if rcvC == 0 then 0 else max rcvC rcvS
+    in (x, y)
+    where sndC = fst hc
+          rcvC = snd hc
+          sndS = fst hs
+          rcvS = snd hs
+    
   
 

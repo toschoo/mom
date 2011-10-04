@@ -447,7 +447,7 @@ where
 
   registerCon :: (SubMsg -> IO()) -> Int -> S.Socket -> IO ()
   registerCon wSnd cid s = 
-    wSnd $ RegMsg cid s
+    wSnd $ RegMsg cid s 
 
   unRegisterCon :: (SubMsg -> IO ()) -> Int -> IO ()
   unRegisterCon wSnd cid = 

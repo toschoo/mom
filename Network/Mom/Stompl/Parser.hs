@@ -12,7 +12,7 @@ where
   import qualified Data.ByteString.UTF8 as U
   import           Data.Word 
 
-  import           Control.Applicative ((<|>))
+  import           Control.Applicative ((<|>), (<$>))
   import           Network.Mom.Stompl.Frame
 
   startParsing :: B.ByteString -> Either String (Result Frame)
@@ -113,7 +113,7 @@ where
       Right m -> return m
 
   headers :: Parser [Header]
-  headers = headers' []
+  headers = reverse <$> headers' []
 
   headers' :: [Header] -> Parser [Header]
   headers' hs = do

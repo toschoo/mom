@@ -1,6 +1,8 @@
 module Main 
 where
 
+  import Types
+
   import Network.Mom.Stompl.Parser
   import Network.Mom.Stompl.Frame
 
@@ -20,9 +22,10 @@ where
   data TestDesc = TDesc {
                     dscDesc  :: String,
                     dscType  :: FrameType,
+                    dscTrans :: Frame -> Maybe Frame,
                     dscRes   :: TestResult,
                     dscHdrs  :: [(String, String)]}
-    deriving (Eq, Show, Read)
+    -- deriving (Eq, Show, Read)
 
   data TestResult = Fail | Pass
     deriving (Eq, Show, Read)
@@ -36,82 +39,106 @@ where
   mkTestDir :: [Test]
   mkTestDir = 
     [(TDesc "Simple connect" 
-            Connect Pass 
+            Connect (Just . id) Pass 
             [("login", "guest"),
              ("passcode", "guest")], "con.txt"),
      (TDesc "Connect 1.1" 
-            Connect Pass 
+            Connect (Just . id) Pass 
             [("accept-version", "1.0,1.1"),
              ("login", "guest"),
              ("passcode", "guest"),
-             ("heart-beat", "500,500"),
+             ("heart-beat", "50,1000"),
              ("host", "Test-1")], "con-1.1.txt"),
      (TDesc "Connected 1.1" 
-            Connected Pass 
+            Connected (Just . id) Pass 
             [("version", "1.1"),
              ("heart-beat", "500,500")], "cond-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected 1.1" 
+            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            [("version", "1.1"),
+             ("server", "test/0.1"),
+             ("heart-beat", "500,1000"),
+             ("session", "1")], "con-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected 1.1 with 0 Client Send" 
+            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            [("version", "1.1"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,1000"),
+             ("session", "1")], "con2-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected 1.1 without heart-beat" 
+            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            [("version", "1.1"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,0"),
+             ("session", "1")], "con3-1.1.txt"),
      (TDesc "Simple begin" 
-            Begin Pass 
+            Begin (Just . id) Pass 
             [("transaction", "trn-12345")], "begin.txt"),
      (TDesc "Simple commit" 
-            Commit Pass 
+            Commit (Just . id) Pass 
             [("transaction", "trn-12345")], "commit.txt"),
      (TDesc "commit without transaction" 
-            Commit Fail
+            Commit (Just . id) Fail
             [("content-length", "12345")], "commit2.txt"),
      (TDesc "Simple abort" 
-            Abort Pass 
+            Abort (Just . id) Pass 
             [("transaction", "trn-12345")], "abort.txt"),
      (TDesc "Ack" 
-            Ack Pass 
+            Ack (Just . id) Pass 
             [("message-id", "1234"),
              ("transaction", "trn-12345")], "ack.txt"),
      (TDesc "send with content-length and receipt" 
-            Send Pass 
+            Send (Just . id) Pass 
             [("destination", "/queue/test"),
              ("content-length", "13"),
              ("content-type", "text/plain"),
              ("receipt", "msg-123")], "send1-1.1.txt"),
+     (TDesc "send with duplicated destination header" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "13"),
+             ("content-type", "text/plain"),
+             ("receipt", "msg-123")], "send2-1.1.txt"),
      (TDesc "send with content-length and many NULs" 
-            Send Pass 
+            Send (Just . id) Pass 
             [("destination", "/queue/test"),
              ("content-length", "23")], "send2.txt"),
      (TDesc "send witout content-length" 
-            Send Pass 
+            Send (Just . id) Pass 
             [("destination", "/queue/test")], 
              "send3.txt"),
      (TDesc "Send missing NUL" 
-            Send Fail 
+            Send (Just . id) Fail 
             [("destination", "/queue/test")], "send4.txt"),
      (TDesc "Empty send" 
-            Send Pass 
+            Send (Just . id) Pass 
             [("destination", "/queue/test")], "send5.txt"),
      (TDesc "Message 1.1" 
-            Message Pass
+            Message (Just . id) Pass
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
              ("content-length", "13"),
              ("content-type", "text/plain")], "msg1-1.1.txt"),
      (TDesc "Message with some NULs in body" 
-            Message Pass
+            Message (Just . id) Pass
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
              ("content-length", "23")], "msg2.txt"),
      (TDesc "Message without content-length" 
-            Message Pass
+            Message (Just . id) Pass
             [("destination", "/queue/test"),
              ("message-id", "msg-54321")], "msg3.txt"),
      (TDesc "Message missing NUL" 
-            Message Fail
+            Message (Just . id) Fail
             [("destination", "/queue/test"),
              ("message-id", "msg-54321")], "msg4.txt"),
      (TDesc "Message with wrong content-length" 
-            Message Fail
+            Message (Just . id) Fail
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
              ("content-length", "22")], "msg5.txt"),
      (TDesc "Error 1.1 without content-length" 
-            Error Pass
+            Error (Just . id) Pass
             [("message", "Malformed package received"),
              ("content-type", "text/plain")], "err1-1.1.txt")
     ]
@@ -147,6 +174,8 @@ where
       "heart-beat"     -> beatToVal . getBeat
       "accept-version" -> versToVal . getVersions
       "version"        -> verToVal  . getVersion
+      "session"        -> getSession
+      "server"         -> srvToStr  . getServer
       "host"           -> getHost
       _                -> (\_ -> "unknown")
 
@@ -164,13 +193,21 @@ where
                    Pass -> do
                      tell $ bad ++ ": " ++ e ++ "\n"
                      return $ Left False
-      Right f -> case dscRes d of
-                   Fail -> do
-                     tell $ good ++ "\n"
-                     return $ Left False
-                   Pass -> do
-                     tell $ good ++ "\n"
-                     return $ Right f
+      Right f -> 
+        case trans f of
+          Nothing -> do
+            tell $ "Transformation failed.\n"
+            return $ Left False
+          Just f' -> 
+            case dscRes d of
+              Fail -> do
+                tell $ good ++ "\n"
+                return $ Left False
+              Pass -> do
+                tell $ good ++ "\n"
+                return $ Right f'
+
+    where trans = dscTrans d
 
   testFrame :: Frame -> TestDesc -> Tester Bool
   testFrame f d = do
@@ -190,7 +227,7 @@ where
         tell $ "Header '" ++ h ++ "' is correct.\n"
         return True
       else do
-        tell $ "Header '" ++ h ++ "' is not correct: " ++ (getValue h f) ++ "\n"
+        tell $ "Header '" ++ h ++ "' is not correct: '" ++ (getValue h f) ++ "'\n"
         return False
 
   testHeaders :: Frame -> TestDesc -> Tester Bool
@@ -235,10 +272,16 @@ where
     return r
     -- testType  f d m
 
+  foldTests :: (Test -> IO Bool) -> [Test] -> IO Bool
+  foldTests _ [] = return True
+  foldTests f (t:ts) = do
+    b <- f t
+    if b then foldTests f ts else return False
+
   evalTests :: FilePath -> [Test] -> IO ()
   evalTests p ts = do
-    verdicts <- mapM (execTest p) ts
-    if and verdicts 
+    verdict <- foldTests (execTest p) ts -- mapM (execTest p) ts
+    if verdict
       then do
         putStrLn "OK. All Tests passed"
         exitSuccess

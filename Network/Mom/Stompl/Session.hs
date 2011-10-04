@@ -220,13 +220,14 @@ where
                    String -> Config -> 
                    Frame -> IO (Either SessionError Connection)
   handleConnect cid s nm cfg f = do
-    let eiC = mkCondFrame [mkSesHdr "1"]
-    case eiC of 
-      Left e  -> 
-        return $ Left $ SessionError e B.empty
-      Right c -> do
+    let mbC = conToCond myVersion "1" myBeat f -- mkCondFrame [mkSesHdr "1"]
+                                               -- Create unique Session ID
+    case mbC of 
+      Nothing -> 
+        return $ Left $ SessionError "Not a Connection Frame!" B.empty
+      Just c -> do
         let m = putFrame c
-        l <- send s m
+        l <- send s m -- should go via Sender?
         if l /= B.length m
           then 
             -- throw
@@ -239,3 +240,4 @@ where
                                conSock = s, 
                                conCfg  = cfg,
                                conPend = Nothing}
+

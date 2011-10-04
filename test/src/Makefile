@@ -36,6 +36,11 @@ clean:
 	rm -f $(TDIR)/ttypes
 	rm -f $(TDIR)/runTests
 
+dist-clean:	clean
+		rm -f $(SUTDIR)/*.hi
+		rm -f $(SUTDIR)/*.o
+		rm -f $(SUTDIR)/stompl
+
 build: $(tests) $(SUBSRC)
 
 

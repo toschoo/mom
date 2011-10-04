@@ -8,6 +8,7 @@ where
   import Sender
 
   import Network.Mom.Stompl.Frame
+  import Network.Mom.Stompl.Parser (stompAtOnce)
 
   import Control.Concurrent
   import Control.Monad.State
@@ -17,6 +18,7 @@ where
   import System.FilePath (FilePath, (</>))
 
   import qualified Network.Socket as S
+  import           Network.Socket.ByteString (recv)
   import           Network.BSD (getProtocolNumber) 
 
   import qualified Data.ByteString.Char8 as B
@@ -42,29 +44,29 @@ where
 
   mkTests :: S.Socket -> TestGroup Sender
   mkTests s = 
-    let t1 = [mkTest "Test Connect   "    (testConnect s),
-              mkTest "Test Disconnect"     testDisconnect]
+    let t1  = [mkTest "Test Connect   "    (testConnect s),
+               mkTest "Test Disconnect"     testDisconnect]
 
-        t2 = [mkTest "Test Connect"       (testConnect s),
-              mkTest "Test Sub   with Id" (testSub   "sub-1" 0 Auto),
-              mkTest "Test UnSub with Id" (testUnSub "sub-1" 0     )]
+        t2  = [mkTest "Test Connect"       (testConnect s),
+               mkTest "Test Sub   with Id" (testSub   "sub-1" 0 Auto),
+               mkTest "Test UnSub with Id" (testUnSub "sub-1" 0     )]
 
-        t3 = [mkTest "Test Sub   with    Id" (testSub   "sub-1" 0 Auto),
-              mkTest "Test UnSub without Id" (do 
-                                                ok <- testUnSub "" 0 
-                                                return $ neg ok),
-              mkTest "Test UnSub with    Id" (testUnSub "sub-1" 0)]
+        t3  = [mkTest "Test Sub   with    Id" (testSub   "sub-1" 0 Auto),
+               mkTest "Test UnSub without Id" (do 
+                                                 ok <- testUnSub "" 0 
+                                                 return $ neg ok),
+               mkTest "Test UnSub with    Id" (testUnSub "sub-1" 0)]
 
-        t4 = [mkTest "Test Sub  " (testSub   "" 0 Auto),
-              mkTest "Test UnSub" (testUnSub "" 0)]
+        t4  = [mkTest "Test Sub  " (testSub   "" 0 Auto),
+               mkTest "Test UnSub" (testUnSub "" 0)]
 
-        t5 = [mkTest "Test Sub  " (testSub   "" 0 Auto),
-              mkTest "Test Sub  " (testSub   "" 1 Auto),
-              mkTest "Test Sub  " (testSub   "" 2 Auto),
-              mkTest "Test UnSub" (testUnSub "" 2),
-              mkTest "Test UnSub" (testUnSub "" 1),
-              mkTest "Test UnSub" (testUnSub "" 0)]
-
+        t5  = [mkTest "Test Sub  " (testSub   "" 0 Auto),
+               mkTest "Test Sub  " (testSub   "" 1 Auto),
+               mkTest "Test Sub  " (testSub   "" 2 Auto),
+               mkTest "Test UnSub" (testUnSub "" 2),
+               mkTest "Test UnSub" (testUnSub "" 1),
+               mkTest "Test UnSub" (testUnSub "" 0)]
+ 
         t5b = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto),
                mkTest "Test Sub  " (testSub   "sub-2" 1 Auto),
                mkTest "Test Sub  " (testSub   "sub-3" 2 Auto),
@@ -135,9 +137,9 @@ where
     handleRequest $ RegMsg cid1 s
     b <- get
     case bookCons b of
-      [] -> do
+      [] -> 
         return $ Fail "No Connection"
-      [c] -> do
+      [c] -> 
         return Pass
 
   testDisconnect :: Sender TestResult
@@ -147,6 +149,20 @@ where
     case bookCons b of
       [] -> return Pass
       _  -> return $ Fail "Connection not removed"
+
+  -- no socket communication!
+  testCon1dot1 :: S.Socket -> Sender TestResult
+  testCon1dot1 s = do
+    handleRequest $ RegMsg cid1 s
+    b <- get
+    case bookCons b of
+      [] -> do
+        return $ Fail "No Connection"
+      [c] -> do
+        m <- liftIO $ recv s 1024
+        if B.length m == 0
+          then return $ Fail "No Connected Frame!"
+          else return Pass
 
   testSub :: String -> Int -> AckMode -> Sender TestResult
   testSub sid l a = 
@@ -319,6 +335,15 @@ where
       qs -> case qMsgs $ head qs of
               [] -> return Nothing
               ms -> return $ Just $ head ms
+
+  getConMsg :: Connection -> Maybe Frame
+  getConMsg c = 
+    case conPending c of
+      [] -> Nothing
+      ps -> 
+        case stompAtOnce $ strMsg $ head ps of
+         Left  _ -> Nothing
+         Right f -> Just f
 
   mkConnect :: Either String Frame
   mkConnect = 
