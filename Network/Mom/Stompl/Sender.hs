@@ -18,11 +18,15 @@ where
   import           Control.Applicative ((<$>))
 
   import           Data.List  (insert, delete, find)
+  import           Data.Maybe (catMaybes)
   import qualified Data.ByteString           as B
 
   type TxId  = String
   type SubId = String
 
+  ------------------------------------------------------------------------
+  -- Transaction
+  ------------------------------------------------------------------------
   data Transaction = Tx {
                        txId     :: TxId,
                        txExt    :: String,
@@ -67,6 +71,9 @@ where
                       Nothing -> insert tx ts
                       Just _  ->           ts
 
+  ------------------------------------------------------------------------
+  -- Queue 
+  ------------------------------------------------------------------------
   data Queue = Queue {
                  qName :: String,
                  qMsgs :: [MsgStore],
@@ -95,8 +102,8 @@ where
                      qSubs = subs,
                      qMsgs = []}
 
-  addMsgToQ :: String -> MsgStore -> Connection -> SendState -> Sender ()
-  addMsgToQ n m c st = do
+  addMsgToQ :: String -> MsgStore -> Connection -> String -> SendState -> Sender ()
+  addMsgToQ n m c sid st = do
     b <- get
     case getQueue n $ bookQs b of
       Nothing -> do
@@ -106,13 +113,31 @@ where
         let cid = conId c
         case find (== m) $ qMsgs q of
           Nothing -> do
-            let m' = m {strPending = [(cid, st)]}
+            let m' = m {strPending = [(cid, mkPnd sid st)]}
             let q' = q {qMsgs = m' : qMsgs q}
             put b {bookQs = insert q' $ delete q $ bookQs b}
           Just mx -> do
-            let mx' = mx {strPending = (cid, st) : strPending mx}
+            let mx' = mx {strPending = (cid, mkPnd sid st) : strPending mx}
             let q' = q {qMsgs = insert mx' $ delete mx $ qMsgs q}
             put b {bookQs = insert q' $ delete q $ bookQs b}
+
+  msgFilter :: Int -> SubId -> SendState -> [MsgStore] -> [MsgStore]
+  msgFilter cid sid st ms = 
+    case filCon cid ms of
+      []  -> []
+      cms -> case filSub sid cms of
+              []  -> []
+              sms -> filState st sms
+    where findCon   c x = (              fst) x == c
+          findSub   s x = (getPndSub   . snd) x == s
+          findState s x = (getPndState . snd) x == s
+          findMsg f x   = case find f $ strPending x of
+                          Nothing -> Nothing
+                          Just y  -> Just x
+          filterM f     = catMaybes . foldr (\x y -> findMsg f x : y) [] 
+          filCon  c xs  = filterM (findCon c) xs
+          filSub  s xs  = filterM (findSub s) xs
+          filState s xs = filterM (findState s) xs
 
   addSubToQ :: SubId -> String -> [Queue] -> [Queue]
   addSubToQ sid n qs =
@@ -134,6 +159,9 @@ where
                         then delete q qs
                         else (insert q' . delete q) qs
 
+  ------------------------------------------------------------------------
+  -- Subscription 
+  ------------------------------------------------------------------------
   data Subscription = Subscription {
                         subId    :: SubId, -- = ConId ++ extId ++ Queue
                         subExt   :: String,
@@ -155,8 +183,8 @@ where
   eqSub :: String -> Subscription -> Bool
   eqSub sid s = subId s == sid
 
-  getSub :: String -> [Subscription] -> Maybe Subscription
-  getSub sid = find (eqSub sid)
+  getSubscription :: SubId -> [Subscription] -> Maybe Subscription
+  getSubscription sid = find (eqSub sid)
 
   getSubById :: Int -> String -> [Subscription] -> Maybe Subscription
   getSubById cid ext = find (\s -> cid == subCid s && ext == subExt s)
@@ -193,16 +221,37 @@ where
 
   getQueueFromSub :: SubId -> Book -> Maybe Queue
   getQueueFromSub sid b =
-    case getSub sid $ bookSubs b of
+    case getSubscription sid $ bookSubs b of
       Nothing -> Nothing
       Just s  -> case getQueue (subQueue s) $ bookQs b of
                    Nothing -> Nothing
                    Just q  -> Just q
 
+  getSubMode :: SubId -> Sender AckMode
+  getSubMode sid = do
+    b <- get
+    case find (eqSub sid) $ bookSubs b of
+      Nothing -> return Auto
+      Just s  -> return $ subMode s
+
+  ------------------------------------------------------------------------
+  -- MessageStore
+  ------------------------------------------------------------------------
+  type PndMsg = (SubId, SendState)
+
+  getPndSub :: PndMsg -> SubId
+  getPndSub = fst
+
+  getPndState :: PndMsg -> SendState
+  getPndState = snd
+
+  mkPnd :: SubId -> SendState -> PndMsg
+  mkPnd sid st = (sid, st)
+
   data MsgStore = MsgStore {
                     strId      :: String,
                     strMsg     :: B.ByteString,
-                    strPending :: [(Int, SendState)]}
+                    strPending :: [(Int, PndMsg)]}
     deriving (Show)
 
   instance Eq MsgStore where
@@ -222,40 +271,42 @@ where
                      strMsg     = m,
                      strPending = []}
 
-  setState :: Int -> SendState -> MsgStore -> MsgStore
-  setState cid s m = case lookup cid $ strPending m of
-                       Nothing  -> m 
-                       Just old -> 
-                         m {strPending =
-                             (cid, s) : (delete (cid, old) $ strPending m)}
+  setState :: Int -> String -> SendState -> MsgStore -> MsgStore
+  setState cid sid s m = case lookup cid $ strPending m of
+                           Nothing  -> m 
+                           Just old -> 
+                             m {strPending =
+                                 (cid, mkPnd sid s) : (delete (cid, old) $ strPending m)}
 
-  updMsgState :: Int -> String -> String -> Sender ()
-  updMsgState cid mid n = do
+  updMsgState :: Int -> String -> String -> SubId -> Sender ()
+  updMsgState cid mid n sid = do
     b <- get
     case getQueue n $ bookQs b of
       Nothing -> logS WARNING $ "Queue " ++ n ++ " not found"
       Just q  -> 
         case getStoreFromQ mid q of
           Nothing -> logS WARNING $ "Queue " ++ n ++ " has no pending messages"
-          Just m  -> 
+          Just m  -> do
             case lookup cid $ strPending m of
               Nothing -> logS WARNING $ "Queue "             ++ n ++ 
                                         " has no pending message" ++
                                         " for connection " ++ (show cid)
-              Just Sent -> delMsg  Sent cid q m
-              Just st   -> setSent st   cid q m
+              Just (sub, Sent) -> 
+                if sub == sid then delMsg  Sent cid q sid m else return ()
+              Just (sub, st  ) -> 
+                if sub == sid then setSent st   cid q sid m else return ()
 
-  setSent :: SendState -> Int -> Queue -> MsgStore -> Sender ()
-  setSent st cid q m = do
+  setSent :: SendState -> Int -> Queue -> SubId -> MsgStore -> Sender ()
+  setSent st cid q sid m = do
     b <- get
-    let m' = m {strPending = (cid, Sent) : (delete (cid, st) $ strPending m)}
+    let m' = m {strPending = (cid, mkPnd sid Sent) : (delete (cid, mkPnd sid st) $ strPending m)}
     let q' = q {qMsgs = insert m' $ delete m $ qMsgs q}
     put b {bookQs = insert q' $ delete q $ bookQs b}
 
-  delMsg :: SendState -> Int -> Queue -> MsgStore -> Sender ()
-  delMsg st cid q m = do
+  delMsg :: SendState -> Int -> Queue -> SubId -> MsgStore -> Sender ()
+  delMsg st cid q sid m = do
     b <- get
-    let m' = m {strPending = delete (cid, st) $ strPending m}
+    let m' = m {strPending = delete (cid, mkPnd sid st) $ strPending m}
     if null $ strPending m'
       then do 
         let q' = q {qMsgs = delete m $ qMsgs q}
@@ -276,6 +327,9 @@ where
                  in (not . null) xi &&
                     (not . null) yi && xi == yi
 
+  ------------------------------------------------------------------------
+  -- Connection
+  ------------------------------------------------------------------------
   data SendState = Pending | Sent | Acked 
     deriving (Eq, Show)
 
@@ -307,6 +361,9 @@ where
   mkCon :: Int -> S.Socket -> Connection
   mkCon cid sock = Connection cid sock Up []
 
+  ------------------------------------------------------------------------
+  -- State
+  ------------------------------------------------------------------------
   data Book = Book {
                 bookCfg   :: Config,
                 bookLog   :: String,
@@ -466,6 +523,9 @@ where
   logIO b p s = do
     logX (writeLog $ bookCfg b) (bookLog b) p s 
 
+  ------------------------------------------------------------------------
+  -- Start and run Sender
+  ------------------------------------------------------------------------
   startSender :: Config -> IO ()
   startSender c = do
     evalStateT runSender $ mkBook c
@@ -479,6 +539,9 @@ where
       handleRequest m
       return ()
 
+  ------------------------------------------------------------------------
+  -- Handling requests
+  ------------------------------------------------------------------------
   waitRequest :: Sender SubMsg
   waitRequest = do
     b <- get
@@ -511,12 +574,18 @@ where
       F.Send        -> handleSend   cid f
       F.Error       -> handleError  cid f
 
+  ------------------------------------------------------------------------
+  -- Begin Frame
+  ------------------------------------------------------------------------
   handleBegin :: Int -> Frame -> Sender ()
   handleBegin cid f = do
     let tid = getTrans f
     logS DEBUG $ "Handle Begin: " ++ tid
     insTx $ mkTx cid tid []
 
+  ------------------------------------------------------------------------
+  -- Commit Frame
+  ------------------------------------------------------------------------
   handleCommit :: Int -> Frame -> Sender ()
   handleCommit cid f = do
     let tid = mkTxId cid $ getTrans f
@@ -531,6 +600,9 @@ where
         mapM_ (handleFrame cid) $ reverse $ txFrames tx
         delTx tx
 
+  ------------------------------------------------------------------------
+  -- Abort Frame
+  ------------------------------------------------------------------------
   handleAbort :: Int -> Frame -> Sender ()
   handleAbort cid f = do
     let tid = mkTxId cid $ getTrans f
@@ -544,6 +616,9 @@ where
         logS DEBUG $ "Aborting " ++ tid
         delTx tx
 
+  ------------------------------------------------------------------------
+  -- Ack Frame
+  ------------------------------------------------------------------------
   handleAck :: Int -> Frame -> Sender ()
   handleAck cid f = do
     if null $ getTrans f 
@@ -553,14 +628,28 @@ where
   doAck :: Int -> Frame -> Sender ()
   doAck cid f = do
     logS DEBUG "Handle Ack"
-    let mid = getId   f
+    let mid = getId f
     b <- get
-    case (if null $ getDest f 
-            then lookup mid $ bookMsgs b
-            else Just $ getDest f) of
+    case lookup mid $ bookMsgs b of
       Nothing -> logS INFO $ "Unknown message " ++ mid
-      Just n  -> updMsgState cid mid n
+      Just n  -> do
+        let sid = mkSubId cid (getSub f) n
+        am <- getSubMode sid
+        case am of
+          Client     -> updMsgOlder b   mid n sid
+          ClientIndi -> updMsgState cid mid n sid
+          _          -> liftIO $ putStrLn "AckMode Auto!" -- return ()
+     where updMsgOlder b mid n sid = 
+              case getQueue n $ bookQs b of
+                Nothing -> return ()
+                Just q  -> do
+                  let ms  = dropWhile (\x -> strId x /= mid) $ qMsgs q
+                  let ms' = msgFilter cid sid Sent ms
+                  mapM_ (\x -> updMsgState cid (strId x) n sid) ms' 
 
+  ------------------------------------------------------------------------
+  -- Subscribe Frame
+  ------------------------------------------------------------------------
   -- should we ensure unique subscriptions per
   -- cid / queue or
   -- cid / id / queue ?
@@ -570,7 +659,7 @@ where
     b <- get
     let cons = bookCons b
     case getCon cid cons of
-      Nothing -> return ()
+      Nothing -> return () -- error & disconnect
       Just _  -> do
         let q  = getDest f
         insSub cid (getId f) (getDest f) (getAcknow f)
@@ -578,6 +667,9 @@ where
         -- logS DEBUG $ show $ bookSubs   b
         -- logS DEBUG $ show $ bookCons   b
 
+  ------------------------------------------------------------------------
+  -- Unsubscribe Frame
+  ------------------------------------------------------------------------
   handleUnSub :: Int -> Frame -> Sender ()
   handleUnSub cid f = do
     logS DEBUG "Handle Unsubscribe"
@@ -588,7 +680,8 @@ where
       Just _  -> do
         let i = getId   f
         let subSearch = if null i 
-                          then getSub (mkSubId cid (getId f) (getDest f))
+                          then getSubscription 
+                               (mkSubId cid (getId f) (getDest f))
                           else getSubById cid i
         case subSearch $ bookSubs b of
           Nothing -> do
@@ -599,6 +692,9 @@ where
             -- logS DEBUG $ show $ bookSubs b
             -- logS DEBUG $ show $ bookCons b
 
+  ------------------------------------------------------------------------
+  -- Send Frame
+  ------------------------------------------------------------------------
   -- send receipt
   handleSend :: Int -> Frame -> Sender ()
   handleSend cid f = do
@@ -624,6 +720,9 @@ where
             addMsg mid n 
             mapM_ (\c-> sendFrame n c (getTrans f) m) cc
 
+  ------------------------------------------------------------------------
+  -- Error Frame
+  ------------------------------------------------------------------------
   handleError :: Int -> Frame -> Sender ()
   handleError cid f = do
     b <- get
@@ -631,12 +730,18 @@ where
       Nothing -> return ()
       Just c  -> sendFrame "" (c, Nothing) "" f
 
+  ------------------------------------------------------------------------
+  -- Actually send a Frame
+  ------------------------------------------------------------------------
   sendFrame :: String -> (Connection, Maybe Subscription) -> String -> Frame -> Sender ()
   sendFrame n (c, mbS) trn f = do
     let m  = putFrame f
+    let sid = case mbS of
+                Nothing -> ""
+                Just x  -> subId x
     if (conState c == Down) ||
        (not $ null $ conPending c) 
-      then addMsgx n m Pending
+      then addMsgx n m sid Pending
       else do
         let s = conSock c
         b <- get
@@ -646,18 +751,18 @@ where
           then do
             logS ERROR "Can't send Frame"
             updCon c {conState = Down}
-            addMsgx n m Pending
+            addMsgx n m sid Pending
           else case mbS of
                  Nothing -> return ()
                  Just x  -> 
-                   if subMode x == Client
-                     then addMsgx n m Sent
+                   if subMode x /= Auto
+                     then addMsgx n m sid Sent
                      else return () 
     where onError b s e = do
             logIO b WARNING (show e)
             return 0
-          addMsgx nm m st = do
+          addMsgx nm m sid st = do
             let ms = mkStore m f [(conId c, st)]
             if null nm
               then updCon c {conPending = ms : conPending c} 
-              else addMsgToQ nm ms c st
+              else addMsgToQ nm ms c sid st

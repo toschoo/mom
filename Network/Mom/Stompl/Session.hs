@@ -63,8 +63,9 @@ where
               then return ()
               else  
                 case stompAtOnce m of
-                  Left e  -> handleError cfg nm cid $ 
-                               SessionError "Parse Error" (B.pack e)
+                  Left e  -> do
+                    handleError cfg nm cid $ 
+                      SessionError "Parse Error" (B.pack e)
                   Right f -> do
                     eiC <- getCon cid s nm cfg f
                     case eiC of
@@ -157,6 +158,7 @@ where
         logS WARNING ("Error: " ++ s)
         liftIO $ handleError (conCfg c) (conName c) (conId c) 
                              (SessionError "Parse Error" $ B.pack e)
+        disconnect
       A.Partial r      -> do 
         logS DEBUG "Got partial result"
         c <- get
@@ -191,10 +193,10 @@ where
         logS CRITICAL $ "Can't create DisFrame: " ++ (show e)
       Right f -> do
         logS DEBUG "Disconnecting"
-        disconnect f
+        disconnect 
 
-  disconnect :: Frame -> Session ()
-  disconnect _ = do
+  disconnect :: Session ()
+  disconnect = do
     c <- get
     put c {conCon = False}
       

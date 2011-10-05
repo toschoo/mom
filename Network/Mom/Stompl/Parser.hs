@@ -33,6 +33,7 @@ where
     t <- msgType
     case t of
       "CONNECT"     -> connect
+      "STOMP"       -> connect
       "CONNECTED"   -> connected
       "DISCONNECT"  -> disconnect
       "SEND"        -> send

@@ -9,11 +9,12 @@ module Network.Mom.Stompl.Frame (
                        sndToMsg, conToCond,
                        valToVer, valToVers, verToVal, versToVal,
                        beatToVal, valToBeat,
+                       ackToVal, valToAck,
                        strToSrv, srvToStr,
                        typeOf, putFrame, toString,
                        upString, numeric,
                        getLen, getAck, isValidAck,
-                       getLogin, getPasscode, getDest,
+                       getLogin, getPasscode, getDest, getSub,
                        getLength, getTrans, getReceipt,
                        getSelector, getId, getAcknow,
                        getHost, getVersions, getVersion,
@@ -26,6 +27,7 @@ module Network.Mom.Stompl.Frame (
                        mkSesHdr,   mkMsgHdr,  mkMIdHdr,
                        mkAcVerHdr, mkVerHdr,  mkHostHdr,
                        mkBeatHdr,  mkMimeHdr, mkSrvHdr,
+                       mkSubHdr,
                        (|>), (<|), (>|<))
 where
 
@@ -94,12 +96,13 @@ where
   noSrvDesc :: SrvDesc
   noSrvDesc = ("","","")
 
-  hdrLog, hdrPass, hdrDest, hdrLen, hdrTrn, hdrRec,
+  hdrLog, hdrPass, hdrDest, hdrSub, hdrLen, hdrTrn, hdrRec,
     hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, 
     hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime :: String
   hdrLog   = "login"
   hdrPass  = "passcode"
   hdrDest  = "destination"
+  hdrSub   = "subscription"
   hdrLen   = "content-length"
   hdrMime  = "content-type"
   hdrTrn   = "transaction"
@@ -134,6 +137,7 @@ where
   mkIdHdr    = mkHeader hdrId
   mkMIdHdr   = mkHeader hdrMId
   mkAckHdr   = mkHeader hdrAck
+  mkSubHdr   = mkHeader hdrSub
   mkSesHdr   = mkHeader hdrSes
   mkMsgHdr   = mkHeader hdrMsg
   mkVerHdr   = mkHeader hdrVer
@@ -185,7 +189,7 @@ where
                  }
                | AckFrame {
                    frmId    :: String,
-                   frmDest  :: String,
+                   frmSub   :: String,
                    frmTrans :: String
                  }
                | AbrtFrame {
@@ -228,6 +232,7 @@ where
   getMsg      = frmMsg
   getAcknow   = frmAck
   getDest     = frmDest
+  getSub      = frmSub
   getId       = frmId
   getReceipt  = frmRec
   getBody     = frmBody
@@ -278,6 +283,15 @@ where
                      "CLIENT-INDIVIDUAL" -> [(ClientIndi, "")]
                      _                   -> error $ "Can't parse AckMode: " ++ s
 
+  valToAck :: String -> Maybe AckMode
+  valToAck s = if isValidAck s
+                 then Just $ read s
+                 else Nothing
+
+  ackToVal :: AckMode -> String
+  ackToVal = show 
+                   
+
   infixr >|<, |>, <| 
   (>|<) :: B.ByteString -> B.ByteString -> B.ByteString
   (|>)  :: B.ByteString ->   Char       -> B.ByteString
@@ -287,7 +301,8 @@ where
   x  |> y = x `B.snoc` y
 
   isValidAck :: String -> Bool
-  isValidAck s = case find (== (upString s)) ["AUTO", "CLIENT"] of
+  isValidAck s = case find (== (upString s)) 
+                      ["AUTO", "CLIENT", "CLIENT-INDIVIDUAL"] of
                    Nothing -> False
                    Just _  -> True
 
@@ -417,7 +432,7 @@ where
   toHeaders (AbrtFrame t) = [mkTrnHdr t]
   toHeaders (AckFrame i s t) = 
     let ih = if null i then [] else [mkIdHdr i]
-        sh = if null s then [] else [mkDestHdr s]
+        sh = if null s then [] else [mkSubHdr s]
     in mkTrnHdr t : (ih ++ sh)
   toHeaders (MsgFrame h _ _ _ _ _)  = h
   toHeaders (RecFrame  r) = [mkRecHdr r]
@@ -494,7 +509,7 @@ where
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in Subscribe Frame"
       Just d  -> case getAck hs of
-                   Left e -> Left e
+                   Left  e -> Left e
                    Right a -> Right $ SubFrame {
                                         frmDest = d,
                                         frmAck  = a,
@@ -543,12 +558,12 @@ where
       Just i  -> let t = case lookup hdrTrn hs of
                            Nothing  -> ""
                            Just trn -> trn
-                     s = case lookup hdrDest hs of -- mandatory!
+                     s = case lookup hdrSub hs of -- mandatory!
                            Nothing -> ""
                            Just x  -> x
                  in Right AckFrame {
                               frmId    = i,
-                              frmDest  = s,
+                              frmSub   = s,
                               frmTrans = t}
 
   mkMsgFrame :: [Header] -> Int -> Body -> Either String Frame

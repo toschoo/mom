@@ -44,71 +44,115 @@ where
 
   mkTests :: S.Socket -> TestGroup Sender
   mkTests s = 
-    let t1  = [mkTest "Test Connect   "    (testConnect s),
+    let t10 = [mkTest "Test Connect   "    (testConnect s),
                mkTest "Test Disconnect"     testDisconnect]
 
-        t2  = [mkTest "Test Connect"       (testConnect s),
+        t20 = [mkTest "Test Connect"       (testConnect s),
                mkTest "Test Sub   with Id" (testSub   "sub-1" 0 Auto),
                mkTest "Test UnSub with Id" (testUnSub "sub-1" 0     )]
 
-        t3  = [mkTest "Test Sub   with    Id" (testSub   "sub-1" 0 Auto),
+        t30 = [mkTest "Test Sub   with    Id" (testSub   "sub-1" 0 Auto),
                mkTest "Test UnSub without Id" (do 
                                                  ok <- testUnSub "" 0 
                                                  return $ neg ok),
                mkTest "Test UnSub with    Id" (testUnSub "sub-1" 0)]
 
-        t4  = [mkTest "Test Sub  " (testSub   "" 0 Auto),
+        t40 = [mkTest "Test Sub  " (testSub   "" 0 Auto),
                mkTest "Test UnSub" (testUnSub "" 0)]
 
-        t5  = [mkTest "Test Sub  " (testSub   "" 0 Auto),
+        t50 = [mkTest "Test Sub  " (testSub   "" 0 Auto),
                mkTest "Test Sub  " (testSub   "" 1 Auto),
                mkTest "Test Sub  " (testSub   "" 2 Auto),
                mkTest "Test UnSub" (testUnSub "" 2),
                mkTest "Test UnSub" (testUnSub "" 1),
                mkTest "Test UnSub" (testUnSub "" 0)]
  
-        t5b = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto),
+        t51 = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto),
                mkTest "Test Sub  " (testSub   "sub-2" 1 Auto),
                mkTest "Test Sub  " (testSub   "sub-3" 2 Auto),
                mkTest "Test UnSub" (testUnSub "sub-3" 2),
                mkTest "Test UnSub" (testUnSub "sub-2" 1),
                mkTest "Test UnSub" (testUnSub "sub-1" 0)]
 
-        t6 = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto), 
-              mkTest "Test Send "  testSend,
-              mkTest "Test UnSub" (testUnSub "sub-1" 0)]
+        t60 = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto), 
+               mkTest "Test Send "  testSend,
+               mkTest "Test UnSub" (testUnSub "sub-1" 0)]
 
-        t7 = [mkTest "Test Disconnect"  testDisconnect,
-              mkTest "Test Connect   " (testConnect s),
-              mkTest "Test Sub       " (testSub   "sub-1" 0 Client),
-              mkTest "Test Send      "  testSend,
-              mkTest "Test Ack       "  testAck,
-              mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+        t70 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "sub-1" 0 Client),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testAck "sub-1"),
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
 
-        t8 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
-              mkTest "Test Begin     " testBegin,
-              mkTest "Test Send Tx   " testTxSend,
-              mkTest "Test Abort     " testAbort,
-              mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+        t71 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "sub-1" 0 ClientIndi),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testAck "sub-1"),
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
 
-        t9 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
-              mkTest "Test Begin     " testBegin,
-              mkTest "Test Send Tx   " testTxSend,
-              mkTest "Test Commit    " testCommit,
-              mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+        t72 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "" 0 ClientIndi),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testAck ""),
+               mkTest "Test UnSub     " (testUnSub "" 0)]
+
+        t73 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "" 0 Client),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testAck ""),
+               mkTest "Test UnSub     " (testUnSub "" 0)]
+
+        t74 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "sub-1" 0 Client),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testCumulatedAck "sub-1" 1),
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+
+        t75 = [mkTest "Test Disconnect"  testDisconnect,
+               mkTest "Test Connect   " (testConnect s),
+               mkTest "Test Sub       " (testSub   "sub-1" 0 ClientIndi),
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Send      "  testSend,
+               mkTest "Test Ack       " (testCumulatedAck "sub-1" 2),
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+
+        t80 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
+               mkTest "Test Begin     " testBegin,
+               mkTest "Test Send Tx   " testTxSend,
+               mkTest "Test Abort     " testAbort,
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+ 
+        t90 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
+               mkTest "Test Begin     " testBegin,
+               mkTest "Test Send Tx   " testTxSend,
+               mkTest "Test Commit    " testCommit,
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
 
     in  mkMetaGroup 
                  "Sender Tests" (Stop (Fail ""))
-                 [mkGroup "Connect"                          (Stop $ Fail "") t1,
-                  mkGroup "Sub with Id"                      (Stop $ Fail "") t2,
-                  mkGroup "Sub with Id, Unsub without Id"    (Stop $ Fail "") t3,
-                  mkGroup "Sub/UnSub without Id"             (Stop $ Fail "") t4,
-                  mkGroup "Multiple Sub/Unsub without Id"    (Stop $ Fail "") t5,
-                  mkGroup "Multiple Sub/Unsub with    Id"    (Stop $ Fail "") t5b,
-                  mkGroup "Send"                             (Stop $ Fail "") t6,
-                  mkGroup "Send in Client Mode"              (Stop $ Fail "") t7,
-                  mkGroup "Send Tx Abort      "              (Stop $ Fail "") t8,
-                  mkGroup "Send Tx Commit     "              (Stop $ Fail "") t9]
+                 [mkGroup "Connect"                               (Stop $ Fail "") t10,
+                  mkGroup "Sub with Id"                           (Stop $ Fail "") t20,
+                  mkGroup "Sub with Id, Unsub without Id"         (Stop $ Fail "") t30,
+                  mkGroup "Sub/UnSub without Id"                  (Stop $ Fail "") t40,
+                  mkGroup "Multiple Sub/Unsub without Id"         (Stop $ Fail "") t50,
+                  mkGroup "Multiple Sub/Unsub with    Id"         (Stop $ Fail "") t51,
+                  mkGroup "Send"                                  (Stop $ Fail "") t60,
+                  mkGroup "Send in Client Mode with Ack"          (Stop $ Fail "") t70,
+                  mkGroup "Send in ClientIndi Mode with Ack"      (Stop $ Fail "") t71,
+                  mkGroup "Send in Client Mode without SubId"     (Stop $ Fail "") t72,
+                  mkGroup "Send in ClientIndi Mode without SubId" (Stop $ Fail "") t73,
+                  mkGroup "Cumulated Ack with Client Mode"        (Stop $ Fail "") t74,
+                  mkGroup "Cumulated Ack with ClientIndi Mode"    (Stop $ Fail "") t75,
+                  mkGroup "Send Tx Abort      "                   (Stop $ Fail "") t80,
+                  mkGroup "Send Tx Commit     "                   (Stop $ Fail "") t90]
 
   tSender :: FilePath -> IO ()
   tSender dir = do
@@ -214,16 +258,17 @@ where
             liftIO $ putStrLn $ "After Send: " ++ (show m)
             return Pass
 
-  testAck :: Sender TestResult
-  testAck = do
+  -- we need a SubId for 1.1
+  testAck :: SubId -> Sender TestResult
+  testAck sid = do
     mbM <- getLastMsg 
     case mbM of
       Nothing -> return $ Fail "No Message available"
       Just m  -> do
-        let m'  = setState cid1 Sent m 
+        let m'  = setState cid1 (mkSubId cid1 sid q1) Sent m 
         liftIO $ putStrLn $ "Message: " ++ (show m')
         updMsg q1 m m'
-        case mkAck $ strId m of 
+        case mkAck (strId m) sid of 
           Left e  -> return $ Fail "Could not make Ack Frame"
           Right f -> do
             handleRequest $ FrameMsg cid1 f
@@ -231,6 +276,31 @@ where
             case mbM2 of
               Nothing -> return Pass
               Just n  -> return $ Fail ("Message not acknowledged: " ++ (show n))
+
+  testCumulatedAck :: SubId -> Int -> Sender TestResult
+  testCumulatedAck sid exp = do
+    b <- get
+    case getQueue q1 $ bookQs b of
+      Nothing -> return $ Fail ("Queue " ++ q1 ++ " not found.")
+      Just q  -> do
+        let ms  = qMsgs q
+        if length ms /= 3
+          then return $ Fail ("Number of Messages not correct: " ++ (show $ length ms))
+          else do
+            let ms' = map (setState cid1 (mkSubId cid1 sid q1) Sent) ms
+            mapM_ (\(m, m') -> updMsg q1 m m') $ zip ms ms'
+            let m = (head . tail) ms'
+            case mkAck (strId m) sid of
+              Left e  -> return $ Fail "Could not make Ack Frame"
+              Right f -> do
+                handleRequest $ FrameMsg cid1 f
+                n <- countMsgs q1
+                if n == exp 
+                  then return Pass
+                  else return $ Fail $ 
+                                  "Number of Messages does not match - " ++
+                                  "Expected: " ++ (show exp) ++ 
+                                  ", Real: " ++ (show n)
 
   testBegin :: Sender TestResult
   testBegin = do
@@ -336,6 +406,13 @@ where
               [] -> return Nothing
               ms -> return $ Just $ head ms
 
+  countMsgs :: String -> Sender Int
+  countMsgs n = do
+    b <- get
+    case getQueue n $ bookQs b of
+      Nothing -> return 0
+      Just q  -> return $ length $ qMsgs q
+
   getConMsg :: Connection -> Maybe Frame
   getConMsg c = 
     case conPending c of
@@ -369,9 +446,9 @@ where
     in  mkSndFrame ([mkDestHdr q1] ++ th)
                    (B.length b) b
 
-  mkAck :: String -> Either String Frame
-  mkAck mid = 
-    mkAckFrame [mkMIdHdr mid]
+  mkAck :: String -> SubId -> Either String Frame
+  mkAck mid sid = 
+    mkAckFrame [mkMIdHdr mid, mkSubHdr sid]
 
   mkBegin :: String -> Either String Frame
   mkBegin tx = mkBgnFrame [mkTrnHdr tx]

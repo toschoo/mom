@@ -87,6 +87,34 @@ where
             Ack (Just . id) Pass 
             [("message-id", "1234"),
              ("transaction", "trn-12345")], "ack.txt"),
+     (TDesc "Ack 1.1" 
+            Ack (Just . id) Pass 
+            [("subscription", "sub-1"),
+             ("message-id", "1234"),
+             ("transaction", "trn-12345")], "ack1-1.1.txt"),
+     (TDesc "Simple Subscription (1.0)" 
+            Subscribe (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("ack", "client")], "sub1.txt"),
+     (TDesc "Subscription 1.1 without id" 
+            Subscribe (Just . id) Pass -- Fail
+            [("destination", "/queue/test"),
+             ("ack", "client")], "sub2-1.1.txt"),
+     (TDesc "Subscription 1.1 auto mode" 
+            Subscribe (Just . id) Pass
+            [("id", "10"),
+             ("destination", "/queue/test"),
+             ("ack", "auto")], "sub1-1.1.txt"),
+     (TDesc "Subscription 1.1 client mode" 
+            Subscribe (Just . id) Pass
+            [("id", "10"),
+             ("destination", "/queue/test"),
+             ("ack", "client")], "sub3-1.1.txt"),
+     (TDesc "Subscription 1.1 client-individual mode" 
+            Subscribe (Just . id) Pass
+            [("id", "10"),
+             ("destination", "/queue/test"),
+             ("ack", "client-individual")], "sub4-1.1.txt"),
      (TDesc "send with content-length and receipt" 
             Send (Just . id) Pass 
             [("destination", "/queue/test"),
@@ -164,10 +192,12 @@ where
       "login"          -> getLogin
       "passcode"       -> getPasscode
       "destination"    -> getDest
+      "subscription"   -> getSub
       "content-length" -> show . getLength
       "content-type"   -> getMime
       "transaction"    -> getTrans
       "id"             -> getId
+      "ack"            -> ackToVal . getAcknow
       "message-id"     -> getId
       "message"        -> getMsg
       "receipt"        -> getReceipt

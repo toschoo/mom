@@ -44,19 +44,19 @@ dist-clean:	clean
 build: $(tests) $(SUBSRC)
 
 
-$(TDIR)/tframe:		$(TDIR)/tframe.hs
+$(TDIR)/tframe:		$(TDIR)/tframe.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/tparser:	$(TDIR)/tparser.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/tsender2:	$(TDIR)/tsender2.hs
+$(TDIR)/tsender2:	$(TDIR)/tsender2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/ttypes:		$(TDIR)/ttypes.hs
+$(TDIR)/ttypes:		$(TDIR)/ttypes.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/runTests:	$(TDIR)/runTests.hs
+$(TDIR)/runTests:	$(TDIR)/runTests.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 
