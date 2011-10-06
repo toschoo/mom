@@ -181,7 +181,7 @@ where
   handleFrame f = do
     let t = typeOf f 
     if t == Disconnect 
-      then disconnect f 
+      then disconnect 
       else do
         c <- get
         liftIO $ bookFrame (writeSender $ conCfg c) (conId c) f

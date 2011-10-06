@@ -5,6 +5,7 @@ where
 
   import Types
   import Config
+  import Book
   import Sender
 
   import Network.Mom.Stompl.Frame
@@ -251,7 +252,7 @@ where
       Left e -> return $ Fail "Could not make Send Frame"
       Right f -> do
         handleRequest $ FrameMsg cid1 f
-        mbM <- getLastMsg
+        mbM <- getLastMsg q1
         case mbM of
           Nothing -> return $ Fail "No Message inserted"
           Just m  -> do
@@ -261,18 +262,18 @@ where
   -- we need a SubId for 1.1
   testAck :: SubId -> Sender TestResult
   testAck sid = do
-    mbM <- getLastMsg 
+    mbM <- getLastMsg q1
     case mbM of
       Nothing -> return $ Fail "No Message available"
       Just m  -> do
         let m'  = setState cid1 (mkSubId cid1 sid q1) Sent m 
         liftIO $ putStrLn $ "Message: " ++ (show m')
         updMsg q1 m m'
-        case mkAck (strId m) sid of 
+        case mkAck (getMsgId m) sid of 
           Left e  -> return $ Fail "Could not make Ack Frame"
           Right f -> do
             handleRequest $ FrameMsg cid1 f
-            mbM2 <- getLastMsg
+            mbM2 <- getLastMsg q1
             case mbM2 of
               Nothing -> return Pass
               Just n  -> return $ Fail ("Message not acknowledged: " ++ (show n))
@@ -280,7 +281,7 @@ where
   testCumulatedAck :: SubId -> Int -> Sender TestResult
   testCumulatedAck sid exp = do
     b <- get
-    case getQueue q1 $ bookQs b of
+    case getQueue q1 b of
       Nothing -> return $ Fail ("Queue " ++ q1 ++ " not found.")
       Just q  -> do
         let ms  = qMsgs q
@@ -290,7 +291,7 @@ where
             let ms' = map (setState cid1 (mkSubId cid1 sid q1) Sent) ms
             mapM_ (\(m, m') -> updMsg q1 m m') $ zip ms ms'
             let m = (head . tail) ms'
-            case mkAck (strId m) sid of
+            case mkAck (getMsgId m) sid of
               Left e  -> return $ Fail "Could not make Ack Frame"
               Right f -> do
                 handleRequest $ FrameMsg cid1 f
@@ -321,8 +322,8 @@ where
       Left  e -> return $ Fail "Could not make Abort Frame"
       Right f -> do
         handleRequest $ FrameMsg cid1 f
-        txs <- getTxs
-        case getTx tid1 txs of
+        b <- get
+        case getTx tid1 b of
           Nothing -> return Pass
           Just _  -> return $ Fail "Could not abort Transaction"
 
@@ -331,16 +332,16 @@ where
     case mkCommit tid1 of
       Left e  -> return $ Fail "Could not make Commit Frame"
       Right f -> do
-        txs <- getTxs
-        case getTx (mkTxId cid1 tid1) txs of
+        b <- get
+        case getTx (mkTxId cid1 tid1) b of
           Nothing -> return $ Fail ("Transaction " ++ tid1 ++ " not found")
           Just t  -> do
             handleRequest $ FrameMsg cid1 f
-            txs' <- getTxs
-            case getTx tid1 txs' of
+            b' <- get
+            case getTx tid1 b' of
               Just _  -> return $ Fail "Could not commit transaction"
               Nothing -> do
-                mbM <- getLastMsg
+                mbM <- getLastMsg q1
                 case mbM of
                   Nothing -> return $ Fail "Message not sent"
                   Just m  -> return Pass
@@ -362,8 +363,7 @@ where
   checkQueue :: String -> Sender TestResult
   checkQueue n = do
     b <- get
-    let qs = bookQs b
-    case getQueue n qs of
+    case getQueue n b of
       Nothing -> return $ Fail ("Queue " ++ n ++ " not found")
       Just q  -> return Pass
 
@@ -377,7 +377,7 @@ where
   getTxFrames :: Sender [Frame]
   getTxFrames = do
     b <- get
-    case getTx (mkTxId cid1 tid1) $ bookTrans b of
+    case getTx (mkTxId cid1 tid1) b of
       Nothing -> return []
       Just t  -> return $ txFrames t
 
@@ -389,27 +389,27 @@ where
   updMsg :: String -> MsgStore -> MsgStore -> Sender ()
   updMsg n m m' = do
     b <- get
-    case getQueue n $ bookQs b of
+    case getQueue n b of
       Nothing -> do
         liftIO $ putStrLn $ "Queue " ++ n ++ " not found."
         return ()
       Just q -> do
         let q' = q {qMsgs = insert m' $ delete m $ qMsgs q}
-        put b {bookQs = insert q' $ delete q $ bookQs b}
+        put $ addQueue q' $ remQueue q b 
 
-  getLastMsg :: Sender (Maybe MsgStore)
-  getLastMsg = do
+  getLastMsg :: String -> Sender (Maybe MsgStore)
+  getLastMsg qn = do
     b <- get
-    case bookQs b of
-      [] -> return Nothing
-      qs -> case qMsgs $ head qs of
-              [] -> return Nothing
-              ms -> return $ Just $ head ms
+    case getQueue q1 b of
+      Nothing -> return Nothing
+      Just q  -> case qMsgs q of
+                   [] -> return Nothing
+                   ms -> return $ Just $ head ms
 
   countMsgs :: String -> Sender Int
   countMsgs n = do
     b <- get
-    case getQueue n $ bookQs b of
+    case getQueue n b of
       Nothing -> return 0
       Just q  -> return $ length $ qMsgs q
 
@@ -418,7 +418,7 @@ where
     case conPending c of
       [] -> Nothing
       ps -> 
-        case stompAtOnce $ strMsg $ head ps of
+        case stompAtOnce $ getMsgString $ head ps of
          Left  _ -> Nothing
          Right f -> Just f
 

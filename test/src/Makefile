@@ -14,12 +14,13 @@ SUBSRC = $(SUTDIR)/Frame.hs \
          $(SUTDIR)/Parser.hs \
          $(SUTDIR)/Types.hs \
          $(SUTDIR)/Server.hs \
+         $(SUTDIR)/Book.hs \
          $(SUTDIR)/Sender.hs \
          $(SUTDIR)/Session.hs 
 
 
 GHC = ghc
-FLGS = -Wall --make
+FLGS = -DTEST -Wall --make
 INC  = -i./test/src -i./Network/Mom/Stompl
 
 all:
