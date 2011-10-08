@@ -1,8 +1,12 @@
-module Sender {- (
-                            startSender,
-                            registerCon, unRegisterCon,
-                            bookFrame
-                          ) -}
+{-# Language CPP #-}
+module Sender 
+#ifndef TEST
+           (
+             startSender,
+             registerCon, unRegisterCon,
+             bookFrame
+           )
+#endif 
 where
   
   import           Types  
@@ -135,13 +139,24 @@ where
   addMsg :: String -> MsgStore -> Connection -> String -> SendState -> Sender ()
   addMsg n m c sid st = do
     b <- get
-    case getQueue n b of
-      Nothing -> do
-        logS INFO $ "Unknown Queue " ++ n ++
-                    ". Discarding Message."
-      Just q  -> do
-        let q' = addMsgToQ m c sid st q
-        put $ addQueue q' $ remQueue q b 
+    q <- case getQueue n b of
+           Nothing -> do
+             logS INFO $ "New Queue " ++ n 
+             return $ mkQueue n []
+           Just q -> return q
+    let q' = addMsgToQ m c sid st q
+    put $ addQueue q' $ remQueue q b 
+
+  addMsgNoSub :: String -> MsgStore -> Sender ()
+  addMsgNoSub n m = do
+    b <- get
+    q <- case getQueue n b of
+           Nothing -> do
+             logS INFO $ "New Queue " ++ n 
+             return $ mkQueue n []
+           Just q  -> return q
+    let q' = addMsgToQNoSub m q
+    put $ addQueue q' $ remQueue q b
 
   getCount :: Sender Int
   getCount = get >>= \b -> do
@@ -297,9 +312,6 @@ where
   ------------------------------------------------------------------------
   -- Subscribe Frame
   ------------------------------------------------------------------------
-  -- should we ensure unique subscriptions per
-  -- cid / queue or
-  -- cid / id / queue ?
   handleSub :: Int -> F.Frame -> Sender ()
   handleSub cid f = do
     logS DEBUG "Handle Subscription"
@@ -309,9 +321,6 @@ where
       Just _  -> do
         let q  = F.getDest f
         insSub cid (F.getId f) (F.getDest f) (F.getAcknow f)
-        -- logS DEBUG $ show $ bookQs     b
-        -- logS DEBUG $ show $ bookSubs   b
-        -- logS DEBUG $ show $ bookCons   b
 
   ------------------------------------------------------------------------
   -- Unsubscribe Frame
@@ -362,7 +371,13 @@ where
           Nothing -> logS ERROR "Can't convert Send to Message"
           Just m  -> do
             insMsg mid n 
-            mapM_ (\c-> sendFrame n c (F.getTrans f) m) cc
+            if length cc > 0 
+              then
+                mapM_ (\c-> sendFrame n c (F.getTrans f) m) cc
+              else do
+                let mb  = F.putFrame m
+                let ms  = mkStore mb m []
+                addMsgNoSub n ms 
 
   ------------------------------------------------------------------------
   -- Error Frame

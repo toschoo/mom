@@ -2,13 +2,17 @@ import Network.Stomp
 import qualified Data.ByteString.Lazy.Char8 as B
 
 main = do
+  putStrLn "Starting Client!"
   -- connect to a stomp broker
   con <- connect "stomp://guest:guest@127.0.0.1:61613" vers headers
   putStrLn $ "Accepted versions: " ++ show (versions con)
+
+  -- create q 
+  send con "/queue/test" [] (B.pack "init")
   
   -- start consumer and subscribe to the queue
   startConsumer con callback
-  subscribe con "/queue/test" "0" []
+  subscribe con "/queue/test" "1" []
 
   -- send the messages to the queue
   putStrLn $ "content-length: " ++ (show $ B.length $ B.pack "message1")

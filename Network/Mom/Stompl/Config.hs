@@ -1,18 +1,23 @@
-module Config (
-                           Config,
-                           getBroker, getLogger, getSender,
-                           setBroker, setLogger, setSender,
-                           getName, setName, getMName, getSharedName,
-                           getLogFile, getLogLevel, 
-                           setLogFile, setLogLevel, 
-                           readLog, writeLog,
-                           readSender, writeSender,
-                           getHost, getPort, getSocks, getCons, 
-                           getMCons, getSharedCons, setSharedCons,
-                           incCons, decCons,
-                           getMaxRcv, setMaxRcv,
-                           ChangeAction,
-                           mkConfig)
+{-# Language CPP #-}
+module Config
+#ifndef TEST
+             (
+               Config,
+               getBroker, getLogger, getSender,
+               setBroker, setLogger, setSender,
+               getName, setName, getMName, getSharedName,
+               getLogFile, getLogLevel, 
+               setLogFile, setLogLevel, 
+               readLog, writeLog,
+               readSender, writeSender,
+               getHost, getPort, getSocks, getCons, 
+               getMCons, getSharedCons, setSharedCons,
+               incCons, decCons,
+               getMaxRcv, setMaxRcv,
+               ChangeAction,
+               mkConfig
+              )
+#endif
 where
 
   import Types

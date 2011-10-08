@@ -286,10 +286,13 @@ abort con tid hs = sendFrame con (Frame (CC ABORT) hs' BL.empty)
 mkConnection :: ClientCommand -> Host -> PortNumber -> [Header] -> IO Connection
 mkConnection cmd host port hs = do
     con <- newConn host port hs
+    putStrLn "Connected!"
     sendFrame con (Frame (CC cmd) hs BL.empty)
+    putStrLn "Connection Frame sent!"
     (Frame (SC cmd) hs' body) <- receiveFrame con
     when (cmd /= CONNECTED) $
        E.throwIO $ ConnectionError (BL.unpack body) 
+    putStrLn "Connected Frame received!"
     let (sendBeat, recvBeat) = getBeats hs hs'
     return con { recvTimeout = recvBeat 
                , sendTimeout = sendBeat 

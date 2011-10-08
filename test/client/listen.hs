@@ -1,21 +1,25 @@
 import Network.Stomp
 import qualified Data.ByteString.Lazy.Char8 as B
+import System.Environment
+import System.Exit
 
 main = do
+  os <- getArgs
+  case os of 
+    [q] -> listen q
+    _   -> do
+      putStrLn "I need a queue name and only a queue name"
+      exitFailure
+
+listen :: String -> IO ()
+listen q = do
   -- connect to a stomp broker
   con <- connect "stomp://guest:guest@127.0.0.1:61613" vers headers
   putStrLn $ "Accepted versions: " ++ show (versions con)
   
   -- start consumer and subscribe to the queue
   startConsumer con callback
-  startConsumer con callback
-  subscribe con "/queue/test" "0" []
-  subscribe con "/queue/test" "1" []
-
-  -- send the messages to the queue
-  putStrLn $ "content-length: " ++ (show $ B.length $ B.pack "message1")
-  -- send con "/queue/test" [] (B.pack "message1")
-  -- send con "/queue/test" [] (B.pack "message2")
+  subscribe con q "0" []
 
   -- wait
   getLine
@@ -30,7 +34,7 @@ main = do
 callback :: Frame -> IO ()
 callback (Frame (SC MESSAGE) hs body) = do
       putStrLn $ "received message: " ++ (B.unpack body) 
-      putStrLn $ "headers: " ++ show hs
+      -- putStrLn $ "headers: " ++ show hs
 callback (Frame (SC ERROR) hs body) = do
       putStrLn $ "received message: " ++ (B.unpack body) 
       putStrLn $ "headers: " ++ show hs

@@ -50,6 +50,7 @@ where
 
   msgType :: Parser String
   msgType = do
+    skipWhite
     t <- A.takeTill (endAny)
     skipWhite
     terminal

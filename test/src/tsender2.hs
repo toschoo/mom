@@ -25,7 +25,7 @@ where
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
 
-  import Data.List (delete, insert)
+  import Data.List (find, delete, insert)
 
   main :: IO ()
   main = do
@@ -77,35 +77,45 @@ where
 
         t60 = [mkTest "Test Sub  " (testSub   "sub-1" 0 Auto), 
                mkTest "Test Send "  testSend,
-               mkTest "Test UnSub" (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub" (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
+
+        t61 = [mkTest "Test Send "  testSend,
+               mkTest "Test Sub  "  (testSub   "sub-1" 0 Auto),
+               mkTest "Test UnSub"  (testUnSub "sub-1" 0),
+               mkTest "Clear Queue" clearQ]
 
         t70 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
                mkTest "Test Sub       " (testSub   "sub-1" 0 Client),
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testAck "sub-1"),
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t71 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
                mkTest "Test Sub       " (testSub   "sub-1" 0 ClientIndi),
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testAck "sub-1"),
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t72 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
                mkTest "Test Sub       " (testSub   "" 0 ClientIndi),
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testAck ""),
-               mkTest "Test UnSub     " (testUnSub "" 0)]
+               mkTest "Test UnSub     " (testUnSub "" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t73 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
                mkTest "Test Sub       " (testSub   "" 0 Client),
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testAck ""),
-               mkTest "Test UnSub     " (testUnSub "" 0)]
+               mkTest "Test UnSub     " (testUnSub "" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t74 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
@@ -114,7 +124,8 @@ where
                mkTest "Test Send      "  testSend,
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testCumulatedAck "sub-1" 1),
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t75 = [mkTest "Test Disconnect"  testDisconnect,
                mkTest "Test Connect   " (testConnect s),
@@ -123,19 +134,22 @@ where
                mkTest "Test Send      "  testSend,
                mkTest "Test Send      "  testSend,
                mkTest "Test Ack       " (testCumulatedAck "sub-1" 2),
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
 
         t80 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
                mkTest "Test Begin     " testBegin,
                mkTest "Test Send Tx   " testTxSend,
                mkTest "Test Abort     " testAbort,
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
  
         t90 = [mkTest "Test Sub       " (testSub "sub-1" 0 Auto),
                mkTest "Test Begin     " testBegin,
                mkTest "Test Send Tx   " testTxSend,
                mkTest "Test Commit    " testCommit,
-               mkTest "Test UnSub     " (testUnSub "sub-1" 0)]
+               mkTest "Test UnSub     " (testUnSub "sub-1" 0),
+               mkTest "Clear Queue    " clearQ]
 
     in  mkMetaGroup 
                  "Sender Tests" (Stop (Fail ""))
@@ -146,6 +160,7 @@ where
                   mkGroup "Multiple Sub/Unsub without Id"         (Stop $ Fail "") t50,
                   mkGroup "Multiple Sub/Unsub with    Id"         (Stop $ Fail "") t51,
                   mkGroup "Send"                                  (Stop $ Fail "") t60,
+                  mkGroup "First Send then Sub"                   (Stop $ Fail "") t61,
                   mkGroup "Send in Client Mode with Ack"          (Stop $ Fail "") t70,
                   mkGroup "Send in ClientIndi Mode with Ack"      (Stop $ Fail "") t71,
                   mkGroup "Send in Client Mode without SubId"     (Stop $ Fail "") t72,
@@ -237,13 +252,23 @@ where
         case bookSubs b of
           [] -> do
             if l == 0 
-             then do
-               t <- checkQueue q1
-               return $ neg t
-             else return $ Fail "Could not unsubscribe"
+             then 
+               if null sid then return Pass
+                 else do
+                   t <- checkSubInQ q1 sid
+                   case t of
+                     Pass   -> return $ Fail "Sub still in Queue!"
+                     Fail _ -> return Pass
+             else return $ Fail "No Subscriptions left"
           s  -> do
             if length s == l
-              then checkQueue q1
+              then if null sid 
+                     then return Pass
+                     else do
+                       t <- checkSubInQ q1 sid
+                       case t of
+                         Pass   -> return $ Fail "Sub still in Queue!"
+                         Fail _ -> return Pass
               else return $ Fail "Could not unsubscribe"
 
   testSend :: Sender TestResult
@@ -298,10 +323,15 @@ where
                 n <- countMsgs q1
                 if n == exp 
                   then return Pass
-                  else return $ Fail $ 
-                                  "Number of Messages does not match - " ++
-                                  "Expected: " ++ (show exp) ++ 
-                                  ", Real: " ++ (show n)
+                  else do
+                    b' <- get
+                    case getQueue q1 b' of
+                      Nothing -> return $ Fail ("Queue " ++ q1 ++ " disappeared.")
+                      Just q' -> 
+                        return $ Fail $ 
+                                 "Number of Messages does not match - " ++
+                                 "Expected: " ++ (show exp) ++ 
+                                 ", Real: " ++ (show n) ++ "\n" ++ (show q')
 
   testBegin :: Sender TestResult
   testBegin = do
@@ -367,12 +397,28 @@ where
       Nothing -> return $ Fail ("Queue " ++ n ++ " not found")
       Just q  -> return Pass
 
+  checkSubInQ :: String -> SubId -> Sender TestResult 
+  checkSubInQ n sid = do
+    b <- get
+    case getQueue n b of
+      Nothing -> return $ Fail ("Queue " ++ n ++ " not found")
+      Just q  -> case find (== sid) $ qSubs q of
+                   Nothing -> return $ Fail (
+                                "Sub " ++ sid ++ " not in Queue " ++ n)
+                   Just _  -> return Pass
+
   clearTx :: Sender ()
   clearTx = do
     b <- get
     case bookTrans b of
       [] -> return ()
       ts -> put b {bookTrans = []}
+
+  clearQ :: Sender TestResult
+  clearQ = do
+    b <- get
+    put b {bookQs = []}
+    return Pass
 
   getTxFrames :: Sender [Frame]
   getTxFrames = do
@@ -394,7 +440,7 @@ where
         liftIO $ putStrLn $ "Queue " ++ n ++ " not found."
         return ()
       Just q -> do
-        let q' = q {qMsgs = insert m' $ delete m $ qMsgs q}
+        let q' = q {qMsgs = subMsg m m' $ qMsgs q}
         put $ addQueue q' $ remQueue q b 
 
   getLastMsg :: String -> Sender (Maybe MsgStore)

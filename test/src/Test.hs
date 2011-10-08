@@ -12,7 +12,6 @@ where
   import Data.List (foldl')
 
   data TestResult = Fail String | Pass
-    deriving (Show)
 
   instance Eq TestResult where
     t1 == t2 = case t1 of
@@ -22,6 +21,10 @@ where
                  _    -> case t2 of
                            Pass -> False
                            _    -> True
+
+  instance Show TestResult where
+    show  Pass    = "Pass"
+    show (Fail s) = "Fail: " ++ s
 
   data Stop = Stop {stopOn :: TestResult}
             | End

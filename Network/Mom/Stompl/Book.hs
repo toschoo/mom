@@ -1,40 +1,52 @@
 {-# Language CPP #-}
 module Book ( 
+         -- * Book 
          Book,
-         Connection, Queue, 
-         Subscription, Transaction, MsgStore,
-         SendState(..), PndMsg,
          mkBook,
          bookCfg, bookLog, 
          countBook,
-         SubId, TxId, 
-         eqTx, getTx, mkTx, insertTrn, addTx, remTx,
-         mkTxId, parseTrn, addTxFrame, txFrames,
-         mkSubId, parseSubId,
+         -- * Connection
+         Connection, 
+         eqCon, mkCon, getCon,
+         addPndToCon, pndOnCon, getSock,
+         addCon, remCon, getConId,
+         updSockState, sockUp,
+         -- * Queue
+         Queue, 
          eqQueue, mkQueue, getQueue,
          qMsgs, addQueue, remQueue,
          getMsgFromQ,
          addMsgToQ, msgFilter,
+         addMsgToQNoSub,
          addSubToQ, remSubFromQ,
+         -- * Subscription
+         Subscription,
+         SubId, 
+         mkSubId, parseSubId,
          addSub, remSub, remSubs,
          eqSub, getSub, mkSub,
+         getQueueFromSub,
+         getSubscribers, getSubsOfCon,
+         getSubId, getSubConId,
+         getSubById, getModeOfSub, getQofSub,
+         -- * Transaction
+         Transaction,
+         TxId, 
+         eqTx, getTx, mkTx, insertTrn, addTx, remTx,
+         mkTxId, parseTrn, addTxFrame, txFrames,
+         -- * MsgStore
+         MsgStore,
+         SendState(..), PndMsg,
          eqStore, getStoreFromQ,
-         getQofSub, getQofMsg,
+         getQofMsg,
          addBookMsg, remBookMsg,
          getMsgId, getMsgString,
          remMsg, setSent, mkStore,
-         updMsgPnd,
-         setState, getQueueFromSub,
-         getSubscribers, getSubsOfCon,
-         getSubId, getSubConId,
-         getSubById, getConId, getModeOfSub,
-         addPndToCon, pndOnCon, getSock,
-         addCon, remCon,
-         updSockState, sockUp,
-         eqCon, mkCon, getCon
+         updMsgPnd, setState, subMsg
 #ifdef TEST
          , bookCons, bookTrans, bookQs, bookSubs,
-         conPending
+         conPending, qSubs, MsgStore(..),
+         mkPnd
 #endif
          )
 
@@ -45,7 +57,7 @@ where
 
   import qualified Network.Mom.Stompl.Frame as F
 
-  import           Data.List  (insert, delete, find)
+  import           Data.List  (insert, delete, find, findIndex)
   import           Data.Maybe (catMaybes)
   import qualified Data.ByteString           as B
   import qualified Network.Socket            as S
@@ -116,7 +128,7 @@ where
   remTx :: Transaction -> Book -> Book
   remTx tx b = b {bookTrans = delete tx $ bookTrans b}
 
-  mkTx :: Int -> TxId -> [F.Frame] -> Transaction
+  mkTx :: Int -> String -> [F.Frame] -> Transaction
   mkTx cid tid fs = Tx {
                       txId     = mkTxId cid tid,
                       txExt    = tid,
@@ -149,9 +161,21 @@ where
   ------------------------------------------------------------------------
   -- Queue 
   ------------------------------------------------------------------------
+  data Pattern = PtoP | NtoM
+    deriving (Show) 
+
+  patternFromName :: String -> Pattern
+  patternFromName qn = 
+    let pre = takeWhile (/= '/') qn
+        qs  = ["Q", "QUEUE"]
+    in case find (== F.upString pre) qs of
+         Nothing -> NtoM
+         Just _  -> PtoP
+
   data Queue = Queue {
                  qName :: String,
-                 qMsgs :: [MsgStore],
+                 qType :: Pattern,
+                 qMsgs :: [MsgStore], -- List of References?
                  qSubs :: [SubId]
                }
     deriving (Show)
@@ -180,6 +204,7 @@ where
   mkQueue :: String -> [SubId] -> Queue
   mkQueue n subs = Queue {
                      qName = n,
+                     qType = patternFromName n,
                      qSubs = subs,
                      qMsgs = []}
 
@@ -192,7 +217,19 @@ where
            in  q {qMsgs = m' : qMsgs q}
          Just mx -> 
            let mx' = mx {strPending = (cid, mkPnd sid st) : strPending mx}
-           in  q  {qMsgs = insert mx' $ delete mx $ qMsgs q}
+           in  q  {qMsgs = subMsg mx mx' $ qMsgs q}
+
+  addMsgToQNoSub :: MsgStore -> Queue -> Queue
+  addMsgToQNoSub m q = q {qMsgs = m : qMsgs q}
+
+  addSubToMsg :: Int -> SubId -> Queue -> Queue
+  addSubToMsg cid sid q =
+    let ms  = qMsgs q
+        ms' = map (addPnd cid sid) ms
+    in q {qMsgs = ms'}
+ 
+  addPnd :: Int -> SubId -> MsgStore -> MsgStore
+  addPnd cid sid m = m {strPending = (cid, mkPnd sid Pending) : strPending m}
 
   msgFilter :: Int -> SubId -> SendState -> [MsgStore] -> [MsgStore]
   msgFilter cid sid st ms = 
@@ -205,8 +242,8 @@ where
           findSub   s x = (getPndSub   . snd) x == s
           findState s x = (getPndState . snd) x == s
           findMsg f x   = case find f $ strPending x of
-                          Nothing -> Nothing
-                          Just _  -> Just x
+                            Nothing -> Nothing
+                            Just _  -> Just x
           filterM f     = catMaybes . foldr (\x y -> findMsg f x : y) [] 
           filCon  c xs  = filterM (findCon c) xs
           filSub  s xs  = filterM (findSub s) xs
@@ -219,7 +256,7 @@ where
         subs = insert s $ bookSubs b
         qs   = case getQueue n b of
                   Nothing -> insert (mkQueue n [sid]) $ bookQs b
-                  Just _  -> addSubToQ sid n $ bookQs b
+                  Just _  -> addSubToQ s n $ bookQs b
     in b {bookSubs = subs, 
           bookQs   = qs}
 
@@ -234,13 +271,15 @@ where
   remSubs sid b = b {bookSubs = filSubs b}
     where filSubs = filter (not . eqSub sid) . bookSubs
 
-  addSubToQ :: SubId -> String -> [Queue] -> [Queue]
-  addSubToQ sid n qs =
+  addSubToQ :: Subscription -> String -> [Queue] -> [Queue]
+  addSubToQ s n qs = 
     case find (eqQueue n) qs of
       Nothing -> qs
       Just q  -> 
-        let q' = q {qSubs = insert sid $ qSubs q} 
+        let q' = addSubToMsg cid sid $ q {qSubs = insert sid $ qSubs q} 
         in  (insert q' . delete q) qs
+    where sid = subId  s
+          cid = subCid s
 
   remSubFromQ :: SubId -> String -> [Queue] -> [Queue]
   remSubFromQ sid n qs = 
@@ -250,9 +289,7 @@ where
                    Nothing -> qs
                    Just s  -> 
                      let q' = q {qSubs = delete s $ qSubs q}
-                     in if null $ qSubs q' 
-                        then delete q qs
-                        else (insert q' . delete q) qs
+                     in  insert q' $ delete q qs
 
   getQofMsg :: String -> Book -> Maybe String
   getQofMsg mid b = lookup mid $ bookMsgs b
@@ -273,7 +310,7 @@ where
                         subId    :: SubId, -- = ConId ++ extId ++ Queue
                         subExt   :: String,
                         subCid   :: Int,
-                        subQueue :: String,
+                        subQueue :: String,  -- Reference?
                         subMode  :: F.AckMode
                       }
     deriving (Show)
@@ -363,7 +400,8 @@ where
   data MsgStore = MsgStore {
                     strId      :: String,
                     strMsg     :: B.ByteString,
-                    strPending :: [(Int, PndMsg)]}
+                    strPending :: [(Int, PndMsg)],
+                    strOld     :: Bool}
     deriving (Show)
 
   instance Eq MsgStore where
@@ -381,7 +419,8 @@ where
                                     F.Message -> F.getId f
                                     _         -> "",
                      strMsg     = m,
-                     strPending = []}
+                     strPending = [],
+                     strOld     = False}
 
   getMsgId :: MsgStore -> String
   getMsgId = strId
@@ -421,7 +460,7 @@ where
   setSent :: SendState -> Int -> SubId -> MsgStore -> Queue -> Queue
   setSent st cid sid m q = 
     let m' = m {strPending = (cid, mkPnd sid Sent) : (delete (cid, mkPnd sid st) $ strPending m)}
-    in  q {qMsgs = insert m' $ delete m $ qMsgs q}
+    in  q {qMsgs = subMsg m m' $ qMsgs q}
 
   remMsg :: SendState -> Int -> SubId -> MsgStore -> Queue -> Queue
   remMsg st cid sid m q = 
@@ -429,7 +468,13 @@ where
         q' = q {qMsgs = delete m $ qMsgs q}
     in if null $ strPending m'
          then q' 
-         else q' {qMsgs = insert m' $ delete m $ qMsgs q}
+         else q' {qMsgs = subMsg m m' $ qMsgs q}
+
+  subMsg :: MsgStore -> MsgStore -> [MsgStore] -> [MsgStore]
+  subMsg m m' ms = 
+    case findIndex (\x -> strId x == strId m) ms of
+      Nothing -> ms
+      Just i  -> take i ms ++ [m'] ++ drop (i+1) ms 
 
   getStoreFromQ :: String -> Queue -> Maybe MsgStore
   getStoreFromQ mid q = find (\m -> strId m == mid) $ qMsgs q 
