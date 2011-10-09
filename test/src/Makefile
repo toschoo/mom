@@ -47,6 +47,10 @@ dist-clean:	clean
 		rm -f $(SUTDIR)/stompl
 		rm -f $(SUTDIR)/$(CLIENT)/*.hi
 		rm -f $(SUTDIR)/$(CLIENT)/*.o
+		rm -f test/bin/*.o
+		rm -f test/bin/*.hi
+		rm -f test/client/*.o
+		rm -f test/client/*.hi
 
 build: $(tests) $(SUBSRC)
 

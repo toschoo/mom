@@ -198,6 +198,7 @@ where
                  }
                | MsgFrame {
                    frmHdrs  :: [Header],
+                   frmSub   :: String,
                    frmDest  :: String,
                    frmId    :: String,
                    frmLen   :: Int,
@@ -265,7 +266,7 @@ where
               (CmtFrame  _             ) -> Commit
               (AbrtFrame _             ) -> Abort
               (AckFrame  _ _ _         ) -> Ack
-              (MsgFrame  _ _ _ _ _ _   ) -> Message
+              (MsgFrame  _ _ _ _ _ _ _ ) -> Message
               (RecFrame  _             ) -> Receipt
               (ErrFrame  _ _ _ _       ) -> Error
 
@@ -388,7 +389,7 @@ where
               CmtFrame  _             -> "COMMIT"
               AbrtFrame _             -> "ABORT"
               AckFrame  _ _ _         -> "ACK"
-              MsgFrame  _ _ _ _ _ _   -> "MESSAGE"
+              MsgFrame  _ _ _ _ _ _ _ -> "MESSAGE"
               RecFrame  _             -> "RECEIPT"
               ErrFrame  _ _ _ _       -> "ERROR"
     in B.pack (s ++ "\n")
@@ -435,7 +436,7 @@ where
     let ih = if null i then [] else [mkIdHdr i]
         sh = if null s then [] else [mkSubHdr s]
     in mkTrnHdr t : (ih ++ sh)
-  toHeaders (MsgFrame h _ _ _ _ _)  = h
+  toHeaders (MsgFrame h _ _ _ _ _ _)  = h
   toHeaders (RecFrame  r) = [mkRecHdr r]
   toHeaders (ErrFrame m l t _) = 
     let mh = if null m then [] else [mkMsgHdr m]
@@ -448,7 +449,7 @@ where
     case f of 
       SndFrame _ _ _ _ _ _ b -> b |> '\x00'
       ErrFrame _ _ _       b -> b |> '\x00'
-      MsgFrame _ _ _ _ _   b -> b |> '\x00'
+      MsgFrame _ _ _ _ _ _ b -> b |> '\x00'
       _                    -> B.pack "\x00"
 
   mkConFrame :: [Header] -> Either String Frame
@@ -577,6 +578,9 @@ where
                      Right $ MsgFrame {
                                frmHdrs = hs,
                                frmDest = d,
+                               frmSub  = case lookup hdrSub hs of
+                                           Nothing -> ""
+                                           Just s  -> s,
                                frmId   = i, 
                                frmLen  = l,
                                frmMime = case lookup hdrMime hs of
@@ -631,6 +635,7 @@ where
                      Just MsgFrame {
                                frmHdrs = frmHdrs f,
                                frmDest = frmDest f,
+                               frmSub  = "",
                                frmLen  = frmLen  f,
                                frmMime = frmMime f,
                                frmId   = i,

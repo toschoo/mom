@@ -11,6 +11,9 @@ where
   import           Control.Concurrent
   import           Control.Applicative ((<$>))
 
+  defVersion :: F.Version
+  defVersion = (1,0)
+
   data Connection = Connection {
                        conAddr :: String,
                        conPort :: Int,
@@ -40,12 +43,28 @@ where
                         subName :: String,
                         subMode :: F.AckMode}
 
-  data Message = Msg {
-                   msgId   :: String,
-                   msgType :: String,
-                   msgLen  :: Int,
-                   msgTx   :: String,
-                   msgBody :: B.ByteString}
+  mkSub :: String -> String -> F.AckMode -> Subscription
+  mkSub sid qn am = Sub {
+                      subId   = sid,
+                      subName = qn,
+                      subMode = am}
+
+  data Message a = Msg {
+                     msgId   :: String,
+                     msgType :: String,
+                     msgLen  :: Int,
+                     msgTx   :: String,
+                     msgRaw  :: B.ByteString,
+                     msgCont :: a}
+  
+  mkMessage :: String -> String -> Int -> String -> B.ByteString -> a -> Message a
+  mkMessage mid typ len tx raw cont = Msg {
+                                        msgId   = mid,
+                                        msgType = typ,
+                                        msgLen  = len,
+                                        msgTx   = tx,
+                                        msgRaw  = raw,
+                                        msgCont = cont}
 
   mkConnection :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> Connection
   mkConnection host port mx usr pwd vers beat = 
@@ -94,6 +113,11 @@ where
   ok :: Connection -> Bool
   ok c = 0 == conErr c 
 
+  getVersion :: Connection -> F.Version
+  getVersion c = if null (conVers c) 
+                   then defVersion
+                   else head $ conVers c
+
   getReceipt :: Connection -> String
   getReceipt _ = "rc-1"
 
@@ -140,7 +164,7 @@ where
   unsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO Connection
   unsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
 
-  send :: Connection -> String -> Message -> String -> [F.Header] -> IO Connection
+  send :: Connection -> String -> Message a -> String -> [F.Header] -> IO Connection
   send c q msg receipt hs = sendFrame c msg receipt ([F.mkDestHdr q] ++ hs) mkSendF
 
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
@@ -197,8 +221,9 @@ where
            case eiC of
              Left e  -> return c {conErrM = e}
              Right r -> do
-               return $ handleConnected r
+               let c' = handleConnected r
                           c {conRcv = Just rc, conWrt = Just wr} 
+               return c'
 
   startListener :: Connection -> IO ()
   startListener c = undefined
@@ -249,9 +274,9 @@ where
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
-  mkSendF :: Message -> String -> [F.Header] -> Either String F.Frame
+  mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
     let th = if null $ msgTx msg then [] else [F.mkTrnHdr $ msgTx msg]
     in  F.mkSndFrame ([F.mkMimeHdr $ msgType msg] ++ th ++ hs)
                      (msgLen msg)
-                     (msgBody msg)
+                     (msgRaw msg)
