@@ -3,6 +3,7 @@ where
 
   import qualified Socket as S
   import qualified Network.Mom.Stompl.Frame as F
+  import           Network.Mom.Stompl.Exception
   import           Network.Socket (Socket)
 
   import qualified Data.ByteString.Char8 as B
@@ -10,6 +11,7 @@ where
 
   import           Control.Concurrent
   import           Control.Applicative ((<$>))
+  import           Control.Exception (throwIO)
 
   defVersion :: F.Version
   defVersion = (1,0)
@@ -111,7 +113,8 @@ where
   getErr = conErrM
 
   ok :: Connection -> Bool
-  ok c = 0 == conErr c 
+  ok c = (0 == conErr c) &&
+         (null $ conErrM c)
 
   getVersion :: Connection -> F.Version
   getVersion c = if null (conVers c) 
@@ -124,61 +127,55 @@ where
   connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
   connect host port mx usr pwd vers beat = do
     let c = mkConnection host port mx usr pwd vers beat
-    eiS <- S.connect host port
-    case eiS of
-      Left  e -> return $ c {conErrM = e}
-      Right s -> connectBroker mx vers beat 
-                               c {conSock = Just s, conTcp = True}
+    s <- S.connect host port
+    connectBroker mx vers beat c {conSock = Just s, conTcp = True}
 
   disconnect :: Connection -> String -> IO Connection
   disconnect c receipt = 
     if not $ connected c 
       then return c {conErrM = "Not connected!"}
       else 
-        case mkDiscF receipt of
-          Left  e -> return c {conErrM = "Cannot create Frame: " ++ e}
-          Right f -> do
-            eiR <- S.send (getWr c) (getSock c) f
-            case eiR of
-              Left e  -> return c {conErrM = "Cannot send Frame: " ++ e}
-              Right _ -> disc receipt c
+        if conBrk c
+          then case mkDiscF receipt of
+                 Left  e -> return c {conErrM = "Cannot create Frame: " ++ e}
+                 Right f -> do
+                   r <- S.send (getWr c) (getSock c) f 
+                   disc receipt c
+        else disc "" c
 
-  begin :: Connection -> Transaction -> String -> IO Connection
+  begin :: Connection -> Transaction -> String -> IO ()
   begin c tx receipt = undefined
 
-  commit :: Connection -> Transaction -> String -> IO Connection
+  commit :: Connection -> Transaction -> String -> IO ()
   commit c tx receipt = undefined
 
-  abort :: Connection -> Transaction -> String -> IO Connection
+  abort :: Connection -> Transaction -> String -> IO ()
   abort c tx receipt = undefined
 
-  ack :: Connection -> String -> String -> IO Connection
+  ack :: Connection -> String -> String -> IO ()
   ack c mid receipt = undefined
 
-  nack :: Connection -> String -> String -> IO Connection
+  nack :: Connection -> String -> String -> IO ()
   nack c mid receipt = undefined
 
-  subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO Connection
+  subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   subscribe c sub receipt hs = sendFrame c sub receipt hs mkSubF
 
-  unsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO Connection
+  unsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   unsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
 
-  send :: Connection -> String -> Message a -> String -> [F.Header] -> IO Connection
-  send c q msg receipt hs = sendFrame c msg receipt ([F.mkDestHdr q] ++ hs) mkSendF
+  send :: Connection -> String -> Message a -> String -> [F.Header] -> IO ()
+  send c q msg receipt hs = 
+    sendFrame c msg receipt ([F.mkDestHdr q] ++ hs) mkSendF
 
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
-               (a -> String -> [F.Header] -> Either String F.Frame) -> 
-               IO Connection
+               (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
   sendFrame c m receipt hs mkF = 
-    if not $ connected c then return c {conErrM = "Not connected!"}
+    if not $ connected c then throwIO $ ConnectException "Not connected!"
       else case mkF m receipt hs of
-             Left e  -> return c {conErrM = e}
-             Right f -> do
-               eiR <- S.send (getWr c) (getSock c) f
-               case eiR of
-                 Left e  -> return c {conErrM = e}
-                 Right _ -> return c
+             Left e  -> throwIO $ ProtocolException $
+                          "Cannot create Frame: " ++ e
+             Right f -> S.send (getWr c) (getSock c) f
 
   disc :: String -> Connection -> IO Connection
   disc receipt c = do
@@ -193,16 +190,16 @@ where
         return c'
       else do
         eiC <- S.receive (getRc c) (getSock c) (conMax c)
+        S.disconnect (getSock c)
         case eiC of
-          Left  e -> return c' {conErrM = "Cannot disconnect: " ++ e}
+          Left  e -> do
+            return c' {conErrM = "Cannot disconnect from Broker: " ++ e}
           Right f ->
             case F.typeOf f of
-              F.Receipt -> do
-                let c2 = if receipt == F.getReceipt f
+              F.Receipt -> 
+                return $ if receipt == F.getReceipt f
                             then c'
                             else c' {conErrM = "Wrong receipt: " ++ F.getReceipt f}
-                S.disconnect (getSock c)
-                return c2
               F.Error     -> return c' {conErrM = errToMsg f}
               _           -> return c' {conErrM = "Unexpected Frame: " ++ (U.toString $ F.putCommand f)}
 
@@ -213,8 +210,9 @@ where
       Right f -> do
         rc <- S.initReceiver
         wr <- S.initWriter
-        eiN <- S.send wr (getSock c) f
-        case eiN of
+        eiR <- catch (S.send wr (getSock c) f >> (return $ Right c))
+                     (\e -> return $ Left $ show e)
+        case eiR of
           Left  e -> return c {conErrM = e}
           Right _ -> do
            eiC <- S.receive rc (getSock c) mx 

@@ -2,6 +2,7 @@
 module Network.Mom.Stompl.Client.Queue (
                    Queue, Qopt(..), Converter(..),
                    withConnection, 
+                   withConnection_, 
                    newQueue, readQ, writeQ)
 where
 
@@ -10,6 +11,7 @@ where
   import           Factory  
 
   import qualified Network.Mom.Stompl.Frame as F
+  import           Network.Mom.Stompl.Exception 
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
@@ -17,7 +19,7 @@ where
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
   import           Control.Monad
-  import           Control.Exception hiding (catch)
+  import           Control.Exception (finally, throwIO)
   import           Data.Typeable (Typeable)
 
   import           System.IO.Unsafe
@@ -34,6 +36,12 @@ where
   addCon :: ConEntry -> IO ()
   addCon c = modifyMVar_ con $ \cs -> return (c:cs)
 
+  -- locking needed
+  -- two threads may change 
+  -- the same connection:
+  -- readCon (for read access only)
+  -- coCon   (locks   -> takeMVar)
+  -- ciCon   (unlocks -> putMVar)
   getCon :: Con -> IO (Maybe P.Connection)
   getCon cid = do
     cs <- takeMVar con
@@ -86,60 +94,53 @@ where
   vers :: [F.Version]
   vers = [(1,0), (1,1)]
 
-  data QueueExc = WriteOnRecvExc | ConvertExc String | ConnectExc | SendExc String
-    deriving (Show, Typeable)
-
-  instance Exception QueueExc
+  withConnection_ :: String -> Int -> Int -> String -> String -> F.Heart -> 
+                     (Con -> IO ()) -> IO ()
+  withConnection_ host port mx usr pwd beat act = do
+    _ <- withConnection host port mx usr pwd beat act
+    return ()
 
   withConnection :: String -> Int -> Int -> String -> String -> F.Heart -> 
-                    (Con -> IO (Either String a)) -> IO (Either String a)
+                    (Con -> IO a) -> IO a
   withConnection host port mx usr pwd beat act = do
-    eiCid <- catch (Right <$> mkUniqueConId)
-                   (\e -> return $ Left $ show e)
-    case eiCid of
-      Left  e   -> return $ Left e
-      Right cid -> do
-        c <- P.connect host port mx usr pwd vers beat
-        if not $ P.connected c 
-          then return $ Left $ P.getErr c
-          else do
-            addCon (cid, c) -- catch!
-            eiT <- catch (Right <$> (forkIO $ listen cid))
-                         (\e -> return $ Left $ show e)
-            r <- case eiT of
-                   Left e  -> return $ Left e
-                   Right _ -> catch (act cid)
-                              (\e -> return $ Left $ show e)
-            c' <- P.disconnect c ""
-            rmCon (cid, c)
-            return r
-            -- sub and dest?
-            -- all subs and dests have to be added to Connection
-            -- and removed on rmCon
-            -- By the way: Dest needs a Connection-Prefix to
-            --             distinguish qs that by chance have
-            --             the same name in different connections!
+    cid <- mkUniqueConId
+    c   <- P.connect host port mx usr pwd vers beat
+    if not $ P.connected c 
+      then throwIO $ ConnectException $ P.getErr c
+      else finally (do addCon (cid, c)
+                       _ <- forkIO $ listen cid
+                       act cid)
+                   (do c' <- P.disconnect c ""
+                       rmCon (cid, c))
+                -- sub and dest?
+                -- all subs and dests have to be added to Connection
+                -- and removed on rmCon
+                -- By the way: Dest needs a Connection-Prefix to
+                --             distinguish qs that by chance have
+                --             the same name in different connections!
 
   data Queue a = SendQ {
                    qCon  :: Con,
                    qDest :: String,
+                   qName :: String,
                    qRec  :: Bool,
                    qWait :: Bool,
-                   qTo   :: a -> IO (Either String B.ByteString)}
+                   qTo   :: a -> IO B.ByteString}
                | RecvQ {
                    qCon  :: Con,
                    qSub  :: Sub,
                    qDest :: String,
+                   qName :: String,
                    qMode :: F.AckMode,
                    qAuto :: Bool, -- library creates Ack
-                   qFrom :: B.ByteString -> IO (Either String a)}
+                   qFrom :: B.ByteString -> IO a}
 
   data QType = SendQT | RecvQT
     deriving (Eq)
 
   typeOf :: Queue a -> QType
-  typeOf (SendQ _ _ _ _ _  ) = SendQT
-  typeOf (RecvQ _ _ _ _ _ _) = RecvQT
+  typeOf (SendQ _ _ _ _ _ _  ) = SendQT
+  typeOf (RecvQ _ _ _ _ _ _ _) = RecvQT
 
   data Qopt = OSend | OReceive | OWithReceipt | OWaitReceipt | OMode F.AckMode | OAck
     deriving (Show, Read, Eq) 
@@ -157,65 +158,67 @@ where
                        OMode m -> True
                        _       -> False
 
-  data Converter a = OutBound (a -> IO (Either String B.ByteString))
-                    | InBound (B.ByteString -> IO (Either String a))
+  data Converter a = OutBound (a -> IO B.ByteString)
+                    | InBound (B.ByteString -> IO a)
 
-  newQueue :: Con -> String -> [Qopt] -> [F.Header] -> 
-              Converter a -> IO (Either String (Queue a))
-  newQueue cid qn os hs conv = do
+  newQueue :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+              Converter a -> IO (Queue a)
+  newQueue cid qn dst os hs conv = do
     mbC <- getCon cid
     case mbC of
-      Nothing -> return $ Left $ "Unknown connection"
+      Nothing -> throwIO $ ConnectException "Unknown connection"
       Just c  -> 
         if not $ P.connected c
-          then return $ Left "Not connected"
+          then throwIO $ ConnectException $ 
+                 "Not connected (" ++ (show cid) ++ ")"
           else 
             if hasOpt OSend os 
               then 
                 case conv of
-                  (OutBound f) -> newSendQ cid c qn os f
-                  _            -> return $ Left $ 
-                                       "InBound Converter for SendQ"
+                  (OutBound f) -> newSendQ cid c qn dst os f
+                  _            -> throwIO $ QueueException $
+                                    "InBound Converter for SendQ (" ++ 
+                                    (show qn) ++ ")"
               else 
                 if hasOpt OReceive os
                   then 
                     case conv of
-                      (InBound f) -> newRecvQ cid c qn os hs f
-                      _           -> return $ Left $ 
-                                       "OutBound Converter for RecvQ"
-                  else return $ Left "No direction indicated"
+                      (InBound f) -> newRecvQ cid c qn dst os hs f
+                      _           -> throwIO $ QueueException $ 
+                                       "OutBound Converter for RecvQ (" ++
+                                          (show qn) ++ ")"
+                  else throwIO $ QueueException $
+                         "No direction indicated (" ++ (show qn) ++ ")"
 
-  newSendQ :: Con -> P.Connection -> String -> [Qopt] -> 
-              (a -> IO (Either String B.ByteString))  -> 
-              IO (Either String (Queue a))
-  newSendQ cid c qn os conv = 
-    return $ Right SendQ {
-                    qCon  = cid,
-                    qDest = qn,
-                    qRec  = if hasOpt OWithReceipt os then True else False,
-                    qWait = if hasOpt OWaitReceipt os then True else False,
-                    qTo   = conv}
+  newSendQ :: Con -> P.Connection -> String -> String -> [Qopt] -> 
+              (a -> IO B.ByteString)  -> IO (Queue a)
+  newSendQ cid c qn dst os conv = 
+    return SendQ {
+              qCon  = cid,
+              qDest = dst,
+              qName = qn,
+              qRec  = if hasOpt OWithReceipt os then True else False,
+              qWait = if hasOpt OWaitReceipt os then True else False,
+              qTo   = conv}
 
-  newRecvQ :: Con -> P.Connection -> String -> [Qopt] -> [F.Header] ->
-              (B.ByteString -> IO (Either String a))  -> 
-              IO (Either String (Queue a))
-  newRecvQ cid c qn os hs conv = do
+  newRecvQ :: Con -> P.Connection -> String -> String -> 
+              [Qopt] -> [F.Header] ->
+              (B.ByteString -> IO a)  -> IO (Queue a)
+  newRecvQ cid c qn dst os hs conv = do
     let am = ackMode os
     sid <- mkUniqueSubId
-    c'  <- P.subscribe c (P.mkSub (show sid) qn am) "" hs
-    if not $ P.ok c'
-      then return $ Left $ P.getErr c'
-      else do
-        ch <- newChan 
-        addDest (qn,  ch)
-        addSub  (sid, ch)
-        return $ Right $ RecvQ {
-                           qCon  = cid,
-                           qSub  = sid,
-                           qDest = qn,
-                           qMode = am,
-                           qAuto = False,
-                           qFrom = conv}
+    P.subscribe c (P.mkSub (show sid) dst am) "" hs
+    ch <- newChan 
+    addDest (dst,  ch)
+    addSub  (sid, ch)
+    return $ RecvQ {
+               qCon  = cid,
+               qSub  = sid,
+               qDest = dst,
+               qName = qn,
+               qMode = am,
+               qAuto = False,
+               qFrom = conv}
 
   readQ :: Queue a -> IO (Either String (P.Message a))
   readQ q | typeOf q == SendQT = return $ Left "Read on a SendQ!"
@@ -237,32 +240,30 @@ where
                   Right m -> return $ Right m
 
   writeQ :: Queue a -> String -> [F.Header] -> a -> IO ()
-  writeQ q mime hs x | typeOf q == RecvQT = throw WriteOnRecvExc
+  writeQ q mime hs x | typeOf q == RecvQT = 
+                         throwIO $ QueueException $
+                           "Write with RecvQ (" ++ (qName q) ++ ")"
                      | otherwise = do
     mbC <- getCon (qCon q)
     case mbC of
-      Nothing -> throw ConnectExc 
+      Nothing -> throwIO $ ConnectException $ 
+                   "Unknown Connection in Queue (" ++ 
+                   (show $ qName q) ++ ")"
       Just c  -> 
         if not $ P.connected c
-          then throw ConnectExc
+          then throwIO $ ConnectException $
+                 "Not connected (" ++ (show $ qCon q) ++ ")"
           else do
             let conv = qTo q
-            eiS <- catch (conv x)
-                         (\e -> return $ Left $ show e)
-            case eiS of
-              Left  e  -> throw $ ConvertExc e
-              Right s -> do
-                let m = P.mkMessage "" mime (B.length s) "" s x
-                c' <- P.send c (qDest q) m "" hs
-                if not $ P.ok c' 
-                  then throw $ SendExc $ P.getErr c'
-                  else return ()
+            s <- conv x
+            let m = P.mkMessage "" mime (B.length s) "" s x
+            P.send c (qDest q) m "" hs 
 
   frmToMsg :: Queue a -> F.Frame -> IO (Either String (P.Message a))
   frmToMsg q f = do
     let b = F.getBody f
     let conv = qFrom q
-    eiX <- catch (conv b)
+    eiX <- catch (Right <$> conv b)
                  (\e -> return $ Left $ show e)
     case eiX of
       Left  e -> return $ Left e
