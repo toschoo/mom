@@ -53,20 +53,22 @@ where
 
   data Message a = Msg {
                      msgId   :: String,
+                     msgSub  :: String,
                      msgType :: String,
                      msgLen  :: Int,
                      msgTx   :: String,
                      msgRaw  :: B.ByteString,
                      msgCont :: a}
   
-  mkMessage :: String -> String -> Int -> String -> B.ByteString -> a -> Message a
-  mkMessage mid typ len tx raw cont = Msg {
-                                        msgId   = mid,
-                                        msgType = typ,
-                                        msgLen  = len,
-                                        msgTx   = tx,
-                                        msgRaw  = raw,
-                                        msgCont = cont}
+  mkMessage :: String -> String -> String -> Int -> String -> B.ByteString -> a -> Message a
+  mkMessage mid typ sub len tx raw cont = Msg {
+                                          msgId   = mid,
+                                          msgSub  = sub,
+                                          msgType = typ,
+                                          msgLen  = len,
+                                          msgTx   = tx,
+                                          msgRaw  = raw,
+                                          msgCont = cont}
 
   mkConnection :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> Connection
   mkConnection host port mx usr pwd vers beat = 
@@ -152,10 +154,10 @@ where
   abort :: Connection -> Transaction -> String -> IO ()
   abort c tx receipt = undefined
 
-  ack :: Connection -> String -> String -> IO ()
-  ack c mid receipt = undefined
+  ack :: Connection -> Message a -> String -> IO ()
+  ack c m receipt = sendFrame c m receipt [] mkAckF
 
-  nack :: Connection -> String -> String -> IO ()
+  nack :: Connection -> Message a -> String -> IO ()
   nack c mid receipt = undefined
 
   subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
@@ -275,6 +277,15 @@ where
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
     let th = if null $ msgTx msg then [] else [F.mkTrnHdr $ msgTx msg]
-    in  F.mkSndFrame ([F.mkMimeHdr $ msgType msg] ++ th ++ hs)
+        rh = mkReceipt receipt
+    in  F.mkSndFrame ([F.mkMimeHdr $ msgType msg] ++ th ++ rh ++ hs)
                      (msgLen msg)
                      (msgRaw msg)
+
+  mkAckF :: Message a -> String -> [F.Header] -> Either String F.Frame
+  mkAckF msg receipt _ =
+    let sh = if null $ msgSub msg then [] else [F.mkSubHdr $ msgSub msg]
+        th = if null $ msgTx msg then [] else [F.mkTrnHdr $ msgTx msg]
+        rh = mkReceipt receipt
+    in F.mkAckFrame ([F.mkMIdHdr $ msgId msg] ++ sh ++ rh ++ th)
+
