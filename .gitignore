@@ -1,5 +1,5 @@
 others
 mydoc
 dist
-test/smoke
-test/client
+test
+test
