@@ -1,0 +1,4 @@
+SEND
+destination : /queue/test
+
+hello world!
