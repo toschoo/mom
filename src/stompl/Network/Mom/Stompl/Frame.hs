@@ -6,6 +6,11 @@ module Network.Mom.Stompl.Frame (
                        mkSndFrame, mkDisFrame,  mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
                        mkAckFrame, mkRecFrame,
+                       mkConnect, mkConnected, 
+                       mkSubscribe, mkUnsubscribe, mkMessage,
+                       mkSend, mkDisconnect,  mkErr,
+                       mkBegin, mkCommit,  mkAbort,
+                       mkAck, mkReceipt,
                        sndToMsg, conToCond,
                        valToVer, valToVers, verToVal, versToVal,
                        beatToVal, valToBeat,
@@ -32,13 +37,17 @@ module Network.Mom.Stompl.Frame (
                        (|>), (<|), (>|<))
 where
 
+  -- Todo:
+  -- - conformance to protocol
+
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
   import           Data.List (find)
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes)
-  -- import qualified Codec.MIME.Type as Mi
+  import           Codec.MIME.Type as Mime (Type, MIMEType, nullType) 
+  import           Codec.MIME.Parse        (parseMIMEType)
 
   type Header = (String, String)
   type Body   = B.ByteString
@@ -177,7 +186,7 @@ where
                    frmTrans :: String,
                    frmRec   :: String,
                    frmLen   :: Int,
-                   frmMime  :: String, -- MimeType?
+                   frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | DisFrame {
                    frmRec   :: String
@@ -202,7 +211,7 @@ where
                    frmDest  :: String,
                    frmId    :: String,
                    frmLen   :: Int,
-                   frmMime  :: String, -- MimeType?
+                   frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | RecFrame {
                    frmRec   :: String
@@ -210,13 +219,99 @@ where
                | ErrFrame {
                    frmMsg  :: String,
                    frmLen  :: Int,
-                   frmMime :: String, -- MimeType?
+                   frmMime :: Mime.Type,
                    frmBody :: Body}
     deriving (Show, Eq)
 
+  mkConnect :: String -> String -> String -> Heart -> [Version] -> Frame
+  mkConnect usr pwd hst beat vers =
+    ConFrame {
+       frmLogin = usr,
+       frmPass  = pwd,
+       frmHost  = hst,
+       frmBeat  = beat,
+       frmAcVer = vers}
+
+  mkConnected :: String -> Heart -> Version -> SrvDesc -> Frame
+  mkConnected ses beat ver srv =
+    CondFrame {
+      frmSes  = ses,
+      frmBeat = beat,
+      frmVer  = ver, 
+      frmSrv  = srv}
+
+  mkSubscribe :: String -> AckMode -> String -> String -> Frame
+  mkSubscribe dst ack sel sid =
+    SubFrame {
+      frmDest = dst,
+      frmAck  = ack,
+      frmSel  = sel,
+      frmId   = sid}
+
+  mkUnsubscribe :: String -> String -> Frame
+  mkUnsubscribe dst sid =
+    USubFrame {
+      frmDest = dst,
+      frmId   = sid}
+ 
+  mkSend :: String    -> String -> String   -> 
+            Mime.Type -> Int    -> [Header] -> 
+            Body      -> Frame
+  mkSend dst trn rec mime len hs bdy = 
+    SndFrame {
+      frmHdrs  = hs,
+      frmDest  = dst,
+      frmTrans = trn,
+      frmRec   = rec,
+      frmLen   = len,
+      frmMime  = mime,
+      frmBody  = bdy}
+
+  mkDisconnect :: String -> Frame
+  mkDisconnect rec = DisFrame rec
+
+  mkReceipt :: String -> Frame
+  mkReceipt rec = RecFrame rec
+
+  mkMessage :: String    -> String -> String   ->
+               Mime.Type -> Int    -> [Header] -> 
+               Body      -> Frame
+  mkMessage sub dst mid mime len hs bdy =
+    MsgFrame {
+      frmHdrs  = hs,
+      frmSub   = sub,
+      frmDest  = dst,
+      frmId    = mid,
+      frmLen   = len,
+      frmMime  = mime,
+      frmBody  = bdy}
+
+  mkErr :: String -> Mime.Type -> Int -> Body -> Frame
+  mkErr mid mime len bdy =
+    ErrFrame {
+      frmMsg  = mid,
+      frmLen  = len,
+      frmMime = mime,
+      frmBody = bdy}
+
+  mkBegin  :: String -> Frame
+  mkBegin = BgnFrame
+
+  mkCommit :: String -> Frame
+  mkCommit = CmtFrame
+
+  mkAbort  :: String -> Frame
+  mkAbort = AbrtFrame
+
+  mkAck :: String -> String -> String -> Frame
+  mkAck mid sid trn = AckFrame {
+                        frmId    = mid,
+                        frmSub   = sid,
+                        frmTrans = trn}
+
   getLogin, getPasscode, getSession, getId,
     getDest,  getTrans,    getReceipt, getMsg,
-    getSelector, getHost, getMime :: Frame -> String
+    getSelector, getHost :: Frame -> String
   getLength     :: Frame -> Int
   getAcknow     :: Frame -> AckMode
   getBody       :: Frame -> B.ByteString
@@ -225,6 +320,7 @@ where
   getBeat       :: Frame -> Heart
   getServer     :: Frame -> SrvDesc
   getHeaders    :: Frame -> [Header]
+  getMime       :: Frame -> Mime.Type
   getLogin    = frmLogin 
   getPasscode = frmPass
   getSession  = frmSes
@@ -378,20 +474,20 @@ where
 
   putCommand :: Frame -> B.ByteString
   putCommand f = 
-    let s = case f of
-              ConFrame  _ _ _ _ _     -> "CONNECT"
-              CondFrame _ _ _ _       -> "CONNECTED"
-              DisFrame  _             -> "DISCONNECT"
-              SndFrame  _ _ _ _ _ _ _ -> "SEND"
-              SubFrame  _ _ _ _       -> "SUBSCRIBE"
-              USubFrame _ _           -> "UNSUBSCRIBE"
-              BgnFrame  _             -> "BEGIN"
-              CmtFrame  _             -> "COMMIT"
-              AbrtFrame _             -> "ABORT"
-              AckFrame  _ _ _         -> "ACK"
-              MsgFrame  _ _ _ _ _ _ _ -> "MESSAGE"
-              RecFrame  _             -> "RECEIPT"
-              ErrFrame  _ _ _ _       -> "ERROR"
+    let s = case typeOf f of
+              Connect     -> "CONNECT"
+              Connected   -> "CONNECTED"
+              Disconnect  -> "DISCONNECT"
+              Send        -> "SEND"
+              Subscribe   -> "SUBSCRIBE"
+              Unsubscribe -> "UNSUBSCRIBE"
+              Begin       -> "BEGIN"
+              Commit      -> "COMMIT"
+              Abort       -> "ABORT"
+              Ack         -> "ACK"
+              Message     -> "MESSAGE"
+              Receipt     -> "RECEIPT"
+              Error       -> "ERROR"
     in B.pack (s ++ "\n")
 
   putHeaders :: Frame -> B.ByteString
@@ -428,7 +524,13 @@ where
     let ih = if null i then [] else [mkIdHdr i]
         dh = if null i then [] else [mkDestHdr d]
     in dh ++ ih
-  toHeaders (SndFrame h _ _ _ _ _ _) = h
+  toHeaders (SndFrame h d t r l m _) = 
+    let th = if null t then [] else [mkTrnHdr t]
+        rh = if null r then [] else [mkRecHdr r]
+        lh = if l <= 0 then [] else [mkLenHdr (show l)]
+    in [mkDestHdr d, 
+        mkMimeHdr (show m)] 
+       ++ th ++ rh ++ lh ++ h
   toHeaders (BgnFrame  t) = [mkTrnHdr t]
   toHeaders (CmtFrame  t) = [mkTrnHdr t]
   toHeaders (AbrtFrame t) = [mkTrnHdr t]
@@ -436,13 +538,18 @@ where
     let ih = if null i then [] else [mkIdHdr i]
         sh = if null s then [] else [mkSubHdr s]
     in mkTrnHdr t : (ih ++ sh)
-  toHeaders (MsgFrame h _ _ _ _ _ _)  = h
+  toHeaders (MsgFrame h s d i l m _)  = 
+    let sh = if null s then [] else [mkSubHdr  s]
+        dh = if null d then [] else [mkDestHdr d]
+        lh = if l <= 0 then [] else [mkLenHdr (show l)]
+    in  [mkMIdHdr i,
+         mkMimeHdr (show m)] 
+        ++ sh ++ dh ++ lh ++ h
   toHeaders (RecFrame  r) = [mkRecHdr r]
   toHeaders (ErrFrame m l t _) = 
     let mh = if null m then [] else [mkMsgHdr m]
-        th = if null t then [] else [mkMimeHdr t]
         lh = if l <  0 then [] else [mkLenHdr (show l)]
-    in  mh ++ lh 
+    in  mh ++ lh ++ [mkMimeHdr $ show t]
 
   putBody :: Frame -> Body
   putBody f =
@@ -495,8 +602,11 @@ where
                            frmDest  = d,
                            frmLen   = l,
                            frmMime  = case lookup hdrMime hs of
-                                        Nothing -> ""
-                                        Just t  -> t,
+                                        Nothing -> Mime.nullType
+                                        Just t  -> 
+                                          case parseMIMEType t of
+                                            Nothing -> Mime.nullType
+                                            Just m  -> m,
                            frmTrans = case lookup hdrTrn hs of
                                         Nothing -> ""
                                         Just t  ->  t,
@@ -584,8 +694,11 @@ where
                                frmId   = i, 
                                frmLen  = l,
                                frmMime = case lookup hdrMime hs of
-                                           Nothing -> ""
-                                           Just t  -> t,
+                                           Nothing -> Mime.nullType
+                                           Just t  -> 
+                                             case parseMIMEType t of
+                                               Nothing -> Mime.nullType
+                                               Just m  -> m,
                                frmBody = b
                              }
 
@@ -625,8 +738,11 @@ where
                            frmMsg  = m,
                            frmLen  = l,
                            frmMime = case lookup hdrMime hs of
-                                       Nothing -> defMime
-                                       Just t  -> t,
+                                       Nothing -> Mime.nullType 
+                                       Just t  -> 
+                                         case parseMIMEType t of
+                                           Nothing -> Mime.nullType
+                                           Just m  -> m,
                            frmBody = b}
 
   sndToMsg :: String -> Frame -> Maybe Frame

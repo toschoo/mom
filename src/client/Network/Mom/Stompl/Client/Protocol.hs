@@ -1,9 +1,19 @@
-module Protocol
+module Protocol (Connection, mkConnection,
+                 getSock, getWr, getRc,
+                 connected, getErr, conMax,
+                 connect, disconnect,
+                 Subscription, mkSub,
+                 subscribe, unsubscribe,
+                 begin, commit, abort,
+                 Message(..), mkMessage,
+                 send, ack, nack)
+                 
+                 
 where
 
   import qualified Socket as S
   import qualified Network.Mom.Stompl.Frame as F
-  import           Network.Mom.Stompl.Exception
+  import           Network.Mom.Stompl.Client.Exception
   import           Network.Socket (Socket)
 
   import qualified Data.ByteString.Char8 as B
@@ -12,6 +22,8 @@ where
   import           Control.Concurrent
   import           Control.Applicative ((<$>))
   import           Control.Exception (throwIO)
+
+  import           Codec.MIME.Type as Mime (Type, MIMEType, nullType) 
 
   defVersion :: F.Version
   defVersion = (1,0)
@@ -34,12 +46,6 @@ where
                        conTcp  :: Bool,
                        conBrk  :: Bool}
 
-  data TxState = TxStarted | TxAborted | TxCommitted
-
-  data Transaction = Tx {
-                       txId    :: String,
-                       txState :: TxState}
-
   data Subscription = Sub {
                         subId   :: String,
                         subName :: String,
@@ -54,16 +60,22 @@ where
   data Message a = Msg {
                      msgId   :: String,
                      msgSub  :: String,
-                     msgType :: String,
+                     msgDest :: String,
+                     msgHdrs :: [F.Header],
+                     msgType :: Mime.Type,
                      msgLen  :: Int,
                      msgTx   :: String,
                      msgRaw  :: B.ByteString,
                      msgCont :: a}
   
-  mkMessage :: String -> String -> String -> Int -> String -> B.ByteString -> a -> Message a
-  mkMessage mid typ sub len tx raw cont = Msg {
+  mkMessage :: String -> String -> String -> 
+               Mime.Type -> Int -> String -> 
+               B.ByteString -> a -> Message a
+  mkMessage mid sub dst typ len tx raw cont = Msg {
                                           msgId   = mid,
                                           msgSub  = sub,
+                                          msgDest = dst,
+                                          msgHdrs = [],
                                           msgType = typ,
                                           msgLen  = len,
                                           msgTx   = tx,
@@ -166,18 +178,19 @@ where
   unsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   unsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
 
-  send :: Connection -> String -> Message a -> String -> [F.Header] -> IO ()
-  send c q msg receipt hs = 
-    sendFrame c msg receipt ([F.mkDestHdr q] ++ hs) mkSendF
+  send :: Connection -> Message a -> String -> [F.Header] -> IO ()
+  send c msg receipt hs = 
+    sendFrame c msg receipt hs mkSendF
 
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
                (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
   sendFrame c m receipt hs mkF = 
     if not $ connected c then throwIO $ ConnectException "Not connected!"
       else case mkF m receipt hs of
-             Left e  -> throwIO $ ProtocolException $
+             Left  e -> throwIO $ ProtocolException $
                           "Cannot create Frame: " ++ e
-             Right f -> S.send (getWr c) (getSock c) f
+             Right f -> do
+               S.send (getWr c) (getSock c) f
 
   disc :: String -> Connection -> IO Connection
   disc receipt c = do
@@ -224,9 +237,6 @@ where
                let c' = handleConnected r
                           c {conRcv = Just rc, conWrt = Just wr} 
                return c'
-
-  startListener :: Connection -> IO ()
-  startListener c = undefined
 
   handleConnected :: F.Frame -> Connection -> Connection
   handleConnected f c = 
@@ -276,16 +286,14 @@ where
 
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
-    let th = if null $ msgTx msg then [] else [F.mkTrnHdr $ msgTx msg]
-        rh = mkReceipt receipt
-    in  F.mkSndFrame ([F.mkMimeHdr $ msgType msg] ++ th ++ rh ++ hs)
-                     (msgLen msg)
-                     (msgRaw msg)
+    Right $ F.mkSend (msgDest msg) (msgTx msg)  receipt 
+                     (msgType msg) (msgLen msg) hs 
+                     (msgRaw msg) 
 
   mkAckF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkAckF msg receipt _ =
     let sh = if null $ msgSub msg then [] else [F.mkSubHdr $ msgSub msg]
-        th = if null $ msgTx msg then [] else [F.mkTrnHdr $ msgTx msg]
+        th = if null $ msgTx  msg then [] else [F.mkTrnHdr $ msgTx msg]
         rh = mkReceipt receipt
     in F.mkAckFrame ([F.mkMIdHdr $ msgId msg] ++ sh ++ rh ++ th)
 

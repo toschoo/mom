@@ -1,6 +1,10 @@
 {-# OPTIONS -fglasgow-exts -fno-cse #-}
 module Network.Mom.Stompl.Client.Queue (
+                   P.Message, P.mkMessage,
+                   P.msgRaw, msgContent,
+                   P.msgType, P.msgLen, P.msgHdrs,
                    Queue, Qopt(..), Converter(..),
+                   Factory.Con,
                    withConnection, 
                    withConnection_, 
                    newQueue, readQ, writeQ,
@@ -11,17 +15,16 @@ where
 
   ----------------------------------------------------------------
   -- todo
-  -- - get current transaction in ack
-  -- - receipts on commit/abort
-  -- - test/check for deadlocks
-  -- - write Transaction State
-  -- - remove Transaction from Protocol
   -- - store errors, acks and receipts in Transaction
   --   (Queues and listen!)
+  -- - receipts on commit/abort
+  -- - nack
+  -- - test/check for deadlocks
+  -- - write Transaction State
   -- - generate receipts for queues!
   -- - waitReceipt on writeQ
   -- - forceTx
-  -- - Message Interface
+  -- - Heartbeat
   ----------------------------------------------------------------
 
   import qualified Socket   as S
@@ -29,7 +32,7 @@ where
   import           Factory  
 
   import qualified Network.Mom.Stompl.Frame as F
-  import           Network.Mom.Stompl.Exception 
+  import           Network.Mom.Stompl.Client.Exception
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
@@ -44,6 +47,11 @@ where
 
   import           Data.List (find, deleteBy, delete, insert)
   import           Data.Char (isDigit)
+
+  import           Codec.MIME.Type as Mime (Type, nullType)
+
+  msgContent :: P.Message a -> a
+  msgContent = P.msgCont
 
   data Connection = Connection {
                       conCon   :: P.Connection,
@@ -248,7 +256,7 @@ where
                    qName :: String,
                    qRec  :: Bool,
                    qWait :: Bool,
-                   qTo   :: a -> IO B.ByteString}
+                   qTo   :: OutBoundF a}
                | RecvQ {
                    qCon  :: Con,
                    qSub  :: Sub,
@@ -256,7 +264,7 @@ where
                    qName :: String,
                    qMode :: F.AckMode,
                    qAuto :: Bool, -- library creates Ack
-                   qFrom :: B.ByteString -> IO a}
+                   qFrom :: InBoundF a}
 
   instance Eq (Queue a) where
     q1 == q2 = qName q1 == qName q2
@@ -284,9 +292,10 @@ where
     where isMode x = case x of
                        OMode m -> True
                        _       -> False
-
-  data Converter a = OutBound (a -> IO B.ByteString)
-                    | InBound (B.ByteString -> IO a)
+  type OutBoundF a = a -> IO B.ByteString
+  type InBoundF  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
+  data Converter a = OutBound (OutBoundF a)
+                    | InBound (InBoundF  a)
 
   newQueue :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
               Converter a -> IO (Queue a)
@@ -319,7 +328,7 @@ where
                          "No direction indicated (" ++ (show qn) ++ ")"
 
   newSendQ :: Con -> Connection -> String -> String -> [Qopt] -> 
-              (a -> IO B.ByteString)  -> IO (Connection, Queue a)
+              OutBoundF a -> IO (Connection, Queue a)
   newSendQ cid c qn dst os conv = 
     let q = SendQ {
               qCon  = cid,
@@ -330,9 +339,9 @@ where
               qTo   = conv}
     in return (c, q)
 
-  newRecvQ :: Con -> Connection -> String -> String -> 
-              [Qopt] -> [F.Header] ->
-              (B.ByteString -> IO a)  -> IO (Connection, Queue a)
+  newRecvQ :: Con        -> Connection -> String -> String -> 
+              [Qopt]     -> [F.Header] ->
+              InBoundF a -> IO (Connection, Queue a)
   newRecvQ cid c qn dst os hs conv = do
     let am = ackMode os
     sid <- mkUniqueSubId
@@ -366,14 +375,14 @@ where
             m <- (readChan ch >>= frmToMsg q)
             return (c, m)
 
-  writeQ :: Queue a -> String -> [F.Header] -> a -> IO ()
+  writeQ :: Queue a -> Mime.Type -> [F.Header] -> a -> IO ()
   writeQ q mime hs x | typeOf q == RecvQT = 
                          throwIO $ QueueException $
                            "Write with RecvQ (" ++ (qName q) ++ ")"
                      | otherwise = 
     withCon (writeQ' q mime hs x) (qCon q)
 
-  writeQ' :: Queue a -> String -> [F.Header] -> a -> ConEntry -> IO (Connection, ())
+  writeQ' :: Queue a -> Mime.Type -> [F.Header] -> a -> ConEntry -> IO (Connection, ())
   writeQ' q mime hs x (cid, c) = 
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
@@ -385,8 +394,25 @@ where
                  case mbT of
                    Nothing     -> return ""
                    Just (x, t) -> return (show x)))
-        let m = P.mkMessage "" mime (show $ qSub q) (B.length s) tx s x
-        P.send (conCon c) (qDest q) m "" hs 
+        let m = P.mkMessage "" (qDest q) (qDest q) 
+                            mime (B.length s) tx s x
+        P.send (conCon c) m "" hs 
+        return (c, ())
+
+  ack :: Con -> P.Message a -> IO ()
+  ack cid msg = withCon (ack' msg) cid
+
+  ack' :: P.Message a -> ConEntry -> IO (Connection, ())
+  ack' msg (cid, c) =
+    if not $ P.connected (conCon c) 
+      then throwIO $ ConnectException $ 
+             "Not connected (" ++ (show cid) ++ ")"
+      else do
+        tx <- (getCurTx c >>= (\mbT -> 
+                  case mbT of
+                    Nothing     -> return ""
+                    Just (x, t) -> return $ show x))
+        P.ack  (conCon c) msg {P.msgTx = tx} "" 
         return (c, ())
 
   withTransaction_ :: Con -> [Topt] -> (Con -> IO ()) -> IO ()
@@ -467,12 +493,14 @@ where
   frmToMsg q f = do
     let b = F.getBody f
     let conv = qFrom q
-    x <- conv b
-    return $ P.mkMessage (F.getId     f)
-                         (F.getMime   f)
-                         (F.getSub    f)
-                         (F.getLength f)
-                         "" b x
+    x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
+    let m = P.mkMessage (F.getId     f)
+                        (F.getSub    f)
+                        (F.getDest   f) 
+                        (F.getMime   f)
+                        (F.getLength f)
+                        "" b x
+    return m {P.msgHdrs = F.getHeaders f}
     
   listen :: Con -> IO ()
   listen cid = forever $ do

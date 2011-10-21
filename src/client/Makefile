@@ -2,6 +2,7 @@ TDIR = test/suite
 SDIR = ../test/samples
 CFGDIR = ../test/cfg
 SMOKEDIR = ./test/smoke
+COMDIR = ../test/common
 
 tests = $(TDIR)/tparser \
         $(TDIR)/tframe 
@@ -19,7 +20,8 @@ GHC = ghc
 FLGS = -DTEST -Wall --make
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../broker/Network/Mom/Stompl \
-		    -i../stompl/Network/Mom/Stompl 
+		    -i../stompl/Network/Mom/Stompl \
+		    -i../test/common
 
 smoke:	$(SMOKEDIR)/listen2 $(SMOKEDIR)/send2 $(SMOKEDIR)/sendtx
 
@@ -30,6 +32,17 @@ $(SMOKEDIR)/send2:	$(SMOKEDIR)/send2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/sendtx:	$(SMOKEDIR)/sendtx.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+suite:	$(TDIR)/tprotocol
+
+$(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs
+			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/tmime:		$(TDIR)/tmime.hs
 			$(GHC) $(FLGS) $(INC) $@
 
 all:

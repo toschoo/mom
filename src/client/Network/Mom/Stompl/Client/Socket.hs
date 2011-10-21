@@ -13,7 +13,7 @@ where
 
   import           Network.Mom.Stompl.Parser (stompParser)
   import qualified Network.Mom.Stompl.Frame as F
-  import           Network.Mom.Stompl.Exception
+  import           Network.Mom.Stompl.Client.Exception
 
   import           Control.Concurrent.MVar
   import           Control.Applicative ((<$>))
@@ -142,11 +142,11 @@ where
         s <- BS.recv sock max
         if B.null s 
           then return $ Left "Peer disconnected"
-          else 
+          else do
             let s' = B.dropWhile white s
-            in  if B.null s 
-                  then getInput rec sock max
-                  else return $ Right s
+            if B.null s' 
+              then getInput rec sock max
+              else return $ Right s
 
   white :: Char -> Bool
   white c = c == '\n'

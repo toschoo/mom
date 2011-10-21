@@ -4,16 +4,14 @@
 module Main
 where
 
-  import Protocol -- Message interface!
   import Network.Mom.Stompl.Client.Queue
-  import Network.Mom.Stompl.Exception
+  import Network.Mom.Stompl.Client.Exception
 
   import System.Exit
   import System.Environment
 
   import Network.Socket (withSocketsDo)
   import Control.Monad (forever)
-  import Control.Exception (try)
 
   import qualified Data.ByteString.UTF8  as U
 
@@ -29,7 +27,7 @@ where
   conAndListen :: String -> IO ()
   conAndListen qn = withSocketsDo $ do -- connectAndGo
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let conv = InBound (return . U.toString)
+      let conv = InBound (\_ _ _ -> return . U.toString)
       q <- newQueue c "Q-Hof" qn [OReceive] [] conv
       listen2 q
 

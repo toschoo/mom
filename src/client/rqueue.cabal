@@ -13,10 +13,10 @@ Library
                    attoparsec  >= 0.9.1.1,
                    split       >= 0.1.4.1,
                    network     >= 2.3.0.4,
-                   stompl      >= 0.0.1
-                   -- mime        >= 0.3.3
+                   stompl      >= 0.0.1,
+                   mime        >= 0.3.3
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
-  Exposed-Modules: Network.Mom.Stompl.Client.Queue
+  Exposed-Modules: Network.Mom.Stompl.Client.Queue, Network.Mom.Stompl.Client.Exception
 
