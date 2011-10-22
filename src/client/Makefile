@@ -67,6 +67,9 @@ clean:
 	rm -f $(SMOKEDIR)/listen2
 	rm -f $(SMOKEDIR)/send2
 	rm -f $(SMOKEDIR)/sendtx
+	rm -f $(SMOKEDIR)/sendf
+	rm -f $(SMOKEDIR)/sendforever
+	rm -f $(SMOKEDIR)/frost
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
 
