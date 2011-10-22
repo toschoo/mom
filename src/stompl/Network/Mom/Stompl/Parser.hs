@@ -148,9 +148,9 @@ where
 
   terminal :: Parser ()
   terminal = do
-    skipWhite
+    -- skipWhite
     _ <- word8 eol 
-    skipWhite
+    return ()
 
   body :: Int -> Parser B.ByteString
   body x = body' x B.empty
@@ -164,7 +164,7 @@ where
             return b
           else 
             if l < B.length b 
-              then failBodyLen 
+              then failBodyLen l (B.length b)
               else do
                 _ <- word8 nul
                 body' l (b |> '\x00') 
@@ -192,6 +192,8 @@ where
   spc  = 32
   col  = 58
   
-  failBodyLen :: Parser a
-  failBodyLen = fail "Body longer than indicated by content-length" 
+  failBodyLen :: Int -> Int -> Parser a
+  failBodyLen l1 l2 = 
+    fail $ "Body longer than indicated by content-length: " ++
+           (show l1) ++ " - " ++ (show l2)
   

@@ -7,7 +7,7 @@ where
   import Network.Mom.Stompl.Frame
 
   import qualified Data.ByteString      as B (readFile, ByteString) 
-  import qualified Data.ByteString.UTF8 as U (toString)
+  import qualified Data.ByteString.UTF8 as U 
 
   import Data.Char (toUpper)
 
@@ -16,6 +16,9 @@ where
   import System.Environment (getArgs)
 
   import Control.Monad.Writer
+  import Control.Applicative ((<$>))
+
+  import Codec.MIME.Type (showType)
 
   type Test     = (TestDesc, FilePath)
   type Msg      = String
@@ -141,6 +144,18 @@ where
      (TDesc "Empty send" 
             Send (Just . id) Pass 
             [("destination", "/queue/test")], "send5.txt"),
+     (TDesc "send with spaces at beginning of body" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "16"),
+             ("content-type", "text/plain"),
+             ("receipt", "msg-123")], "send6-1.1.txt"),
+     (TDesc "UTF" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "81"),
+             ("content-type", "text/plain"),
+             ("receipt", "msg-123")], "send-jap.txt"),
      (TDesc "Message 1.1" 
             Message (Just . id) Pass
             [("destination", "/queue/test"),
@@ -194,7 +209,7 @@ where
       "destination"    -> getDest
       "subscription"   -> getSub
       "content-length" -> show . getLength
-      "content-type"   -> getMime
+      "content-type"   -> showType . getMime
       "transaction"    -> getTrans
       "id"             -> getId
       "ack"            -> ackToVal . getAcknow
@@ -218,10 +233,10 @@ where
     case stompAtOnce m of
       Left  e -> case dscRes d of
                    Fail -> do
-                     tell $ bad ++ ": " ++ e ++ "\n"
+                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
                      return $ Left True
                    Pass -> do
-                     tell $ bad ++ ": " ++ e ++ "\n"
+                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
                      return $ Left False
       Right f -> 
         case trans f of
@@ -296,6 +311,7 @@ where
     let d = fst t
     putStrLn $ "Test: " ++ (dscDesc $ fst t)
     m <- B.readFile (p </> f) 
+    -- m <- U.fromString <$> readFile (p </> f) 
     let (r, txt) = runWriter (applyTests f d m)
     putStrLn txt
     putStrLn ""

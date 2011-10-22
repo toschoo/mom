@@ -38,5 +38,5 @@ where
       Left  e -> do
         putStrLn $ "Error: " ++ (show (e::StomplException))
       Right m -> do
-        putStrLn $ "Message: " ++ (show $ msgRaw m)
+        putStrLn $ "Message: " ++ (msgContent m)
 

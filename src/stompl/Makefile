@@ -27,6 +27,7 @@ clean:
 	rm -f $(TDIR)/tparser
 
 dist-clean:	clean
+		cabal clean
 		rm -f $(SUTDIR)/*.hi
 		rm -f $(SUTDIR)/*.o
 		rm -f test/bin/*.o

@@ -46,7 +46,7 @@ where
   import           Data.List (find)
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes)
-  import           Codec.MIME.Type as Mime (Type, MIMEType, nullType) 
+  import           Codec.MIME.Type as Mime (showType, Type, nullType)
   import           Codec.MIME.Parse        (parseMIMEType)
 
   type Header = (String, String)
@@ -94,8 +94,8 @@ where
   noBeat :: Heart
   noBeat = (0,0)
 
-  defMime :: String
-  defMime = "text/plain"
+  defMime :: Mime.Type
+  defMime =  Mime.nullType
 
   defVerStr :: String
   defVerStr = "1.1"
@@ -107,7 +107,7 @@ where
   noSrvDesc = ("","","")
 
   hdrLog, hdrPass, hdrDest, hdrSub, hdrLen, hdrTrn, hdrRec,
-    hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, 
+    hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, hdrSrv,
     hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime :: String
   hdrLog   = "login"
   hdrPass  = "passcode"
@@ -133,7 +133,7 @@ where
   mkHeader k v = (k, v)
 
   mkLogHdr, mkPassHdr, mkDestHdr, mkLenHdr, mkMimeHdr, mkTrnHdr, mkMsgHdr, 
-    mkRecHdr, mkSelHdr, mkMIdHdr, mkIdHdr, 
+    mkRecHdr, mkSelHdr, mkMIdHdr, mkIdHdr, mkSubHdr, mkSrvHdr,
     mkAckHdr, mkSesHdr, mkAcVerHdr, mkVerHdr, 
     mkHostHdr, mkBeatHdr :: String -> Header
   mkLogHdr   = mkHeader hdrLog
@@ -310,7 +310,7 @@ where
                         frmTrans = trn}
 
   getLogin, getPasscode, getSession, getId,
-    getDest,  getTrans,    getReceipt, getMsg,
+    getDest,  getTrans,  getSub, getReceipt, getMsg,
     getSelector, getHost :: Frame -> String
   getLength     :: Frame -> Int
   getAcknow     :: Frame -> AckMode
@@ -442,7 +442,7 @@ where
   valToVers :: String -> Maybe [Version]
   valToVers s = case find (== Nothing) vs of
                   Nothing -> Just $ catMaybes vs
-                  Just x  -> Nothing
+                  Just _  -> Nothing
     where ss = splitWhen (== ',') s 
           vs = map valToVer ss
 
@@ -529,7 +529,7 @@ where
         rh = if null r then [] else [mkRecHdr r]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in [mkDestHdr d, 
-        mkMimeHdr (show m)] 
+        mkMimeHdr (showType m)] 
        ++ th ++ rh ++ lh ++ h
   toHeaders (BgnFrame  t) = [mkTrnHdr t]
   toHeaders (CmtFrame  t) = [mkTrnHdr t]
@@ -543,13 +543,13 @@ where
         dh = if null d then [] else [mkDestHdr d]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in  [mkMIdHdr i,
-         mkMimeHdr (show m)] 
+         mkMimeHdr (showType m)] 
         ++ sh ++ dh ++ lh ++ h
   toHeaders (RecFrame  r) = [mkRecHdr r]
   toHeaders (ErrFrame m l t _) = 
     let mh = if null m then [] else [mkMsgHdr m]
         lh = if l <  0 then [] else [mkLenHdr (show l)]
-    in  mh ++ lh ++ [mkMimeHdr $ show t]
+    in  mh ++ lh ++ [mkMimeHdr $ showType t]
 
   putBody :: Frame -> Body
   putBody f =
@@ -602,10 +602,10 @@ where
                            frmDest  = d,
                            frmLen   = l,
                            frmMime  = case lookup hdrMime hs of
-                                        Nothing -> Mime.nullType
+                                        Nothing -> defMime
                                         Just t  -> 
                                           case parseMIMEType t of
-                                            Nothing -> Mime.nullType
+                                            Nothing -> defMime
                                             Just m  -> m,
                            frmTrans = case lookup hdrTrn hs of
                                         Nothing -> ""
@@ -694,10 +694,10 @@ where
                                frmId   = i, 
                                frmLen  = l,
                                frmMime = case lookup hdrMime hs of
-                                           Nothing -> Mime.nullType
+                                           Nothing -> defMime
                                            Just t  -> 
                                              case parseMIMEType t of
-                                               Nothing -> Mime.nullType
+                                               Nothing -> defMime
                                                Just m  -> m,
                                frmBody = b
                              }
@@ -738,11 +738,11 @@ where
                            frmMsg  = m,
                            frmLen  = l,
                            frmMime = case lookup hdrMime hs of
-                                       Nothing -> Mime.nullType 
+                                       Nothing -> defMime
                                        Just t  -> 
                                          case parseMIMEType t of
-                                           Nothing -> Mime.nullType
-                                           Just m  -> m,
+                                           Nothing -> defMime
+                                           Just x  -> x,
                            frmBody = b}
 
   sndToMsg :: String -> Frame -> Maybe Frame

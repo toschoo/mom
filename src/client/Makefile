@@ -31,8 +31,18 @@ $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 $(SMOKEDIR)/send2:	$(SMOKEDIR)/send2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/sendtx:	$(SMOKEDIR)/sendtx.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/sendf:	$(SMOKEDIR)/sendf.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
 
 suite:	$(TDIR)/tprotocol
 

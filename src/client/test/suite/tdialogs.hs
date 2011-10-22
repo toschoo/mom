@@ -67,9 +67,13 @@ where
 
   mkTests :: TestGroup IO
   mkTests = 
-    let t10 = mkTest "Send and Receive" testSndRcv
-        t20 = mkTest "Transaction     " testTx1
-    in  mkGroup "Send and Receive" (Stop (Fail "")) [t10, t20]
+    let t10 = mkTest "Send and Receive       " testSndRcv
+        t20 = mkTest "Transaction            " testTx1
+        t30 = mkTest "Transaction pending ack" testPendingAcksFail
+        t40 = mkTest "Transaction all ack'd  " testPendingAcksPass
+        t50 = mkTest "Auto Ack               " testAutoAck
+    in  mkGroup "Dialogs" (Stop (Fail "")) 
+        [t10, t20, t30, t40, t50]
 
   testSndRcv :: IO TestResult
   testSndRcv = 
@@ -105,7 +109,7 @@ where
           mbM4 <- tmo $ readQ iQ
           let ms = catMaybes [mbM1, mbM2, mbM3, mbM4]
           if (length ms) /= 4
-            then return $ Fail "Did not receive all messages!"
+            then return $ Fail $ "Did not receive all messages: " ++ (show $ length ms)
             else let zs = zip ms [text1, text2, text3, text4]
                      ts = map (\x -> (msgCont . fst) x == snd x) zs
                  in if and ts then return Pass
@@ -113,6 +117,80 @@ where
                                      "Messages are in wrong order: " ++ 
                                      (show $ map msgCont ms)
 
+  testPendingAcksFail :: IO TestResult
+  testPendingAcksFail =
+    stdCon $ \c -> do
+      iQ <- newQueue c "IN"  tQ1 [OReceive, OMode F.Client] [] iconv
+      oQ <- newQueue c "OUT" tQ1 [OSend]    [] oconv
+
+      writeQ oQ nullType [] text1    -- send m1
+      ok <- withTransaction c [OAbortMissingAcks] $ \_ -> do
+        m1 <- readQ iQ               -- get  m1
+        writeQ oQ nullType [] text2  -- send m2
+        mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+        case mbM2 of 
+          Nothing -> return True
+          Just m  -> return False
+      if not ok 
+        then return $ Fail "obtained message sent in TX before commit!"
+        else do
+          mbM2 <- tmo $ readQ iQ
+          case mbM2 of 
+            Nothing -> return Pass
+            Just m  -> return $ Fail "obtained message from aborted TX!"
+
+  testPendingAcksPass :: IO TestResult
+  testPendingAcksPass = do
+    stdCon $ \c -> do
+      iQ <- newQueue c "IN"  tQ1 [OReceive, OMode F.Client] [] iconv
+      oQ <- newQueue c "OUT" tQ1 [OSend]    [] oconv
+
+      writeQ oQ nullType [] text1    -- send m1
+      ok <- withTransaction c [OAbortMissingAcks] $ \_ -> do
+        m1 <- readQ iQ               -- get  m1
+        writeQ oQ nullType [] text2  -- send m2
+        mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+        case mbM2 of 
+          Nothing -> do
+            ack c m1
+            return True
+          Just m  -> return False
+      if not ok 
+        then return $ Fail "obtained message sent in TX before commit!"
+        else do
+          mbM2 <- tmo $ readQ iQ
+          case mbM2 of
+            Nothing -> return $ Fail "no message from committed TX received!"
+            Just m2 -> 
+              if (msgContent m2) == text2 
+                then return Pass
+                else return $ Fail "Wrong message!"
+
+  testAutoAck :: IO TestResult
+  testAutoAck = do
+    stdCon $ \c -> do
+      iQ <- newQueue c "IN"  tQ1 [OReceive, OMode F.Client, OAck] [] iconv
+      oQ <- newQueue c "OUT" tQ1 [OSend]    [] oconv
+
+      writeQ oQ nullType [] text1    -- send m1
+      ok <- withTransaction c [OAbortMissingAcks] $ \_ -> do
+        m1 <- readQ iQ               -- get  m1
+        writeQ oQ nullType [] text2  -- send m2
+        mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+        case mbM2 of 
+          Nothing -> return True
+          Just m  -> return False
+      if not ok 
+        then return $ Fail "obtained message sent in TX before commit!"
+        else do
+          mbM2 <- tmo $ readQ iQ
+          case mbM2 of
+            Nothing -> return $ Fail "no message from committed TX received!"
+            Just m2 -> 
+              if (msgContent m2) == text2 
+                then return Pass
+                else return $ Fail "Wrong message!"
+       
   stdCon :: (Con -> IO TestResult) -> IO TestResult
   stdCon act =
     withConnection host port maxRcv "guest" "guest" beat act
