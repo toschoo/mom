@@ -62,8 +62,9 @@ all:
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
-	rm -f $(TDIR)/tframe
-	rm -f $(TDIR)/tparser
+	rm -f $(TDIR)/tdialogs
+	rm -f $(TDIR)/tmime
+	rm -f $(TDIR)/tprotocol
 	rm -f $(SMOKEDIR)/listen2
 	rm -f $(SMOKEDIR)/send2
 	rm -f $(SMOKEDIR)/sendtx

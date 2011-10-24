@@ -2,12 +2,13 @@
 module Factory (
         Con(..), mkUniqueConId,
         Sub(..), mkUniqueSubId,
-        Tx (..), mkUniqueTxId)
+        Tx (..), mkUniqueTxId,
+        Rec(..), mkUniqueRecc, parseRec)
 where
 
   import System.IO.Unsafe
   import Control.Concurrent
-  import Control.Applicative ((<$>))
+  import Data.Char (isDigit)
 
   newtype Con = Con Int
     deriving (Eq)
@@ -27,6 +28,20 @@ where
   instance Show Tx where
     show (Tx i) = show i
 
+  data Rec = Rec Int | NoRec
+    deriving (Eq)
+
+  instance Show Rec where
+    show (Rec i) = show i
+    show  NoRec  = ""
+
+  parseRec :: String -> Maybe Rec
+  parseRec s = 
+    if numeric s then Just (Rec $ read s) else Nothing
+
+  numeric :: String -> Bool
+  numeric = and . map isDigit
+
   {-# NOINLINE conid #-}
   conid :: MVar Con
   conid = unsafePerformIO $ newMVar (Con 1)
@@ -39,6 +54,10 @@ where
   txid :: MVar Tx
   txid = unsafePerformIO $ newMVar (Tx 1)
 
+  {-# NOINLINE recc #-}
+  recc :: MVar Rec
+  recc = unsafePerformIO $ newMVar (Rec 1)
+
   mkUniqueConId :: IO Con
   mkUniqueConId = mkUniqueId conid incCon
 
@@ -48,16 +67,26 @@ where
   mkUniqueTxId :: IO Tx
   mkUniqueTxId = mkUniqueId txid incTx
 
+  mkUniqueRecc :: IO Rec
+  mkUniqueRecc = mkUniqueId recc incRecc
+
   mkUniqueId :: MVar a -> (a -> a) -> IO a
   mkUniqueId v f = modifyMVar v $ \x -> do
     let x' = f x in return (x', x')
 
   incCon :: Con -> Con
-  incCon (Con n) = Con (n+1)
+  incCon (Con n) = Con (incX n)
 
   incSub :: Sub -> Sub
-  incSub (Sub n) = Sub (n+1)
+  incSub (Sub n) = Sub (incX n)
 
   incTx :: Tx -> Tx
-  incTx (Tx n) = Tx (n+1)
+  incTx (Tx n) = Tx (incX n)
+
+  incRecc :: Rec -> Rec
+  incRecc (Rec n) = Rec (incX n)
+  incRecc (NoRec) = NoRec
+
+  incX :: Int -> Int
+  incX i = if i == 99999999 then 1 else i+1
   

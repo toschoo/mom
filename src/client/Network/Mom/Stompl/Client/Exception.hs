@@ -16,7 +16,7 @@ where
                        | ConvertException  String
                        | MimeException     String
                        | OuchException     String
-                       | RethrownException String
+                       | BrokerException   String
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception StomplException

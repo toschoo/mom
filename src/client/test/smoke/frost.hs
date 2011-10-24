@@ -38,7 +38,7 @@ where
     threadDelay delay
     writeQ q nullType [] ""
     threadDelay delay
-    writeQ q nullType [] "Stopping by Woods at a snowy Evening"
+    writeQ q nullType [] "Stopping by Woods on a Snowy Evening"
     threadDelay delay
     writeQ q nullType [] ""
     threadDelay delay
@@ -54,7 +54,7 @@ where
     threadDelay delay
     writeQ q nullType [] "my little horse must think it queer"
     threadDelay delay
-    writeQ q nullType [] "  to stop without a farmhouse near"
+    writeQ q nullType [] "  to stop without a farm house near"
     threadDelay delay
     writeQ q nullType [] "    between the woods and frozen lake"
     threadDelay delay

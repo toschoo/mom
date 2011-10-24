@@ -97,6 +97,7 @@ where
   send wr sock f = do
     let s = F.putFrame f
     lock wr
+    -- putStrLn $ U.toString s
     n <- finally (do BS.send sock s)
                  (do release wr)
     if n == B.length s then return ()
@@ -112,11 +113,11 @@ where
     eiS <- getInput rec sock max
     case eiS of -- heart beats!
       Left  e -> return $ Left e
-      Right s -> 
+      Right s -> do
         let prs = case mbR of 
                     Just r -> A.feed r
                     _      -> A.parse stompParser
-        in case prs s of
+        case prs s of
           A.Fail str ctx e -> return $ Left $
                                        (U.toString s) ++ 
                                        ": " ++ e
@@ -146,7 +147,7 @@ where
             let s' = B.dropWhile white s
             if B.null s' 
               then getInput rec sock max
-              else return $ Right s
+              else return $ Right s'
 
   white :: Char -> Bool
   white c = c == '\n'

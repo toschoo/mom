@@ -6,6 +6,9 @@ clean:
 	cd broker; make clean
 	rm -f test/common/*.o
 	rm -f test/common/*.hi
+	rm -f test/studies/*.o
+	rm -f test/studies/*.hi
+	rm -f test/studies/bytestr
 
 dist-clean:	clean
 	cd stompl; make dist-clean 

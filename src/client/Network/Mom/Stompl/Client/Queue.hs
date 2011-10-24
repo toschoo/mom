@@ -4,32 +4,27 @@ module Network.Mom.Stompl.Client.Queue (
                    P.msgRaw, msgContent,
                    P.msgType, P.msgLen, P.msgHdrs,
                    Queue, Qopt(..), Converter(..),
-                   Factory.Con,
+                   Factory.Con, 
+                   Factory.Rec(..), Receipt,
                    withConnection, 
                    withConnection_, 
-                   newQueue, readQ, writeQ,
+                   newQueue, readQ, 
+                   writeQ, writeQWith,
+                   waitReceipt,
                    withTransaction,
                    withTransaction_,
                    Topt(..),
-                   clearAllErrors, getErrors, solveError,
                    getPendingAcks, ack)
 where
 
   ----------------------------------------------------------------
   -- todo
-  -- - store errors, acks and receipts in Transaction
-  --   (Queues and listen!)
-  -- - writeQ return receipt
-  -- - clearErrors, checkErrors, solveError
-  -- - getPendingAcks
+  -- - generate receipts newQueue!
   -- - receipts on commit/abort
   -- - nack
-  -- - test/check for deadlocks
-  -- - write Transaction State
-  -- - generate receipts for queues!
-  -- - waitReceipt on writeQ
   -- - forceTx
   -- - Heartbeat
+  -- - test/check for deadlocks
   ----------------------------------------------------------------
 
   import qualified Socket   as S
@@ -45,32 +40,35 @@ where
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
   import           Control.Monad
-  import           Control.Exception (bracket, finally, throwIO)
-  import           Data.Typeable (Typeable)
+  import           Control.Exception (bracket, finally, 
+                                      throwIO)
 
   import           System.IO.Unsafe
 
   import           Data.List (find, deleteBy, delete, insert)
   import           Data.Char (isDigit)
 
-  import           Codec.MIME.Type as Mime (Type, nullType)
+  import           Codec.MIME.Type as Mime (Type)
 
   msgContent :: P.Message a -> a
   msgContent = P.msgCont
 
+  type Receipt = Rec
+
   data Connection = Connection {
                       conCon   :: P.Connection,
+                      conOwner :: ThreadId,
                       conSubs  :: [SubEntry],
                       conDests :: [DestEntry], -- needs connection in key!
                       conThrds :: [ThreadEntry],
                       conErrs  :: [F.Frame],
-                      conRecs  :: [String],
+                      conRecs  :: [Receipt],
                       conAcks  :: [String]}
 
   type ConEntry = (Con, Connection)
 
-  mkConnection :: P.Connection -> Connection
-  mkConnection c = Connection c [] [] [] [] [] []
+  mkConnection :: P.Connection -> ThreadId -> Connection
+  mkConnection c myself = Connection c myself [] [] [] [] [] []
 
   eq :: Eq a => (a, b) -> (a, b) -> Bool
   eq x y = fst x == fst y
@@ -135,23 +133,23 @@ where
   
   data Transaction = Trn {
                        txTmo     :: Int,
-                       txState   :: TxState, 
                        txWait    :: Bool,
                        txAbrtErr :: Bool,
                        txAbrtAck :: Bool,
                        txAcks    :: [String],
-                       txErrs    :: [F.Frame]
+                       txErrs    :: [F.Frame],
+                       txRecs    :: [Receipt]
                      }
 
   mkTrn :: [Topt] -> Transaction
   mkTrn os = Trn {
                txTmo     = tmo os,
-               txState   = TxCreated,
                txWait    = hasTopt os OWaitReceipts,
                txAbrtErr = hasTopt os OAbortOnError,
                txAbrtAck = hasTopt os OAbortMissingAcks,
                txAcks    = [],
-               txErrs    = []
+               txErrs    = [],
+               txRecs    = []
              }
 
   data Topt = OTimeout Int | OWaitReceipts | OAbortOnError | OAbortMissingAcks
@@ -164,14 +162,11 @@ where
 
   tmo :: [Topt] -> Int
   tmo os = case find isTimeout os of
-             Nothing           -> 0
              Just (OTimeout i) -> i
+             _                 -> 0
     where isTimeout o = case o of
                           OTimeout _ -> True
                           _          -> False
-
-  data TxState = TxCreated | TxStarted | TxAborted | TxCommitted
-    deriving (Eq, Show)
 
   type TxEntry = (Tx, Transaction)
 
@@ -186,8 +181,8 @@ where
         return (c {conThrds = [(tid, [t])]}, ())
       Just ts -> 
         return (c {conThrds = addTx2Thrds t tid (conThrds c) ts}, ())
-    where addTx2Thrds t tid ts trns = 
-            (tid, t : trns) : deleteBy eq (tid, trns) ts
+    where addTx2Thrds tx tid ts trns = 
+            (tid, tx : trns) : deleteBy eq (tid, trns) ts
 
   updTx :: Tx -> Con -> (Transaction -> Transaction) -> IO ()
   updTx tx cid f = withCon (updTx' tx f) cid
@@ -289,6 +284,57 @@ where
     let fromCon = rmAckFromCon mid
     withCon (updCurTx fromTx fromCon) cid
 
+  addRecToTx :: Receipt -> Transaction -> Transaction
+  addRecToTx r t = t {txRecs = r : txRecs t}
+
+  addRecToCon :: Receipt -> Connection -> Connection
+  addRecToCon r c = c {conRecs = r : conRecs c}
+
+  rmRecFromTx :: Receipt -> Transaction -> Transaction
+  rmRecFromTx r t = t {txRecs = delete r $ txRecs t}
+
+  rmRecFromCon :: Receipt -> Connection -> Connection
+  rmRecFromCon r c = c {conRecs = delete r $ conRecs c}
+
+  addRec :: Con -> Receipt -> IO ()
+  addRec cid r = do
+    let toTx  = addRecToTx  r
+    let toCon = addRecToCon r
+    withCon (updCurTx toTx toCon) cid
+
+  rmRec :: Con -> Receipt -> IO ()
+  rmRec cid r = do
+    let fromTx  = rmRecFromTx  r
+    let fromCon = rmRecFromCon r
+    withCon (updCurTx fromTx fromCon) cid
+
+  checkCurTx :: (Transaction -> Bool) ->
+                (Connection  -> Bool) -> 
+                Con -> IO Bool
+  checkCurTx onTx onCon cid = do
+    c   <- getCon cid
+    tid <- myThreadId
+    case lookup tid $ conThrds c of
+      Nothing -> return $ onCon c
+      Just ts -> if null ts then return $ onCon c
+                   else return $ onTx $ (snd . head) ts
+
+  checkReceiptTx :: Receipt -> Transaction -> Bool
+  checkReceiptTx r t = case find (== r) $ txRecs t of
+                         Nothing -> True
+                         Just _  -> False
+
+  checkReceiptCon :: Receipt -> Connection -> Bool
+  checkReceiptCon r c = case find (== r) $ conRecs c of
+                         Nothing -> True
+                         Just _  -> False
+
+  checkReceipt :: Con -> Receipt -> IO Bool
+  checkReceipt cid r = do
+    let onTx  = checkReceiptTx r
+    let onCon = checkReceiptCon r
+    checkCurTx onTx onCon cid
+
   rmTx :: Con -> IO ()
   rmTx cid = withCon rmTx' cid 
 
@@ -315,16 +361,17 @@ where
   withConnection :: String -> Int -> Int -> String -> String -> F.Heart -> 
                     (Con -> IO a) -> IO a
   withConnection host port mx usr pwd beat act = do
+    me  <- myThreadId
     cid <- mkUniqueConId
     c   <- P.connect host port mx usr pwd vers beat
     if not $ P.connected c 
       then throwIO $ ConnectException $ P.getErr c
-      else bracket (do addCon (cid, mkConnection c)
+      else bracket (do addCon (cid, mkConnection c me)
                        forkIO $ listen cid)
                    (\l -> do 
                        killThread l
                        _ <- P.disconnect c ""
-                       rmCon (cid, mkConnection c))
+                       rmCon (cid, mkConnection c me))
                    (\_ -> act cid)
     
   data Queue a = SendQ {
@@ -364,8 +411,8 @@ where
 
   ackMode :: [Qopt] -> F.AckMode
   ackMode os = case find isMode os of
-                 Nothing        -> F.Auto
                  Just (OMode x) -> x
+                 _              -> F.Auto
     where isMode x = case x of
                        OMode m -> True
                        _       -> False
@@ -459,10 +506,18 @@ where
                          throwIO $ QueueException $
                            "Write with RecvQ (" ++ (qName q) ++ ")"
                      | otherwise = 
-    withCon (writeQ' q mime hs x) (qCon q)
+    writeQWith q mime hs x >>= (\_ -> return ())
 
-  writeQ' :: Queue a -> Mime.Type -> [F.Header] -> a -> ConEntry -> IO (Connection, ())
-  writeQ' q mime hs x (cid, c) = 
+  writeQWith :: Queue a -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeQWith q mime hs x | typeOf q == RecvQT = 
+                             throwIO $ QueueException $
+                               "Write with RecvQ (" ++ (qName q) ++ ")"
+                         | otherwise = 
+    writeQ' q mime hs x 
+
+  writeQ' :: Queue a -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeQ' q mime hs x = do
+    c <- getCon (qCon q)
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
                  "Not connected (" ++ (show $ qCon q) ++ ")"
@@ -472,29 +527,50 @@ where
         tx <- (getCurTx c >>= (\mbT -> 
                  case mbT of
                    Nothing     -> return ""
-                   Just (x, t) -> return (show x)))
+                   Just (i, t) -> return (show i)))
+        rc <- (if qRec q
+                  then mkUniqueRecc
+                  else return NoRec)
         let m = P.mkMessage "" (qDest q) (qDest q) 
                             mime (B.length s) tx s x
-        P.send (conCon c) m "" hs 
-        return (c, ())
+
+        if qRec q then addRec (qCon q) rc else return ()
+        P.send (conCon c) m (show rc) hs 
+        if (qRec q) && (qWait q) 
+          then waitReceipt (qCon q) rc >> return rc
+          else return rc
 
   ack :: Con -> P.Message a -> IO ()
   ack cid msg = do
-    withCon   (ack' msg)  cid
+    r <- ack' cid False msg
     rmAck cid (P.msgId msg)
 
-  ack' :: P.Message a -> ConEntry -> IO (Connection, ())
-  ack' msg (cid, c) =
+  ackWith :: Con -> P.Message a -> IO Receipt
+  ackWith cid msg = do
+    r <- ack' cid True msg  
+    rmAck cid (P.msgId msg)
+    return r
+
+  ack' :: Con -> Bool -> P.Message a -> IO Receipt
+  ack' cid with msg = do
+    c <- getCon cid
     if not $ P.connected (conCon c) 
       then throwIO $ ConnectException $ 
              "Not connected (" ++ (show cid) ++ ")"
-      else do
-        tx <- (getCurTx c >>= (\mbT -> 
-                  case mbT of
-                    Nothing     -> return ""
-                    Just (x, t) -> return $ show x))
-        P.ack  (conCon c) msg {P.msgTx = tx} "" 
-        return (c, ())
+      else if null (P.msgId msg)
+           then throwIO $ ProtocolException "No message id in message!"
+           else do
+             tx <- (getCurTx c >>= (\mbT -> 
+                       case mbT of
+                         Nothing     -> return ""
+                         Just (x, t) -> return $ show x))
+             rc <- (if with
+                      then mkUniqueRecc
+                      else return NoRec)
+             P.ack  (conCon c) msg {P.msgTx = tx} $ show rc
+             if with 
+               then waitReceipt cid rc >> return rc
+               else return rc
 
   withTransaction_ :: Con -> [Topt] -> (Con -> IO ()) -> IO ()
   withTransaction_ cid os op = do
@@ -540,6 +616,14 @@ where
       Nothing     -> return $ conAcks c
       Just (_, t) -> return $ txAcks  t
 
+  waitReceipt :: Con -> Receipt -> IO ()
+  waitReceipt cid r = do
+    ok <- checkReceipt cid r
+    if ok then return ()
+      else do 
+        threadDelay $ ms 1
+        waitReceipt cid r
+
   startTx :: Tx -> Con -> IO ()
   startTx tx cid = withCon (startTx' tx) cid
 
@@ -559,8 +643,8 @@ where
         if (txErr t) || (txPendingAck t)
           then P.abort (conCon c) (show tx) ""
           else do
-            let tmo = txTmo t
-            ok <- waitTx tx cid tmo
+            let tm = txTmo t
+            ok <- waitTx tx cid tm
             if ok
               then P.commit (conCon c) (show tx) ""
               else P.abort  (conCon c) (show tx) ""
@@ -579,7 +663,7 @@ where
 
   waitTx :: Tx -> Con -> Int -> IO Bool
   waitTx tx cid delay = do
-    c <- getCon cid
+    c   <- getCon cid
     mbT <- getTx tx c
     case mbT of
       Nothing -> return True
@@ -619,26 +703,40 @@ where
         return ()
       Right f -> 
         case F.typeOf f of
-          F.Message -> handleMessage c f
-          F.Error   -> addErr cid f
-          F.Receipt -> putStrLn "Unexpected Receipt Frame!" 
+          F.Message -> handleMessage cid f
+          F.Error   -> handleError cid c f
+          F.Receipt -> handleReceipt cid f
           _         -> putStrLn $ "Unexpected Frame: " ++ (show $ F.typeOf f)
 
-  handleMessage :: Connection -> F.Frame -> IO ()
-  handleMessage c f = do
-    case getCh of
+  handleMessage :: Con -> F.Frame -> IO ()
+  handleMessage cid f = do
+    c <- getCon cid
+    case getCh c of
       Nothing -> do
-        putStrLn "Unkown Queue"
-        return () -- error handling
+        putStrLn $ "Unknown Queue: " ++ (show f)
       Just ch -> 
         writeChan ch f
-    where getCh = let dst = F.getDest f
-                      sid = F.getSub  f
-                  in if null sid
-                    then getDest dst c
-                    else if not $ numeric sid
-                           then Nothing -- error handling
-                           else getSub (Sub $ read sid) c
+    where getCh c = let dst = F.getDest f
+                        sid = F.getSub  f
+                    in if null sid
+                      then getDest dst c
+                      else if not $ numeric sid
+                             then Nothing -- error handling
+                             else getSub (Sub $ read sid) c
+
+  handleError :: Con -> Connection -> F.Frame -> IO ()
+  handleError cid c f = do
+    addErr cid f
+    let e = F.getMsg f ++ ": " ++ (U.toString $ F.getBody f)
+    throwTo (conOwner c) (BrokerException e) 
+
+  handleReceipt :: Con -> F.Frame -> IO ()
+  handleReceipt cid f = do
+    case parseRec $ F.getReceipt f of
+      Just r  -> rmRec cid r
+      Nothing -> do
+        -- log error!
+        putStrLn $ "Invalid receipt: " ++ (F.getReceipt f)
 
   numeric :: String -> Bool
   numeric = and . map isDigit
