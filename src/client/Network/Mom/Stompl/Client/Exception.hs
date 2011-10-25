@@ -17,6 +17,7 @@ where
                        | MimeException     String
                        | OuchException     String
                        | BrokerException   String
+                       | AppException      String
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception StomplException

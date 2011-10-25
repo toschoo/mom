@@ -3,8 +3,7 @@ module Test (
          Test, TestGroup,
          execGroup, evaluate,
          mkTest, mkGroup, mkMetaGroup,
-         (%&), (%|), neg, andR
-         )
+         (?>), (%&), (%|), neg, andR)
 where
 
   import Control.Monad()
@@ -148,6 +147,14 @@ where
   (%|) :: TestResult -> TestResult -> TestResult
   Fail x %| Fail y = Fail (x ++ " " ++ y)
   _      %| _      = Pass
+
+  infixr 8 ?>
+  (?>) :: Monad m => m TestResult -> m TestResult -> m TestResult
+  f ?> g = do
+    r <- f
+    case r of
+      Fail e -> return $ Fail e
+      Pass   -> g
 
   neg :: TestResult -> TestResult
   neg  Pass    = Fail ""
