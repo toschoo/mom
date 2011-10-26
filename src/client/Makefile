@@ -14,6 +14,7 @@ CLIENT = Client
 SUBSRC = $(SUTDIR)/Socket.hs \
          $(SUTDIR)/Protocol.hs \
          $(SUTDIR)/Factory.hs \
+         $(SUTDIR)/State.hs \
          $(SUTDIR)/Queue.hs 
 
 GHC = ghc
