@@ -14,6 +14,7 @@ module State (
          addTx,  getTx, rmTx, rmThisTx,
          updTx, updCurTx, getCurTx,
          updTxState,
+         txPendingAck, txReceipts,
          addAck, rmAck, addRec, rmRec,
          checkReceipt)
 where
@@ -32,6 +33,10 @@ where
   import           Data.List (find, deleteBy, delete)
   import           Data.Char (isDigit)
 
+  ------------------------------------------------------------------------
+  -- | Returns the content of the message in the format 
+  --   produced by an in-bound converter
+  ------------------------------------------------------------------------
   msgContent :: P.Message a -> a
   msgContent = P.msgCont
 
@@ -44,6 +49,7 @@ where
   eq :: Eq a => (a, b) -> (a, b) -> Bool
   eq x y = fst x == fst y
 
+  -- | Just a nicer word for 'Rec'
   type Receipt = Rec
 
   ------------------------------------------------------------------------
@@ -93,8 +99,8 @@ where
   getSub :: Sub -> Connection -> Maybe (Chan F.Frame)
   getSub sid c = lookup sid (conSubs c)
 
-  rmSub :: SubEntry -> Connection -> Connection
-  rmSub s c = c {conSubs = ss} 
+  rmSubFromCon :: SubEntry -> Connection -> Connection
+  rmSubFromCon s c = c {conSubs = ss} 
     where ss = deleteBy eq s (conSubs c)
 
   addDestToCon :: DestEntry -> Connection -> Connection
@@ -103,9 +109,19 @@ where
   getDest :: String -> Connection -> Maybe (Chan F.Frame)
   getDest dst c = lookup dst (conDests c)
 
-  rmDest :: DestEntry -> Connection -> Connection
-  rmDest d c = c {conDests = ds}
+  rmDestFromCon :: DestEntry -> Connection -> Connection
+  rmDestFromCon d c = c {conDests = ds}
     where ds = deleteBy eq d (conDests c)
+
+  txPendingAck :: Transaction -> Bool
+  txPendingAck t = if (txAbrtAck t)
+                     then if (null $ txAcks t) then False else True
+                     else False
+
+  txReceipts :: Transaction -> Bool
+  txReceipts t = if (txAbrtRc t) 
+                   then if (null $ txRecs t) then False else True
+                   else False
 
   ------------------------------------------------------------------------
   -- Connection Entry
@@ -137,7 +153,39 @@ where
                txRecs    = []
              }
 
-  data Topt = OTimeout Int | OWithReceipts | OAbortMissingAcks 
+  ------------------------------------------------------------------------
+  -- | Options passed to a transaction.
+  ------------------------------------------------------------------------
+  data Topt = 
+            -- | The timeout in milliseconds (not microseconds!)
+            --   to wait for pending receipts.
+            --   If no timeout or a timeout /<= 0/, but 
+            --   'OWithReceipts' is given,
+            --   the transaction will immediately terminate
+            --   with 'TxException';
+            --   otherwise it will wait until all pending
+            --   ineractions with the broker have terminated
+            --   or the timeout has expired - whatever comes first.
+            --   If the timeout expires first, 'TxException' is raised. 
+            OTimeout Int 
+            -- | If this option is given,
+            --   interactions of the transaction with the broker,
+            --   /i.e./ starting and ending the transaction,
+            --   will request a receipt from the broker.
+            --   If receipts are pending, when the transaction
+            --   is ready to terminate and 'OTimeout' with
+            --   a value /> 0/ is given, the transaction will
+            --   wait for pending receipts.
+            | OWithReceipts 
+            -- | If a message was received from a 
+            --   queue with 'OMode' option other 
+            --   than 'F.Auto' and this message has not been
+            --   acknowledged when the transaction is ready
+            --   to terminate, the /ack/ is /missing/.
+            --   With this option, the transaction 
+            --   will not commit with missing /acks/,
+            --   but abort and raise 'TxException'.
+            | OAbortMissingAcks 
     deriving (Eq, Show)
 
   hasTopt :: Topt -> [Topt] -> Bool
@@ -212,6 +260,18 @@ where
 
   addDest :: Con -> DestEntry -> IO ()
   addDest cid d = withCon cid $ \(_, c) -> return (addDestToCon d c, ())
+
+  rmSub :: Con -> Sub -> IO ()
+  rmSub cid sid = withCon cid rm
+    where rm (_, c) = case getSub sid c of 
+                        Nothing -> return (c, ())
+                        Just ch -> return (rmSubFromCon (sid, ch) c, ())
+
+  rmDest :: Con -> String -> IO ()
+  rmDest cid dst = withCon cid rm
+    where rm (_, c) = case getDest dst c of 
+                        Nothing -> return (c, ())
+                        Just ch -> return (rmDestFromCon (dst, ch) c, ())
 
   addTx :: TxEntry -> Con -> IO ()
   addTx t cid = withCon cid $ \(_, c) -> do

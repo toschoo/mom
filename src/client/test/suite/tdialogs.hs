@@ -89,6 +89,7 @@ where
         t26  = mkTest "Create InQ with Rc       " $ testMkInQueueWithRc p 
         t30  = mkTest "Send and Receive         " $ testSndRcv p
         t35  = mkTest "Unicode                  " $ testUTF8 p
+        t36  = mkTest "withQueue                " $ testWithQueue p 
         t40  = mkTest "Transaction              " $ testTx1 p
         t45  = mkTest "Abort                    " $ testAbort p
         t46  = mkTest "Abort on exception       " $ testTxException p
@@ -99,14 +100,21 @@ where
         t80  = mkTest "With Receipt1            " $ testQWithReceipt p
         t90  = mkTest "Wait on Receipt1         " $ testQWaitReceipt p
         -- ackWith
-        -- transaction with receipts
+        -- nack
+        -- nackWith
+        -- error handling: BrokerException
+        -- error handling: converter error
+        -- complex converter ok
         t105 = mkTest "Pending Receipts no Tmo  " $ testTxReceiptsNoTmo p
         t110 = mkTest "Pending Receipts    Tmo  " $ testTxReceiptsTmo p
         t120 = mkTest "Nested Transactions      " $ testNestedTx p
         -- nested transaction with abort
         -- nested transaction with exception
+        -- share connection among threads
+        -- share queue among threads
+        -- share transaction among threads
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [t10, t20, t25, t26, t30, t35, t40, t45, t46, t47,
+        [t10, t20, t25, t26, t30, t35, t36, t40, t45, t46, t47,
          t50, t60, t70, t80, t90, t105, t110, t120]
 
   testMkInQueue :: Int -> IO TestResult
@@ -127,7 +135,7 @@ where
                    [OReceive, OWaitReceipt] [] iconv
       case mbQ of
         Nothing -> return $ Fail $ "No Receipt"
-        Just q  -> return Pass
+        Just _  -> return Pass
     case eiR of
        Left e  -> return $ Fail $ show e
        Right r -> return r
@@ -139,7 +147,7 @@ where
                    [OReceive, OWithReceipt] [] iconv
       case mbQ of
         Nothing -> return $ Fail $ "No Receipt"
-        Just q  -> return Pass
+        Just _  -> return Pass
     case eiR of
        Left e  -> return $ Fail $ show e
        Right r -> return r
@@ -163,6 +171,36 @@ where
       if msgCont m == text1
         then return Pass
         else return $ Fail $ "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+    case eiR of
+       Left e  -> return $ Fail $ show e
+       Right r -> return r
+
+  testWithQueue :: Int -> IO TestResult
+  testWithQueue p = do
+    eiR <- try $ stdCon p $ \c -> do
+      oQ <- newQueue c "OUT" tQ1 [OSend] [] oconv
+      eiQ <- withQueue c "IN" tQ1 [OReceive] [] iconv $ \q -> do
+        writeQ oQ nullType [] text1 
+        mbM1 <- tmo $ readQ q
+        case mbM1 of
+          Nothing -> return $ Left "Can't read from queue!"
+          Just m  -> if msgContent m == text1 then return $ Right q
+                         else return $ Left $ "Wrong message: " ++ 
+                                            (msgContent m)
+      case eiQ of
+        Left  e -> return $ Fail e
+        Right q -> do
+          writeQ oQ nullType [] text2 
+          mbM2 <- tmo $ try $ readQ q
+          case mbM2 of
+            Nothing   -> return Pass
+            Just eiM  -> case eiM of
+                           Left (QueueException e) -> return Pass
+                           Left e -> return $ Fail $ 
+                                       "Unexpected Exception: " ++
+                                       (show e)
+                           Right _ -> return $ Fail $                               
+                                        "Received message from dead queue!" 
     case eiR of
        Left e  -> return $ Fail $ show e
        Right r -> return r

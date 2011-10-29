@@ -57,15 +57,33 @@ where
                       subName = qn,
                       subMode = am}
 
+  ------------------------------------------------------------------------
+  -- | Any content received from a queue
+  --   is wrapped in a message.
+  --   It is, in particular, the return value of /readQ/.
+  ------------------------------------------------------------------------
   data Message a = Msg {
+                     -- | The message Identifier
                      msgId   :: String,
+                     -- | The subscription
                      msgSub  :: String,
+                     -- | The destination
                      msgDest :: String,
+                     -- | The Stompl headers
+                     --   that came with the message
                      msgHdrs :: [F.Header],
+                     -- | The /MIME/ type of the 
+                     --   encoded content
                      msgType :: Mime.Type,
+                     -- | The length of the 
+                     --   encoded content
                      msgLen  :: Int,
+                     -- | The transaction where 
+                     --   the message was received
                      msgTx   :: String,
+                     -- | The encoded content             
                      msgRaw  :: B.ByteString,
+                     -- | The content             
                      msgCont :: a}
   
   mkMessage :: String -> String -> String -> 
@@ -75,9 +93,9 @@ where
                                           msgId   = mid,
                                           msgSub  = sub,
                                           msgDest = dst,
-                                          msgHdrs = [],
-                                          msgType = typ,
-                                          msgLen  = len,
+                                          msgHdrs = [], 
+                                          msgType = typ, 
+                                          msgLen  = len, 
                                           msgTx   = tx,
                                           msgRaw  = raw,
                                           msgCont = cont}

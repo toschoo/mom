@@ -44,6 +44,9 @@ $(SMOKEDIR)/sendf:	$(SMOKEDIR)/sendf.hs $(SUBSRC)
 $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 
 suite:	$(TDIR)/tprotocol
 
@@ -71,6 +74,7 @@ clean:
 	rm -f $(SMOKEDIR)/sendtx
 	rm -f $(SMOKEDIR)/sendf
 	rm -f $(SMOKEDIR)/sendforever
+	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/frost
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o

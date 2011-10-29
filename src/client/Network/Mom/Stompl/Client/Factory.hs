@@ -10,6 +10,10 @@ where
   import Control.Concurrent
   import Data.Char (isDigit)
 
+  ------------------------------------------------------------------------
+  -- | Opaque Connection handle.
+  --   Only valid within the action passed to /withConnection/. 
+  ------------------------------------------------------------------------
   newtype Con = Con Int
     deriving (Eq)
 
@@ -28,7 +32,20 @@ where
   instance Show Tx where
     show (Tx i) = show i
 
-  data Rec = Rec Int | NoRec
+  ------------------------------------------------------------------------
+  -- | A receipt is sent to the broker as part of an interaction.
+  --   The broker will confirm the interaction by means of the receipt. 
+  ------------------------------------------------------------------------
+  data Rec = 
+           -- | A valid receipt
+           Rec Int 
+           -- | No receipt was sent with this interaction.
+           --   Receiving a 'NoRec' is not an error,
+           --   but the result of an inconsistent - but harmless -
+           --   use of /writeQWith/ on a queue that does not
+           --   send receipts. An application should, of course,
+           --   not try to wait for a 'NoRec'. It will never be confirmed.
+           | NoRec
     deriving (Eq)
 
   instance Show Rec where

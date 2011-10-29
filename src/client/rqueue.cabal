@@ -1,10 +1,29 @@
 Name:            rqueue
 Version:         0.0.1
 Cabal-Version:   >= 1.8
+Copyright:       Copyright (c) Tobias Schoofs, 2011
 License:         BSD3
 Author:          Tobias Schoofs
-Synopsis:        Stompl Client Library 
+Maintainer:      tobias.schoofs@gmx.net
+Homepage:        http://github.com/toschoo/stompl
+Category:        Network
 Build-Type:      Simple
+Synopsis:        Stompl Client Library 
+Description:
+  The Stompl Protocol specifies message-oriented interoperability.
+  Applications connect to a message broker to send (publish)
+  or receive (subscribe) messages through queues. 
+  Interoperating applications do not know 
+  the location or internal structure of each other.
+  They see only the interfaces, /i.e./ the messages
+  published and subscribed through the broker.
+  
+  The Stompl Client library provides abstractions
+  over the Stomp protocol, it implements in particular 
+  'Connection' and 'Transaction'.
+  The Stompl Client Queue library provides notions for
+  'Queue', 'Message' and 'Receipt'.
+
 
 Library
   Build-Depends:   base        >= 4.0,
