@@ -34,7 +34,7 @@ where
                        --   that was not subscribed
                        | ProtocolException String
                        -- | Thrown on wrong uses of queues, /e.g./
-                       --   write on a receive queue and vice versa
+                       --   use of a queue outside its scope
                        | QueueException    String
                        -- | Thrown on transaction errors, /e.g./
                        --   pending acks

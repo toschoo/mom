@@ -20,6 +20,6 @@ where
   conAndSend :: String -> String -> IO ()
   conAndSend qn m = do
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let conv = OutBound (return . B.pack)
-      q <- newQueue c "Test-Q" qn [OSend] [] conv
+      let conv = return . B.pack
+      q <- newWriter c "Test-Q" qn [] [] conv
       writeQ q nullType [] m

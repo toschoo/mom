@@ -297,7 +297,9 @@ where
 
   mkUnSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkUnSubF sub receipt hs =
-    F.mkUSubFrame $ [F.mkIdHdr $ subId sub] ++ (mkReceipt receipt) ++ hs
+    let dh = if null $ subName sub then [] else [F.mkDestHdr $ subName sub]
+    in  F.mkUSubFrame $ [F.mkIdHdr $ subId sub] ++ dh ++ 
+                        (mkReceipt receipt)     ++ hs
 
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]

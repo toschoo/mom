@@ -32,14 +32,14 @@ where
   ping :: String -> IO ()
   ping qn = do 
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let iconv = InBound  (\_ _ _ -> strToPing . U.toString)
-      let oconv = OutBound (return . U.fromString . show)
-      inQ  <- newQueue c "Q-Ping" qn [OReceive] [] iconv
-      outQ <- newQueue c "Q-Pong" qn [OSend]    [] oconv
+      let iconv _ _ _ = strToPing . U.toString
+      let oconv = return . U.fromString . show
+      inQ  <- newReader c "Q-Ping" qn [] [] iconv
+      outQ <- newWriter c "Q-Pong" qn []    [] oconv
       writeQ outQ nullType [] Pong
       listen inQ outQ
  
-  listen  :: Queue Ping -> Queue Ping -> IO ()
+  listen  :: Reader Ping -> Writer Ping -> IO ()
   listen iQ oQ = forever $ do
     eiM <- try $ readQ iQ 
     case eiM of

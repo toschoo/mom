@@ -27,11 +27,11 @@ where
   conAndListen :: String -> IO ()
   conAndListen qn = withSocketsDo $ do -- connectAndGo
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let conv = InBound (\_ _ _ -> return . U.toString)
-      q <- newQueue c "Q-Hof" qn [OReceive] [] conv
+      let conv _ _ _ = return . U.toString
+      q <- newReader c "Q-Hof" qn [] [] conv
       listen2 q
 
-  listen2 :: Queue String -> IO ()
+  listen2 :: Reader String -> IO ()
   listen2 q = forever $ do
     eiM <- try $ readQ q 
     case eiM of

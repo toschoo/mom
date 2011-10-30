@@ -21,6 +21,6 @@ where
   conAndSend qn f = do
     m <- B.readFile f
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let conv = OutBound return 
-      q <- newQueue c "Test-Q" qn [OSend] [] conv
+      let conv = return 
+      q <- newWriter c "Test-Q" qn [] [] conv
       writeQ q nullType [] m

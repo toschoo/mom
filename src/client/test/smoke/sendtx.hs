@@ -8,10 +8,9 @@ where
 
   import System.Exit
   import System.Environment
-
   import Network.Socket (withSocketsDo)
-
   import qualified Data.ByteString.Char8 as B
+  import Codec.MIME.Type (nullType)
 
   main :: IO ()
   main = do
@@ -25,12 +24,12 @@ where
   makeTransaction :: String -> IO ()
   makeTransaction qn = withSocketsDo $ do -- connectAndGo
     withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-      let conv = OutBound (return . B.pack)
-      q <- newQueue c "Q-Hof" qn [OSend] [] conv
+      let conv = return . B.pack
+      q <- newWriter c "Q-Hof" qn [] [] conv
       withTransaction_ c [] $ \_ -> do
-        writeQ q "text/plain" [] "Tx Message 1" 
-        writeQ q "text/plain" [] "Tx Message 2"
-        writeQ q "text/plain" [] "Tx Message 3"
+        writeQ q nullType [] "Tx Message 1" 
+        writeQ q nullType [] "Tx Message 2"
+        writeQ q nullType [] "Tx Message 3"
         putStrLn "Hit key to end transaction!"
         _ <- getChar
         return ()

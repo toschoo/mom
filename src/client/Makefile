@@ -24,7 +24,14 @@ INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../stompl/Network/Mom/Stompl \
 		    -i../test/common
 
-smoke:	$(SMOKEDIR)/listen2 $(SMOKEDIR)/send2 $(SMOKEDIR)/sendtx
+smoke:	$(SMOKEDIR)/listen2 \
+        $(SMOKEDIR)/send2 \
+        $(SMOKEDIR)/sendtx \
+        $(SMOKEDIR)/sendf \
+        $(SMOKEDIR)/sendforever \
+        $(SMOKEDIR)/sendjp \
+        $(SMOKEDIR)/frost \
+        $(SMOKEDIR)/ping 
 
 $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -39,6 +46,9 @@ $(SMOKEDIR)/sendtx:	$(SMOKEDIR)/sendtx.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/sendf:	$(SMOKEDIR)/sendf.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/sendjp:	$(SMOKEDIR)/sendjp.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)

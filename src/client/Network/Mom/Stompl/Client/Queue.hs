@@ -16,9 +16,8 @@
 -- 
 -- The Stompl Client library provides abstractions
 -- over the Stomp protocol, it implements in particular 
--- 'Connection' and 'Transaction'.
--- The Stompl Client Queue library provides notions for
--- 'Queue', 'P.Message' and 'Receipt'.
+-- 'Connection', 'Transaction' and
+-- queues in terms of 'Reader' and 'Writer'.
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Client.Queue (
                    -- * Connections
@@ -28,15 +27,16 @@ module Network.Mom.Stompl.Client.Queue (
                    withConnection, 
                    withConnection_, 
                    Factory.Con, 
+                   F.Heart,
                    -- * Queues
 
                    -- $stomp_queues
 
-                   Queue, 
-                   newQueue, 
-                   withQueue, withQueue_,
-                   Qopt(..), F.AckMode(..), Converter(..),
-                   OutBoundF, InBoundF, F.Frame,
+                   Reader, Writer, 
+                   newReader, newWriter, 
+                   withReader, withReader_,
+                   Qopt(..), F.AckMode(..), 
+                   InBound, OutBound, 
                    readQ, 
                    writeQ, writeQWith,
 
@@ -73,6 +73,9 @@ module Network.Mom.Stompl.Client.Queue (
 where
   ----------------------------------------------------------------
   -- todo
+  -- - review OWithReceipts (Transaction):
+  --   - one option to say wait for Receipts
+  --   - another to say use receipts
   -- - msgId: String -> MsgId
   -- - nack
   -- - Heartbeat
@@ -100,6 +103,7 @@ where
   import           Data.List (find)
 
   import           Codec.MIME.Type as Mime (Type)
+  import           System.Timeout (timeout)
 
   {- $stomp_con
 
@@ -173,8 +177,8 @@ where
      of adding meaning to the message content
      by adding types to queues. 
      From the perspective of the client Haskell program,
-     a queue is a kind of communication channel
-     that returns messages of a given type.
+     a queue is a communication channel
+     that allows sending and receiving messages of a given type.
      This adds type-safety to Stompl queues, which,
      otherwise, would just return plain bytes.
      It is, on the other hand, always possible
@@ -184,6 +188,15 @@ where
      may be read from the 'P.Message';
      in the second case, the contents of the 'P.Message'
      will be a 'B.ByteString'.
+
+     In the Stompl library, queues 
+     are unidirectional communication channels
+     either for reading or writing.
+     This is captured by implementing queues
+     with two different data types,
+     a 'Reader' and a 'Writer'.
+     On creating a queue a set of parameters can be defined
+     to control the behaviour of the queue.
   -}
 
   {- $stomp_receipts
@@ -282,8 +295,8 @@ where
      >   os <- getArgs
      >   case os of
      >     [q] -> withSocketsDo $ ping q
-     >     _   -> 
-     >       -- error handling...
+     >     _   -> putStrLn "I need a queue name!"
+     >            -- error handling...
      > 
      > data Ping = Ping | Pong
      >   deriving (Show)
@@ -297,14 +310,14 @@ where
      > ping :: String -> IO ()
      > ping qn = do 
      >   withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
-     >     let iconv = InBound  (\_ _ _ -> strToPing . U.toString)
-     >     let oconv = OutBound (return . U.fromString . show)
-     >     inQ  <- newQueue c "Q-IN"  qn [OReceive] [] iconv
-     >     outQ <- newQueue c "Q-OUT" qn [OSend]    [] oconv
+     >     let iconv _ _ _ = strToPing . U.toString
+     >     let oconv       = return    . U.fromString . show
+     >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
+     >     outQ <- newWriter c "Q-OUT" qn [] [] oconv
      >     writeQ outQ nullType [] Pong
      >     listen inQ outQ
      >
-     > listen  :: Queue Ping -> Queue Ping -> IO ()
+     > listen  :: Reader Ping -> Writer Ping -> IO ()
      > listen iQ oQ = forever $ do
      >   eiM <- try $ readQ iQ 
      >   case eiM of
@@ -337,8 +350,7 @@ where
   --   The connection life time is the scope of this action.
   --   The connection handle, 'Con', that is passed to the action
   --   should not be returned from 'withConnection'.
-  --   Connections, however, are thread-safe and, hence, 
-  --   can be shared among threads.
+  --   Connections, however, can be shared among threads.
   --   In this case, the programmer has to take care
   --   of not terminating the action before all other threads
   --   working on the connection have finished.
@@ -405,91 +417,79 @@ where
                    (\_ -> act cid)
     
   ------------------------------------------------------------------------
-  -- | The Queue data type is an abstraction over Stomp queues
-  --   and subscriptions.
-  --
-  --   Queues are unidirectional communication channels
-  --   either for writing or reading.
-  --   The direction as well as the corresponding Stomp queue
-  --   are defined when the queue is created.
-  --   On creating a queue a set of parameters can be defined
-  --   to control the behaviour of the queue.
+  -- | A Queue for sending messages.
   ------------------------------------------------------------------------
-  data Queue a = SendQ {
-                   qCon  :: Con,
-                   qDest :: String,
-                   qName :: String,
-                   qRec  :: Bool,
-                   qWait :: Bool,
-                   qTx   :: Bool,
-                   qTo   :: OutBoundF a}
-               | RecvQ {
-                   qCon  :: Con,
-                   qSub  :: Sub,
-                   qDest :: String,
-                   qName :: String,
-                   qMode :: F.AckMode,
-                   qAuto :: Bool, -- library creates Ack
-                   qRec  :: Bool,
-                   qFrom :: InBoundF a}
+  data Writer a = SendQ {
+                   wCon  :: Con,
+                   wDest :: String,
+                   wName :: String,
+                   wRec  :: Bool,
+                   wWait :: Bool,
+                   wTx   :: Bool,
+                   wTo   :: OutBound a}
 
-  instance Eq (Queue a) where
-    q1 == q2 = qName q1 == qName q2
+  ------------------------------------------------------------------------
+  -- | A Queue for receiving messages
+  ------------------------------------------------------------------------
+  data Reader a = RecvQ {
+                   rCon  :: Con,
+                   rSub  :: Sub,
+                   rDest :: String,
+                   rName :: String,
+                   rMode :: F.AckMode,
+                   rAuto :: Bool, -- library creates Ack
+                   rRec  :: Bool,
+                   rFrom :: InBound a}
 
-  data QType = SendQT | RecvQT
-    deriving (Eq)
+  instance Eq (Reader a) where
+    q1 == q2 = rName q1 == rName q2
 
-  typeOf :: Queue a -> QType
-  typeOf (SendQ _ _ _ _ _ _ _  ) = SendQT
-  typeOf (RecvQ _ _ _ _ _ _ _ _) = RecvQT
+  instance Eq (Writer a) where
+    q1 == q2 = wName q1 == wName q2
 
   ------------------------------------------------------------------------
   -- | Options that may be passed 
   --   to 'newQueue' and its variants.
   ------------------------------------------------------------------------
   data Qopt = 
-            -- | A 'Queue' created with 'OSend' will throw 'QueueException'
-            --   when 'readQ' is applied to it.
-            OSend 
-            -- | A 'Queue' created with 'OReceive' will throw a 'QueueException'
-            --   when 'sendQ' is applied to it.
-            | OReceive 
-            -- | A 'Queue' created with 'OWithReceipt' will request a receipt
+            -- | A queue created with 'OWithReceipt' will request a receipt
             --   on all interactions with the broker.
             --   The handling of receipts may be transparent to applications or
             --   may be made visible by using 'writeQWith'.
             --   Note that the option has effect right from the beginning, /i.e./
-            --   a queue created with 'OWithReceipt' and 'OReceive' will 
+            --   a 'Reader' created with 'OWithReceipt' will 
             --   issue a request for receipt when subscribing to a Stomp queue.
-            | OWithReceipt 
-            -- | A 'Queue' created with 'OWaitReceipt' will wait for the receipt
+            OWithReceipt 
+            -- | A queue created with 'OWaitReceipt' will wait for the receipt
             --   before returning from a call that has issued a request for receipt.
             --   This implies that the current thread will yield the processor.
             --   'writeQ' will internally create a request for receipt and 
             --   wait for the broker to confirm the receipt before returning.
-            --   Note that, for 'newQueue', there is no difference between
+            --   Note that, for 'newReader', there is no difference between
             --   'OWaitReceipt' and 'OWithReceipt'. Either option will cause
             --   the thread to preempt until the receipt is confirmed.
+            --
             --   On writing a message, this is not always the preferred
             --   method. You may want to fire and forget - for a while,
             --   before you check that your message has actually been 
             --   handled by the broker. In this case, you will create the
-            --   queue with 'OWithReceipt' only and, later, after having
-            --   sent a message with 'writeQ', wait for the receipt using
+            --   'Writer' with 'OWithReceipt' only and, later, after having
+            --   sent a message with 'writeQWith', wait for the receipt using
             --   'waitReceipt'. Note that 'OWaitReceipt' without 'OWithReceipt'
-            --   has no meening with 'writeQ'. If you want to send a receipt
+            --   has no meaning with 'writeQ' and 'writeQWith'. 
+            --   If you want to send a receipt
             --   and wait for the broker to confirm it, you have to use 
             --   both options.
             --
             --   It is good practice to use /timeout/ with all calls
             --   that may wait for receipts, 
-            --   /ie/ 'newQueue' and its variants
+            --   /ie/ 'newReader' and 'withReader' 
             --   with 'OWithReceipt' or 'OWaitReceipt',
-            --   'writeQ' and 'writeQWith' with 'OWaitReceipt'
+            --   or 'writeQ' and 'writeQWith' with 'OWaitReceipt'
             --   and 'ackWith'.
             | OWaitReceipt 
             -- | The option defines the 'F.AckMode' of the queue,
-            --   which is relevant for receiving 'Queue's only.
+            --   which is relevant for 'Reader's only.
             --   'F.AckMode's are: 
             --   'F.Auto', 'F.Client', 'F.ClientIndi'.
             --
@@ -514,7 +514,7 @@ where
             --   'F.Client' or 'F.ClientIndi', send an acknowledgment
             --   automatically when a message has been read from the queue. 
             | OAck
-            -- | A 'Queue' created with 'OForceTx' will throw 
+            -- | A queue created with 'OForceTx' will throw 
             --   'QueueException' when used outside a 'Transaction'.
             | OForceTx
     deriving (Show, Read, Eq) 
@@ -533,19 +533,14 @@ where
                        _       -> False
 
   ------------------------------------------------------------------------
-  -- | Convenience type for out-bound converters
-  ------------------------------------------------------------------------
-  type OutBoundF a = a -> IO B.ByteString
-  ------------------------------------------------------------------------
-  -- | Convenience type for in-bound converters
-  ------------------------------------------------------------------------
-  type InBoundF  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
-  ------------------------------------------------------------------------
-  -- | Converters are user-defined actions passed to 'newQueue'
-  --   that convert a value of type /a/ to 'B.ByteString' ('OutBound') or
-  --                a 'B.ByteString' to a value of type /a/ ('InBound').
+  -- | Converters are user-defined actions passed to 
+  --   'newReader' ('InBound') and
+  --   'newWriter' ('OutBound')
+  --   that convert a 'B.ByteString' to a value of type /a/ ('InBound').
+  --                a value of type /a/ to 'B.ByteString' ('OutBound') or
   --   Converters are, hence, similar to /put/ and /get/ in the /Binary/
   --   monad. 
+  --
   --   The reason for using explicit, user-defined converters 
   --   instead of /Binary/ /encode/ and /decode/
   --   is that the conversion with queues
@@ -573,9 +568,11 @@ where
   --   The simplest possible in-bound converter for plain strings
   --   may be created like this:
   --
-  --   > let iconv = INBound (\_ _ _ -> return . toString)
-  --
-  --   Out-bound converters are much simpler.
+  --   > let iconv _ _ _ = return . toString
+  ------------------------------------------------------------------------
+  type InBound  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
+  ------------------------------------------------------------------------
+  -- | Out-bound converters are much simpler.
   --   Since the application developer knows,
   --   which encoding to use, the /MIME/ type is not needed.
   --   The converter receives only the value of type /a/
@@ -583,20 +580,17 @@ where
   --   A simple example to create an out-bound converter 
   --   for plain strings could be:
   --
-  --   > let oconv = OutBound (return . fromString)
+  --   > let oconv = return . fromString
   ------------------------------------------------------------------------
-  data Converter a = OutBound (OutBoundF a) -- ^ Creates an out-bound converter
-                    | InBound (InBoundF  a) -- ^ Creates an in-bound converter
+  type OutBound a = a -> IO B.ByteString
 
   ------------------------------------------------------------------------
-  -- | Creates a 'Queue' with the life time of the connection 'Con'.
+  -- | Creates a 'Reader' with the life time of the connection 'Con'.
   --   Creating a receiving queue involves interaction with the broker;
   --   this may result in preempting the calling thread, 
   --   depending on the options ['Qopt'].
   --   
-  --   Queues are thread-safe and may be shared among threads.
-  --
-  --   'newQueue' receives 
+  --   'newReader' receives 
   --
   --   * The connection handle 'Con'
   --
@@ -619,106 +613,102 @@ where
   --     Selectors are broker-specific and typically expressed
   --     as SQL or XPath.
   --
-  --   * An in- or out-bound 'Converter'. 
-  --     Note that you have to pass an out-bound 'Converter' 
-  --     to a sending queue and an in-bound 'Converter' 
-  --     to a receiving queue.
+  --   * An in-bound converter.
   --
-  --   A usage example to create an in-bound queue
-  --   with 'Connection' /c/ and the in-bound 'Converter'
+  --   A usage example to create a 'Reader'
+  --   with 'Connection' /c/ and the in-bound converter
   --   /iconv/ would be:
   --
-  --   > q <- newQueue c "TestQ" "/queue/test" [OReceive] [] iconv
+  --   > q <- newReader c "TestQ" "/queue/test" [] [] iconv
   --
-  --   A sending queue may be created like in the following
-  --   code fragment, where /oconv/ is 
-  --   an already created out-bound 'Converter':
+  --   A call to 'newReader' may result in preemption when
+  --   one of the options 'OWaitReceipt' or 'OWithReceipt' are given;
+  --   an example for such a call 
+  --   with /tmo/ an 'Int' value representing a /timeout/
+  --   in microseconds and 
+  --   the result /mbQ/ of type 'Maybe' is:
   --
-  --   > q <- newQueue c "TestQ" "/queue/test" [OSend] [] oconv
-  --
-  --   An example for creating a receiving queue
-  --   with 'OWaitReceipt' or 'OWithReceipt',
-  --   where /tmo/ is an 'Int' value representing a /timeout/
-  --   in microseconds and the result has type 'Maybe', is:
-  --
-  --   > mbQ <- timeout tmo $ newQueue c "TestQ" "/queue/test"
-  --   >                        [OSend, OWaitReceipt] [] oconv
+  --   > mbQ <- timeout tmo $ newWriter c "TestQ" "/queue/test"
+  --   >                        [OWaitReceipt] [] oconv
   ------------------------------------------------------------------------
-  newQueue :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-              Converter a -> IO (Queue a)
-  newQueue cid qn dst os hs conv = do
+  newReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+               InBound a -> IO (Reader a)
+  newReader cid qn dst os hs conv = do
     c <- getCon cid
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $ 
                  "Not connected (" ++ (show cid) ++ ")"
-      else 
-        if hasQopt OSend os 
-          then 
-            case conv of
-              (OutBound f) -> newSendQ cid qn dst os f
-              _            -> throwIO $ QueueException $
-                                    "InBound Converter for SendQ (" ++ 
-                                    (show qn) ++ ")"
-          else 
-            if hasQopt OReceive os
-              then 
-                case conv of
-                  (InBound f) -> newRecvQ cid c qn dst os hs f
-                  _           -> throwIO $ QueueException $ 
-                                       "OutBound Converter for RecvQ (" ++
-                                          (show qn) ++ ")"
-              else throwIO $ QueueException $
-                         "No direction indicated (" ++ (show qn) ++ ")"
+      else newRecvQ cid c qn dst os hs conv
+  
+  ------------------------------------------------------------------------
+  -- | Creates a 'Writer' with the life time of the connection 'Con'.
+  --   Creating a sending queue does not involve interaction with the broker
+  --   and will not preempt the calling thread.
+  --   
+  --   A sending queue may be created like in the following
+  --   code fragment, where /oconv/ is 
+  --   an already defined out-bound converter:
+  --
+  --   > q <- newWriter c "TestQ" "/queue/test" [] [] oconv
+  ------------------------------------------------------------------------
+  newWriter :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+               OutBound a -> IO (Writer a)
+  newWriter cid qn dst os hs conv = do
+    c <- getCon cid
+    if not $ P.connected (conCon c)
+      then throwIO $ ConnectException $ 
+                 "Not connected (" ++ (show cid) ++ ")"
+      else newSendQ cid qn dst os conv
 
   ------------------------------------------------------------------------
-  -- | Creates a queue with limited life time. 
+  -- | Creates a 'Reader' with limited life time. 
   --   The queue will live only in the scope of the action
   --   that is passed as last parameter. 
-  --   The function is useful for receiving queues 
+  --   The function is useful for readers
   --   that are used only temporarily, /e.g./ during initialisation.
   --   When the action terminates, the client unsubscribes from 
   --   the broker queue - even if an exception is raised.
   --
-  --   'withQueue' returns the result of the action.
+  --   'withReader' returns the result of the action.
   --   Since the life time of the queue is limited to the action,
-  --   it should not return the queue.
-  --   Any operation of a queue created by 'withQueue'
+  --   it should not be returned.
+  --   Any operation on a reader created by 'withReader'
   --   outside the action will raise 'QueueException'.
   --
   --   A usage example is: 
   --
-  --   > x <- withQueue c "TestQ" "/queue/test" [OReceive] [] iconv $ \q -> do
+  --   > x <- withReader c "TestQ" "/queue/test" [] [] iconv $ \q -> do
   ------------------------------------------------------------------------
-  withQueue :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-               Converter a -> (Queue a -> IO b) -> IO b
-  withQueue cid qn dst os hs conv act = do
-    q <- newQueue cid qn dst os hs conv
+  withReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+                InBound a -> (Reader a -> IO b) -> IO b
+  withReader cid qn dst os hs conv act = do
+    q <- newReader cid qn dst os hs conv
     finally (act   q)
             (unsub q)
 
   ------------------------------------------------------------------------
-  -- | A variant of 'withQueue' 
+  -- | A variant of 'withReader' 
   --   for actions that do not return anything.
   ------------------------------------------------------------------------
-  withQueue_ :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-              Converter a -> (Queue a -> IO ()) -> IO ()
-  withQueue_ cid qn dst os hs conv act = 
-    withQueue cid qn dst os hs conv act >>= (\_ -> return ())
+  withReader_ :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+                 InBound a -> (Reader a -> IO ()) -> IO ()
+  withReader_ cid qn dst os hs conv act = 
+    withReader cid qn dst os hs conv act >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- Creating a SendQ is plain an simple.
   ------------------------------------------------------------------------
   newSendQ :: Con -> String -> String -> [Qopt] -> 
-              OutBoundF a -> IO (Queue a)
+              OutBound a -> IO (Writer a)
   newSendQ cid qn dst os conv = 
     let q = SendQ {
-              qCon  = cid,
-              qDest = dst,
-              qName = qn,
-              qRec  = if hasQopt OWithReceipt os then True else False,
-              qWait = if hasQopt OWaitReceipt os then True else False,
-              qTx   = if hasQopt OForceTx     os then True else False,
-              qTo   = conv}
+              wCon  = cid,
+              wDest = dst,
+              wName = qn,
+              wRec  = if hasQopt OWithReceipt os then True else False,
+              wWait = if hasQopt OWaitReceipt os then True else False,
+              wTx   = if hasQopt OForceTx     os then True else False,
+              wTo   = conv}
     in return q
 
   ------------------------------------------------------------------------
@@ -727,7 +717,7 @@ where
   ------------------------------------------------------------------------
   newRecvQ :: Con        -> Connection -> String -> String -> 
               [Qopt]     -> [F.Header] ->
-              InBoundF a -> IO (Queue a)
+              InBound a -> IO (Reader a)
   newRecvQ cid c qn dst os hs conv = do
     let am   = ackMode os
     let au   = hasQopt OAck os
@@ -739,14 +729,14 @@ where
     addSub  cid (sid, ch) 
     addDest cid (dst, ch) 
     let q = RecvQ {
-               qCon  = cid,
-               qSub  = sid,
-               qDest = dst,
-               qName = qn,
-               qMode = am,
-               qAuto = au,
-               qRec  = with,
-               qFrom = conv}
+               rCon  = cid,
+               rSub  = sid,
+               rDest = dst,
+               rName = qn,
+               rMode = am,
+               rAuto = au,
+               rRec  = with,
+               rFrom = conv}
     if with 
       then do waitReceipt cid rc
               return q
@@ -755,23 +745,21 @@ where
   ------------------------------------------------------------------------
   -- Unsubscribe a queue
   ------------------------------------------------------------------------
-  unsub :: Queue a -> IO ()
-  unsub q = 
-    if typeOf q /= RecvQT then return ()
-      else do
-         let cid = qCon  q
-         let sid = qSub  q
-         let dst = qDest q
-         rmSub  cid sid
-         rmDest cid dst
-         rc <- (if qRec q then mkUniqueRecc else return NoRec) 
-         c  <- getCon cid
-         P.unsubscribe (conCon c) 
-                       (P.mkSub (show sid) dst F.Client) 
-                       (show rc) []
-         if qRec q 
-           then waitReceipt cid rc
-           else return ()
+  unsub :: Reader a -> IO ()
+  unsub q = do
+    let cid = rCon  q
+    let sid = rSub  q
+    let dst = rDest q
+    rc <- (if rRec q then mkUniqueRecc else return NoRec) 
+    c  <- getCon cid
+    finally (P.unsubscribe (conCon c) 
+                           (P.mkSub (show sid) dst F.Client)
+                           (show rc) [])
+            (do rmSub  cid sid
+                rmDest cid dst)
+    if rRec q 
+      then waitReceipt cid rc
+      else return ()
 
   ------------------------------------------------------------------------
   -- | Removes the oldest message from the queue
@@ -803,21 +791,19 @@ where
   --   and use 'ackWith' to acknowledge 
   --   the message explicitly.
   ------------------------------------------------------------------------
-  readQ :: Queue a -> IO (P.Message a)
-  readQ q | typeOf q == SendQT = throwIO $ QueueException $
-                                     "Read on a SendQ: " ++ (qName q)
-          | otherwise = do
-    c <- getCon (qCon q)
+  readQ :: Reader a -> IO (P.Message a)
+  readQ q = do
+    c <- getCon (rCon q)
     if not $ P.connected (conCon c)
-      then throwIO $ QueueException $ "Not connected: " ++ (show $ qCon q)
-      else case getSub (qSub q) c of
+      then throwIO $ QueueException $ "Not connected: " ++ (show $ rCon q)
+      else case getSub (rSub q) c of
              Nothing -> throwIO $ QueueException $ 
-                           "Unknown queue " ++ (qName q)
+                           "Unknown queue " ++ (rName q)
              Just ch -> do
                m <- (readChan ch >>= frmToMsg q)
-               if (qMode q) /= F.Auto
-                 then if (qAuto q) then ack (qCon q) m
-                      else addAck (qCon q)  (P.msgId m)
+               if (rMode q) /= F.Auto
+                 then if (rAuto q) then ack (rCon q) m
+                      else addAck (rCon q)  (P.msgId m)
                  else return ()
                return m
 
@@ -834,22 +820,19 @@ where
   --   that provide selectors on /subscribe/,
   --   see 'newQueue' for details.
   --
-  --   A usage example for a /q/ of type 'Queue' 'String'
+  --   A usage example for a /q/ of type 'Writer' 'String'
   --   may be:
   --
   --   > writeQ q nullType [] "hello world!"
   --
-  --   For a queue that was created 
+  --   For a 'Writer' that was created 
   --   with 'OWithReceipt' and 'OWaitReceipt',
   --   the function should be called with /timeout/:
   --
   --   > mbR <- timeout tmo $ writeQ q nullType [] "hello world!"
   ------------------------------------------------------------------------
-  writeQ :: Queue a -> Mime.Type -> [F.Header] -> a -> IO ()
-  writeQ q mime hs x | typeOf q == RecvQT = 
-                         throwIO $ QueueException $
-                           "Write with RecvQ (" ++ (qName q) ++ ")"
-                     | otherwise = 
+  writeQ :: Writer a -> Mime.Type -> [F.Header] -> a -> IO ()
+  writeQ q mime hs x =
     writeQWith q mime hs x >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
@@ -870,34 +853,31 @@ where
   --
   --   > r <- writeQWith q nullType [] "hello world!"
   ------------------------------------------------------------------------
-  writeQWith :: Queue a -> Mime.Type -> [F.Header] -> a -> IO Receipt
-  writeQWith q mime hs x | typeOf q == RecvQT = 
-                             throwIO $ QueueException $
-                               "Write with RecvQ (" ++ (qName q) ++ ")"
-                         | otherwise = do
-    c <- getCon (qCon q)
+  writeQWith :: Writer a -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeQWith q mime hs x = do
+    c <- getCon (wCon q)
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
-                 "Not connected (" ++ (show $ qCon q) ++ ")"
+                 "Not connected (" ++ (show $ wCon q) ++ ")"
       else do
         tx <- (getCurTx c >>= (\mbT -> 
                  case mbT of
                    Nothing     -> return ""
                    Just (i, _) -> return (show i)))
-        if (null tx) && (qTx q)
+        if (null tx) && (wTx q)
           then throwIO $ QueueException $
-                 "Queue '" ++ (qName q) ++ 
+                 "Queue '" ++ (wName q) ++ 
                  "' with OForceTx used outside Transaction"
           else do
-            let conv = qTo q
+            let conv = wTo q
             s  <- conv x
-            rc <- (if qRec q then mkUniqueRecc else return NoRec)
-            let m = P.mkMessage "" (qDest q) (qDest q) 
+            rc <- (if wRec q then mkUniqueRecc else return NoRec)
+            let m = P.mkMessage "" (wDest q) (wDest q) 
                                 mime (B.length s) tx s x
-            when (qRec q) $ addRec (qCon q) rc 
+            when (wRec q) $ addRec (wCon q) rc 
             P.send (conCon c) m (show rc) hs 
-            if (qRec q) && (qWait q) 
-              then waitReceipt (qCon q) rc >> return rc
+            if (wRec q) && (wWait q) 
+              then waitReceipt (wCon q) rc >> return rc
               else return rc
 
   ------------------------------------------------------------------------
@@ -1048,12 +1028,16 @@ where
   --   with /timeout/.
   ------------------------------------------------------------------------
   waitReceipt :: Con -> Receipt -> IO ()
-  waitReceipt cid r = do
-    ok <- checkReceipt cid r
-    if ok then return ()
-      else do 
-        threadDelay $ ms 1
-        waitReceipt cid r
+  waitReceipt cid r =
+    case r of
+      NoRec -> return ()
+      _     -> waitForMe cid 
+    where waitForMe cid = do
+            ok <- checkReceipt cid r
+            if ok then return ()
+              else do 
+                threadDelay $ ms 1
+                waitForMe cid 
 
   ------------------------------------------------------------------------
   -- | Aborts the transaction immediately by raising 'AppException'.
@@ -1110,18 +1094,20 @@ where
   -----------------------------------------------------------------------
   endTx :: Bool -> Con -> Connection -> Tx -> Transaction -> IO ()
   endTx x cid c tx t = do
-    let w = txTmo t > 0 
+    let w = txAbrtRc t && txTmo t > 0 
     rc <- (if w then mkUniqueRecc else return NoRec)
     when w $ addRec cid rc 
     if x then P.commit (conCon c) (show tx) (show rc)
          else P.abort  (conCon c) (show tx) (show rc)
-    ok <- waitTx tx cid $ txTmo t
+    mbR <- (if w then timeout (ms $ txTmo t) $ waitReceipt cid rc
+                 else return $ Just ())
     rmTx cid
-    if ok then return ()
-          else throwIO $ TxException $
-                 "Transaction in unknown State: " ++
-                 "missing receipt for " ++ (if x then "commit!" 
-                                                 else "abort!")
+    case mbR of
+      Just _  -> return ()
+      Nothing -> throwIO $ TxException $
+                   "Transaction in unknown State: " ++
+                   "missing receipt for " ++ (if x then "commit!" 
+                                                   else "abort!")
 
   -----------------------------------------------------------------------
   -- Check if there are pending acks,
@@ -1148,10 +1134,10 @@ where
   -- Transform a frame into the message
   -- using the queue's application callback
   -----------------------------------------------------------------------
-  frmToMsg :: Queue a -> F.Frame -> IO (P.Message a)
+  frmToMsg :: Reader a -> F.Frame -> IO (P.Message a)
   frmToMsg q f = do
     let b = F.getBody f
-    let conv = qFrom q
+    let conv = rFrom q
     x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
     let m = P.mkMessage (F.getId     f)
                         (F.getSub    f)
@@ -1215,6 +1201,6 @@ where
   handleReceipt cid f = do
     c <- getCon cid
     case parseRec $ F.getReceipt f of
-      Just r  -> rmRec cid r
+      Just r  -> forceRmRec cid r -- rmRec cid r
       Nothing -> throwTo (conOwner c) $ 
                  ProtocolException $ "Invalid Receipt: " ++ (show f)

@@ -666,7 +666,9 @@ where
                                                    Nothing -> ""
                                                    Just r  -> r} 
       Just d  -> Right $ USubFrame {
-                           frmId = "",
+                           frmId   = case lookup hdrId hs of
+                                       Nothing -> ""
+                                       Just i  -> i,
                            frmDest = d,
                            frmRec  = case lookup hdrRec hs of
                                       Nothing -> ""

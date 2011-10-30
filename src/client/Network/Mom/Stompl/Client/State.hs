@@ -16,6 +16,7 @@ module State (
          updTxState,
          txPendingAck, txReceipts,
          addAck, rmAck, addRec, rmRec,
+         forceRmRec,
          checkReceipt)
 where
 
@@ -324,16 +325,16 @@ where
   updCurTx onTx onCon (_, c) = do
     tid  <- myThreadId
     case lookup tid $ conThrds c of
-      Nothing -> return $ (onCon c, ())
+      Nothing -> return (onCon c, ())
       Just ts -> if null ts 
                    then return (onCon c, ())
                    else do
                       let (tx, t) = head ts
-                      let t'  = onTx t 
-                      let ts' = (tx, t') : tail ts
-                      let c'  = c {conThrds = 
-                                     (tid, ts') : (
-                                     deleteBy eq (tid, ts) $ conThrds c)}
+                      let t'      = onTx t 
+                      let ts'     = (tx, t') : tail ts
+                      let c'      = c {conThrds = 
+                                         (tid, ts') : (
+                                         deleteBy eq (tid, ts) $ conThrds c)}
                       return (c', ())
 
   addAck :: Con -> String -> IO ()
@@ -359,6 +360,17 @@ where
     let fromTx  = rmRecFromTx  r
     let fromCon = rmRecFromCon r
     withCon cid $ updCurTx fromTx fromCon
+
+  forceRmRec :: Con -> Receipt -> IO ()
+  forceRmRec cid r = withCon cid doRmRec 
+    where doRmRec (_, c) = do
+            case find (== r) $ conRecs c of
+              Just _  -> return (rmRecFromCon r c, ())
+              Nothing -> 
+                let thrds = map rmRecFromThrd $ conThrds c
+                in  return (c {conThrds = thrds}, ()) 
+          rmRecFromThrd   (thrd, ts) = (thrd, map rmRecFromTxEntry ts)
+          rmRecFromTxEntry (tid, tx) = (tid,      rmRecFromTx    r tx)
 
   checkCurTx :: (Transaction -> Bool) ->
                 (Connection  -> Bool) -> 
