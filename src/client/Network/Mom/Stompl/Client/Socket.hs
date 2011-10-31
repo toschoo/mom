@@ -144,7 +144,7 @@ where
         if B.null s 
           then return $ Left "Peer disconnected"
           else do
-            let s' = B.dropWhile white s
+            let s' = s -- B.dropWhile white s
             if B.null s' 
               then getInput rec sock max
               else return $ Right s'

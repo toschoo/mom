@@ -91,35 +91,40 @@ where
         t90   = mkTest "Abort                    " $ testWith p testAbort 
         t100  = mkTest "Abort on exception       " $ testWith p testTxException 
         t110  = mkTest "ForceTX                  " $ testWith p testForceTx 
-        t120  = mkTest "Transaction pending ack  " $ testWith p testPendingAcksFail 
-        t130  = mkTest "Transaction all ack'd    " $ testWith p testPendingAcksPass 
+        t120  = mkTest "Tx pending ack           " $ testWith p testPendingAcksFail 
+        t130  = mkTest "Tx all ack'd             " $ testWith p testPendingAcksPass 
         t140  = mkTest "Auto Ack                 " $ testWith p testAutoAck 
         t150  = mkTest "With Receipt1            " $ testWith p testQWithReceipt
         t160  = mkTest "Wait on Receipt1         " $ testWith p testQWaitReceipt
-        -- t170 ackWith
-        -- t180 nack
-        -- t190 nackWith
-        t200 = mkTest "Pending Receipts no Tmo  " $ testWith p testTxReceiptsNoTmo
-        t210 = mkTest "Pending Receipts    Tmo  " $ testWith p testTxReceiptsTmo
-        t220 = mkTest "Receipts not cleared     " $ testWith p testTxQRec
-        t230 = mkTest "Receipts cleared         " $ testWith p testTxQRecWait
-        t240 = mkTest "Recs not cleared + Tmo   " $ testWith p testTxQRecTmo
-        t250 = mkTest "Nested Transactions      " $ testWith p testNestedTx
-        t260 = mkTest "Nested Tx with foul one  " $ testWith p testNstTxAbort
-        t270 = mkTest "Nested Tx one missing Ack" $ testWith p testNstTxMissingAck
+        t170  = mkTest "ackWith                  " $ testWith p testTxAckWith
+        t180  = mkTest "Tx all nack'd            " $ testWith p testPendingNacksPass 
+        t190  = mkTest "nackWith                 " $ testWith p testTxNackWith
+        t200  = mkTest "Begin Rec no Tmo, fast   " $ testWith p testTxRecsNoTmoFail
+        t205  = mkTest "Begin Rec no Tmo, slow   " $ testWith p testTxRecsNoTmoPass
+        t210  = mkTest "Pending Receipts    Tmo  " $ testWith p testTxRecsTmo
+        t220  = mkTest "Receipts not cleared     " $ testWith p testTxQRec
+        t230  = mkTest "Receipts cleared         " $ testWith p testTxQRecWait
+        t240  = mkTest "Recs not cleared + Tmo   " $ testWith p testTxQRecTmo
+        t250  = mkTest "Nested Transactions      " $ testWith p testNestedTx
+        t260  = mkTest "Nested Tx with foul one  " $ testWith p testNstTxAbort
+        t270  = mkTest "Nested Tx one missing Ack" $ testWith p testNstTxMissingAck
         -- how to provoke an error at the broker?
         -- the library is designed to avoid that!
-        t280 = mkTest "BrokerException          " $ testWith p testBrokerEx 
-        -- t290 error handling: converter error
-        -- t300 complex converter ok
-        -- t310 share connection among threads
-        -- t320 share queue among threads
-        -- t330 share transaction among threads
-        -- t340 multiple connections 
+        -- t280 = mkTest "BrokerException          " $ testWith p testBrokerEx 
+        t290  = mkTest "Converter error          " $ testWith p testConvertEx
+        t300  = mkTest "Cassandra Complex        " $ testWith p testConvComplex
+        t310  = mkTest "Share connection         " $ testWith p testShareCon 
+        t320  = mkTest "Share queue              " $ testWith p testShareQ 
+        t330  = mkTest "Share tx                 " $ testWith p testShareTx
+        t340  = mkTest "Share tx with abort      " $ testWith p testShareTxAbort
+        t350  = mkTest "Nested con - independent " $ testNstConInd  p
+        t360  = mkTest "Nested con - interleaved " $ testNstConX    p
+        t370  = mkTest "Nested con - inner fails " $ testNstConFail p
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t10,  t20,  t30,  t40,  t50,  t60,  t70, t80, t90, t100,
-          t110, t120, t130, t140, t150, t160, t200,
-          t210, t220, t230, t240, t250, t260, t270] 
+        [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,  t90, t100,
+         t110, t120, t130, t140, t150, t160, t170, t180, t190, t200, t205,
+         t210, t220, t230, t240, t250, t260, t270,       t290, t300,
+         t310, t320, t330, t340, t350, t360, t370] 
 
   ------------------------------------------------------------------------
   -- Create a Reader without options
@@ -243,13 +248,64 @@ where
   testUTF8 :: Con -> IO TestResult
   testUTF8 c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
-    oQ <- newWriter c "OUT" tQ1 []    [] oconv
-
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
     writeQ oQ nullType [] utf8
     m <- readQ iQ
     if msgCont m == utf8
       then return Pass
       else return $ Fail $ "Received: " ++ (msgCont m) ++ " - Expected: " ++ utf8
+
+  ------------------------------------------------------------------------
+  -- Converter Error
+  ------------------------------------------------------------------------
+  -- shall create a reader
+  -- shall create a writer
+  -- shall receive message 
+  -- converter shall throw ConvertException
+  -- exception shall be caught
+  ------------------------------------------------------------------------
+  testConvertEx :: Con -> IO TestResult
+  testConvertEx c = do
+    let errmsg = "Bad Message!"
+    let malconv _ _ _ _ = throwIO $ ConvertException errmsg
+    iQ <- newReader c "IN"  tQ1 [] [] malconv
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
+    writeQ oQ nullType [] utf8
+    eiM <- try $ readQ iQ
+    case eiM of
+      Left (ConvertException e) -> 
+        if errmsg `isSuffixOf` e then return Pass
+            else return $ Fail $ "Wrong exception text: " ++ e 
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Right m -> return $ Fail $ "Received message on exception: " ++ 
+                                    (msgContent m)
+
+  ------------------------------------------------------------------------
+  -- Converter including more complex task
+  ------------------------------------------------------------------------
+  -- shall create a reader
+  -- shall create a writer
+  -- shall receive message 
+  -- converter shall perform IO
+  -- message shall be correct
+  ------------------------------------------------------------------------
+  testConvComplex :: Con -> IO TestResult
+  testConvComplex c = do
+    iQ <- newReader c "IN"  tQ1 [] [] cmpconv
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
+    writeQ oQ nullType [] text1
+    eiM <- try $ readQ iQ
+    case eiM of
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Right m -> 
+        if msgContent m == text1 then return Pass
+          else return $ Fail $ "Unexpected message: " ++ 
+                                (msgContent m)
+    where cmpconv _ _ _ b = do
+            v <- newEmptyMVar 
+            _ <- forkIO (putMVar v $ U.toString b)
+            x <- takeMVar v
+            return x
 
   ------------------------------------------------------------------------
   -- Transaction
@@ -430,6 +486,104 @@ where
               else return $ Fail "Wrong message!"
 
   ------------------------------------------------------------------------
+  -- Pending Nacks Pass
+  ------------------------------------------------------------------------
+  -- shall create a reader with OMode Client
+  -- message sent before transaction shall be received during tx
+  -- tx shall not throw any exception
+  ------------------------------------------------------------------------
+  testPendingNacksPass :: Con -> IO TestResult
+  testPendingNacksPass c = do
+    iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+    oQ <- newWriter c "OUT" tQ1 []    [] oconv
+    writeQ oQ nullType [] text1    -- send m1
+    ok <- withTransaction c [OAbortMissingAcks] $ \_ -> do
+      m1 <- readQ iQ               -- get  m1
+      writeQ oQ nullType [] text2  -- send m2
+      mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+      case mbM2 of 
+        Nothing -> do
+          nack c m1
+          return True
+        Just _  -> return False
+    if not ok 
+      then return $ Fail "obtained message sent in TX before commit!"
+      else do
+        mbM2 <- tmo $ readQ iQ
+        case mbM2 of
+          Nothing -> return $ Fail "no message from committed TX received!"
+          Just m2 -> 
+            if (msgContent m2) == text2 
+              then return Pass
+              else return $ Fail "Wrong message!"
+
+  ------------------------------------------------------------------------
+  -- Pending Acks with Receipts Pass
+  ------------------------------------------------------------------------
+  -- shall create a reader with OMode Client
+  -- message sent before transaction shall be received during tx
+  -- tx shall not throw any exception
+  ------------------------------------------------------------------------
+  testTxAckWith :: Con -> IO TestResult
+  testTxAckWith c = do
+    iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+    oQ <- newWriter c "OUT" tQ1 []    [] oconv
+    writeQ oQ nullType [] text1    -- send m1
+    ok <- withTransaction c 
+          [OAbortMissingAcks, OWithReceipts, OTimeout 100] $ \_ -> do
+      m1 <- readQ iQ               -- get  m1
+      writeQ oQ nullType [] text2  -- send m2
+      mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+      case mbM2 of 
+        Nothing -> do
+          ackWith c m1
+          return True
+        Just _  -> return False
+    if not ok 
+      then return $ Fail "obtained message sent in TX before commit!"
+      else do
+        mbM2 <- tmo $ readQ iQ
+        case mbM2 of
+          Nothing -> return $ Fail "no message from committed TX received!"
+          Just m2 -> 
+            if (msgContent m2) == text2 
+              then return Pass
+              else return $ Fail "Wrong message!"
+
+  ------------------------------------------------------------------------
+  -- Pending Nacks with Receipts Pass
+  ------------------------------------------------------------------------
+  -- shall create a reader with OMode Client
+  -- message sent before transaction shall be received during tx
+  -- tx shall not throw any exception
+  ------------------------------------------------------------------------
+  testTxNackWith :: Con -> IO TestResult
+  testTxNackWith c = do
+    iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+    oQ <- newWriter c "OUT" tQ1 []    [] oconv
+    writeQ oQ nullType [] text1    -- send m1
+    ok <- withTransaction c 
+          [OAbortMissingAcks, OWithReceipts, OTimeout 100] $ \_ -> do
+      m1 <- readQ iQ               -- get  m1
+      writeQ oQ nullType [] text2  -- send m2
+      mbM2 <- tmo $ readQ iQ       -- get  m2 (should be timeout)
+      case mbM2 of 
+        Nothing -> do
+          nackWith c m1
+          return True
+        Just _  -> return False
+    if not ok 
+      then return $ Fail "obtained message sent in TX before commit!"
+      else do
+        mbM2 <- tmo $ readQ iQ
+        case mbM2 of
+          Nothing -> return $ Fail "no message from committed TX received!"
+          Just m2 -> 
+            if (msgContent m2) == text2 
+              then return Pass
+              else return $ Fail "Wrong message!"
+
+  ------------------------------------------------------------------------
   -- Auto Ack 
   ------------------------------------------------------------------------
   -- shall create a reader with OMode Client and OAck
@@ -458,41 +612,49 @@ where
               else return $ Fail "Wrong message!"
 
   ------------------------------------------------------------------------
-  -- Tx with Receipts
+  -- Tx with Receipts, no Tmo fails (missing receipt for "begin")
   ------------------------------------------------------------------------
   -- tx started with OReceipts but without Timeout
-  -- message sent before tx shall be received in tx
   -- tx shall throw TxException
+  -- Note: Relies on the fact that we terminate the transaction,
+  --       before the broker is able to sent the commit receipt.
   ------------------------------------------------------------------------
-  testTxReceiptsNoTmo :: Con -> IO TestResult
-  testTxReceiptsNoTmo c = do
-    iQ <- newReader c "IN"  tQ1 [] [] iconv
-    oQ <- newWriter c "OUT" tQ1 [] [] oconv
-    writeQ oQ nullType [] text1    -- send m1
-    eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> do
-        _ <- readQ iQ               -- get  m1
-        return ()
+  testTxRecsNoTmoFail :: Con -> IO TestResult
+  testTxRecsNoTmoFail c = do
+    eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> return ()
     case eiT of
-      Left (TxException _) -> return Pass
+      Left (TxException e) -> 
+        if e == "Transaction aborted: Missing Receipts" 
+          then return Pass
+          else return $ Fail $ "Wrong text in exception: " ++ e
       Left e               -> return $ Fail $ show e
       Right _              -> return $ Fail $ 
-                                "Transaction terminated with missing receipts!"
+                                "Tx not aborted with pending receipt!"
 
   ------------------------------------------------------------------------
-  -- Tx with Receipts + Timeout
+  -- Tx with Receipts, no Tmo passes
+  ------------------------------------------------------------------------
+  -- tx started with OReceipts but without Timeout
+  -- tx shall throw TxException
+  -- Note: Relies on the fact that we give some time to the broker
+  --       to send the receipt, before we terminate the transaction,
+  ------------------------------------------------------------------------
+  testTxRecsNoTmoPass :: Con -> IO TestResult
+  testTxRecsNoTmoPass c = do
+    eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> threadDelay 10000
+    case eiT of
+      Left e               -> return $ Fail $ show e
+      Right _              -> return Pass
+
+  ------------------------------------------------------------------------
+  -- Tx with Receipts + Tmo passes 
   ------------------------------------------------------------------------
   -- tx started with OReceipts and with Timeout
-  -- message sent before tx shall be received in tx
   -- tx shall not throw any exception
   ------------------------------------------------------------------------
-  testTxReceiptsTmo :: Con -> IO TestResult
-  testTxReceiptsTmo c = do
-    iQ <- newReader c "IN"  tQ1 [] [] iconv
-    oQ <- newWriter c "OUT" tQ1 [] [] oconv
-    writeQ oQ nullType [] text1    -- send m1
-    eiT <- try $ withTransaction c [OWithReceipts, OTimeout 100] $ \_ -> do
-        _ <- readQ iQ               -- get  m1
-        return ()
+  testTxRecsTmo :: Con -> IO TestResult
+  testTxRecsTmo c = do
+    eiT <- try $ withTransaction c [OWithReceipts, OTimeout 100] $ \_ -> return ()
     case eiT of
       Left e               -> return $ Fail $ show e
       Right _              -> return $ Pass
@@ -523,6 +685,7 @@ where
       Left e               -> return $ Fail $ show e
       Right _              -> return $ Fail 
                                 "Transaction passed with missing receipts!"
+
   ------------------------------------------------------------------------
   -- Tx with Receipts + no pending receipt
   ------------------------------------------------------------------------
@@ -536,13 +699,13 @@ where
   testTxQRecWait c = do
     oQ <- newWriter c "OUT" tQ1 [OWithReceipt] [] oconv
     eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> do
-        r <- writeQWith oQ nullType [] text1 
+        r   <- writeQWith oQ nullType [] text1 
         mbR <- tmo $ waitReceipt c r
         case mbR of 
           Nothing -> return $ Fail "No receipt!"
           Just _  -> return Pass
     case eiT of
-      Left e  -> return $ Fail $ show e
+      Left  e -> return $ Fail $ show e
       Right r -> return r
 
   ------------------------------------------------------------------------
@@ -760,7 +923,279 @@ where
               then return Pass
               else return $ Fail $ 
                        "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
-      
+
+  ------------------------------------------------------------------------
+  -- Share queue among threads
+  ------------------------------------------------------------------------
+  -- shall create reader and writer
+  -- shall write two different messages
+  -- shall fork a thread
+  -- shall read in both threads
+  -- read messages shall equal sent messages
+  ------------------------------------------------------------------------
+  testShareQ :: Con -> IO TestResult
+  testShareQ c = do
+    v  <- newEmptyMVar
+    iQ <- newReader c "IN"  tQ1 [] [] iconv
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
+    _  <- forkIO (readme v iQ)
+    writeQ oQ nullType [] text1
+    writeQ oQ nullType [] text2
+    mbM <- tmo $ readQ iQ
+    case mbM of
+      Nothing -> return $ Fail "No message received!"
+      Just m  -> do
+        eiM2 <- takeMVar v
+        case eiM2 of
+          Left  e   -> return $ Fail e
+          Right m2 -> 
+            if ((msgContent m  == text1)  &&
+                (msgContent m2 == text2)) ||
+               ((msgContent m  == text2)  &&
+                (msgContent m2 == text1)) 
+              then return Pass
+              else return $ Fail $ 
+                            "Unexpected message: " ++
+                            (msgContent m)
+    where readme v q = do
+            mbM <- tmo $ readQ q
+            case mbM of
+              Nothing -> putMVar v $ Left  $ "No message received!"
+              Just m  -> putMVar v $ Right m
+
+  ------------------------------------------------------------------------
+  -- Share connection among threads
+  ------------------------------------------------------------------------
+  -- shall create a writer with OWithReceipt
+  -- shall create a reader (to clean the queue)
+  -- shall fork a thread
+  -- thread shall receive the receipt
+  ------------------------------------------------------------------------
+  testShareCon :: Con -> IO TestResult
+  testShareCon c = do
+    v   <- newEmptyMVar
+    oQ  <- newWriter c "OUT" tQ1 [OWithReceipt] [] oconv
+    iQ  <- newReader c "IN"  tQ1 [] []             iconv
+    rc  <- writeQWith oQ nullType [] text1
+    _   <- forkIO (readme v rc)
+    r   <- takeMVar v
+    _   <- readQ iQ -- clean the queue
+    return r
+    where readme v r = do
+            mbR <- tmo $ waitReceipt c r
+            case mbR of
+              Nothing -> putMVar v $ Fail $ "No Receipt!"
+              Just _  -> putMVar v   Pass
+
+  ------------------------------------------------------------------------
+  -- Share tx among threads
+  ------------------------------------------------------------------------
+  -- shall create a writer 
+  -- shall create a reader with OMode Client
+  -- shall start tx 
+  -- shall receive sent message
+  -- shall fork a thread
+  -- main thread shall wait for kid in tx
+  -- kid shall try to ack message
+  -- shall throw TxException
+  ------------------------------------------------------------------------
+  testShareTx :: Con -> IO TestResult
+  testShareTx c = do
+    v <- newEmptyMVar
+    oQ  <- newWriter c "OUT" tQ1 []             [] oconv
+    iQ  <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+    writeQ oQ nullType [] text1
+    eiT <- try $ withTransaction c [OAbortMissingAcks] $ \_ -> do
+      mbM <- tmo $ readQ iQ
+      case mbM of
+        Nothing -> return $ Fail "No message received!"
+        Just m  -> do
+          _ <- forkIO (ackMe v m)
+          takeMVar v
+    case eiT of
+      Left  (TxException e) -> 
+        if e == "Transaction aborted: Missing Acks" then return Pass
+          else return $ Fail $ "Unexpected text in exception: " ++ e
+      Left e  -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Right _ -> return $ Fail "Transaction passed with missing acks!"
+    where ackMe v m = do
+            eiR <- try $ ack c m
+            case eiR of
+               Left e  -> putMVar v $ Fail $ 
+                           "Unexpected exception: " ++ (show e)
+               Right _ -> putMVar v Pass
+
+  ------------------------------------------------------------------------
+  -- Share tx with abort
+  ------------------------------------------------------------------------
+  -- shall create reader and writer
+  -- shall start tx 
+  -- shall sent message during tx
+  -- shall fork a thread
+  -- main thread shall wait for kid in tx
+  -- kid shall try to abort
+  -- kid shall receive AppException
+  -- message sent in tx shall be received after tx in main thread
+  ------------------------------------------------------------------------
+  testShareTxAbort :: Con -> IO TestResult
+  testShareTxAbort c = do
+    let appmsg = "Abort!!!"
+    v   <- newEmptyMVar
+    oQ  <- newWriter c "OUT" tQ1 []             [] oconv
+    iQ  <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+    eiT <- try $ withTransaction c [OAbortMissingAcks] $ \_ -> do
+      writeQ oQ nullType [] text1
+      mbM <- tmo $ readQ iQ
+      case mbM of
+        Nothing -> forkIO (abortMe v appmsg) >>= (\_ -> takeMVar v)
+        Just _  -> return $ Fail $ "Message received before end of Tx!"
+    case eiT of
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Right r -> do 
+        mbM <- tmo $ readQ iQ
+        case mbM of
+          Nothing -> return $ Fail "Transaction aborted!"
+          Just m  -> if msgContent m == text1 then return r
+                       else return $ Fail $ "Unexpected message: " ++
+                                         (msgContent m)
+    where abortMe v msg = do
+            eiR <- try $ abort msg
+            case eiR of
+               Left (AppException e) ->
+                 if msg `isSuffixOf` e then putMVar v Pass
+                   else putMVar v $ Fail $ 
+                           "Unexpected text in exception: " ++ e 
+               Left e  -> putMVar v $ Fail $ 
+                           "Unexpected exception: " ++ (show e)
+               Right _ -> putMVar v $ Fail "Abort did not fire!"
+
+  ------------------------------------------------------------------------
+  -- Nested Connection Independent
+  ------------------------------------------------------------------------
+  -- shall create a connection
+  -- shall create a reader and a writer
+  -- shall send a message
+  -- shall create a second connection
+  -- shall create different readers and writers
+  -- shall send message in second con
+  -- shall receive message in second con
+  -- shall receive message in first con
+  ------------------------------------------------------------------------
+  testNstConInd :: Int -> IO TestResult
+  testNstConInd p = do
+    eiR <- try $ stdCon p $ \c -> do
+      oQ  <- newWriter c "OUT" tQ1 [] [] oconv
+      iQ  <- newReader c "IN"  tQ1 [] [] iconv
+      writeQ oQ nullType [] text1
+      eiR2 <- try $ stdCon p $ \c2 -> do
+        oQ2 <- newWriter c2 "OUT" tQ2 [] [] oconv
+        iQ2 <- newReader c2 "IN"  tQ2 [] [] iconv
+        writeQ oQ2 nullType [] text2
+        mbM2 <- tmo $ readQ iQ2
+        case mbM2 of
+          Nothing -> return $ Fail $ "No message received (2)"
+          Just m  -> if msgContent m == text2 then return Pass
+                       else return $ Fail $ "Unexpected message: " ++ 
+                                      (msgContent m)
+      case eiR2 of
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+        Right r -> case r of 
+                     Pass -> do
+                       mbM <- tmo $ readQ iQ
+                       case mbM of
+                         Nothing -> return $ Fail $ "No message received!"
+                         Just m  -> if msgContent m == text1 
+                                      then return Pass
+                                      else return $ Fail $ 
+                                             "Unexpected message " ++ 
+                                             (msgContent m)
+                     Fail e -> return $ Fail e
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
+  ------------------------------------------------------------------------
+  -- Nested Connection crossing
+  ------------------------------------------------------------------------
+  -- shall create a connection
+  -- shall create a reader and a writer
+  -- shall send a message
+  -- shall create a second connection
+  -- shall receive message in second con using first reader
+  -- shall send message in second con using first writer
+  -- shall receive message in first con
+  ------------------------------------------------------------------------
+  testNstConX :: Int -> IO TestResult
+  testNstConX p = do
+    eiR <- try $ stdCon p $ \c -> do
+      oQ  <- newWriter c "OUT" tQ1 [] [] oconv
+      iQ  <- newReader c "IN"  tQ1 [] [] iconv
+      writeQ oQ nullType [] text1
+      eiR2 <- try $ stdCon p $ \_ -> do
+        mbM2 <- tmo $ readQ iQ
+        case mbM2 of
+          Nothing -> return $ Fail $ "No message received (2)"
+          Just m  -> 
+            if msgContent m /= text1 
+              then return $ Fail $ "Unexpected message: " ++ 
+                                   (msgContent m)
+              else do
+                writeQ oQ nullType [] text2
+                return Pass
+      case eiR2 of
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+        Right r -> case r of 
+                     Fail e -> return $ Fail e
+                     Pass -> do
+                       mbM <- tmo $ readQ iQ
+                       case mbM of
+                         Nothing -> return $ Fail $ "No message received!"
+                         Just m  -> if msgContent m == text2 
+                                      then return Pass
+                                      else return $ Fail $ 
+                                             "Unexpected message " ++ 
+                                             (msgContent m)
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
+  ------------------------------------------------------------------------
+  -- Nested Connection with Failure
+  ------------------------------------------------------------------------
+  -- shall create a connection
+  -- shall create a reader and a writer
+  -- shall send a message
+  -- shall create a second connection
+  -- shall throw Exception in inner
+  -- shall receive message in first con
+  ------------------------------------------------------------------------
+  testNstConFail :: Int -> IO TestResult
+  testNstConFail p = do
+    let appmsg = "Bad Connection!"
+    eiR <- try $ stdCon p $ \c -> do
+      oQ  <- newWriter c "OUT" tQ1 [] [] oconv
+      iQ  <- newReader c "IN"  tQ1 [] [] iconv
+      writeQ oQ nullType [] text1
+      eiR2 <- try $ stdCon p $ \_ -> throwIO $ AppException appmsg
+      case eiR2 of
+        Left  (AppException e) -> 
+          if not $ appmsg `isSuffixOf` e 
+            then return $ Fail $ "Unexpected text in exception: " ++ e
+            else do 
+              mbM <- tmo $ readQ iQ
+              case mbM of
+                Nothing -> return $ Fail $ "No message received!"
+                Just m  -> if msgContent m == text1
+                             then return Pass
+                             else return $ Fail $ 
+                                           "Unexpected message " ++ 
+                                           (msgContent m)
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+        Right _ -> return $ Fail   "No exception was thrown!"
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
   ------------------------------------------------------------------------
   -- Simple Tx
   ------------------------------------------------------------------------

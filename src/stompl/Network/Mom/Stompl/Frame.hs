@@ -5,12 +5,13 @@ module Network.Mom.Stompl.Frame (
                        mkSubFrame, mkUSubFrame, mkMsgFrame,
                        mkSndFrame, mkDisFrame,  mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
-                       mkAckFrame, mkRecFrame,
+                       mkAckFrame, mkNackFrame, mkRecFrame,
                        mkConnect, mkConnected, 
                        mkSubscribe, mkUnsubscribe, mkMessage,
                        mkSend, mkDisconnect,  mkErr,
                        mkBegin, mkCommit,  mkAbort,
-                       mkAck, mkReceipt,
+                       mkAck, mkNack, mkReceipt,
+                       mkBeat,
                        sndToMsg, conToCond,
                        valToVer, valToVers, verToVal, versToVal,
                        beatToVal, valToBeat,
@@ -209,6 +210,12 @@ where
                    frmTrans :: String,
                    frmRec   :: String
                  }
+               | NackFrame {
+                   frmId    :: String,
+                   frmSub   :: String,
+                   frmTrans :: String,
+                   frmRec   :: String
+                 }
                | AbrtFrame {
                    frmTrans :: String,
                    frmRec   :: String
@@ -229,6 +236,7 @@ where
                    frmLen  :: Int,
                    frmMime :: Mime.Type,
                    frmBody :: Body}
+               | BeatFrame
     deriving (Show, Eq)
 
   mkConnect :: String -> String -> String -> Heart -> [Version] -> Frame
@@ -304,6 +312,9 @@ where
       frmMime = mime,
       frmBody = bdy}
 
+  mkBeat :: Frame
+  mkBeat = BeatFrame
+
   mkBegin  :: String -> String -> Frame
   mkBegin = BgnFrame
 
@@ -319,6 +330,13 @@ where
                            frmSub   = sid,
                            frmTrans = trn,
                            frmRec   = rc}
+
+  mkNack :: String -> String -> String -> String -> Frame
+  mkNack mid sid trn rc = NackFrame {
+                            frmId    = mid,
+                            frmSub   = sid,
+                            frmTrans = trn,
+                            frmRec   = rc}
 
   getLogin, getPasscode, getSession, getId,
     getDest,  getTrans,  getSub, getReceipt, getMsg,
@@ -357,8 +375,9 @@ where
   resetTrans f = f {frmTrans = ""}
 
   data FrameType = Connect   | Connected   | Disconnect | Message |
-                   Subscribe | Unsubscribe | Send       | Error   |
-                   Begin     | Commit      | Abort      | Ack     | Receipt
+                   Subscribe | Unsubscribe | Send       | Error   | Receipt |
+                   Begin     | Commit      | Abort      | Ack     | Nack    |
+                   HeartBeat
     deriving (Show, Read, Eq)
 
   typeOf :: Frame -> FrameType
@@ -373,9 +392,11 @@ where
               (CmtFrame  _ _           ) -> Commit
               (AbrtFrame _ _           ) -> Abort
               (AckFrame  _ _ _ _       ) -> Ack
+              (NackFrame _ _ _ _       ) -> Nack
               (MsgFrame  _ _ _ _ _ _ _ ) -> Message
               (RecFrame  _             ) -> Receipt
               (ErrFrame  _ _ _ _       ) -> Error
+              (BeatFrame               ) -> HeartBeat
 
   data AckMode = Auto | Client | ClientIndi
     deriving (Eq)
@@ -557,6 +578,10 @@ where
     let sh = if null s then [] else [mkSubHdr s]
         rh = if null r then [] else [mkRecHdr r]
     in mkTrnHdr t : ([mkMIdHdr i] ++ sh ++ rh)
+  toHeaders (NackFrame i s t r) = 
+    let sh = if null s then [] else [mkSubHdr s]
+        rh = if null r then [] else [mkRecHdr r]
+    in mkTrnHdr t : ([mkMIdHdr i] ++ sh ++ rh)
   toHeaders (MsgFrame h s d i l m _)  = 
     let sh = if null s then [] else [mkSubHdr  s]
         dh = if null d then [] else [mkDestHdr d]
@@ -569,6 +594,7 @@ where
     let mh = if null m then [] else [mkMsgHdr m]
         lh = if l <  0 then [] else [mkLenHdr (show l)]
     in  mh ++ lh ++ [mkMimeHdr $ showType t]
+  toHeaders BeatFrame = []
 
   putBody :: Frame -> Body
   putBody f =
@@ -715,6 +741,24 @@ where
                            Nothing -> ""
                            Just x  -> x
                  in Right AckFrame {
+                              frmId    = i,
+                              frmSub   = s,
+                              frmTrans = t,
+                              frmRec = case lookup hdrRec hs of
+                                         Nothing -> ""
+                                         Just r  -> r} 
+
+  mkNackFrame :: [Header] -> Either String Frame
+  mkNackFrame hs =
+    case lookup hdrMId hs of
+      Nothing -> Left $ "No message-id header in Ack Frame"
+      Just i  -> let t = case lookup hdrTrn hs of
+                           Nothing  -> ""
+                           Just trn -> trn
+                     s = case lookup hdrSub hs of -- mandatory!
+                           Nothing -> ""
+                           Just x  -> x
+                 in Right NackFrame {
                               frmId    = i,
                               frmSub   = s,
                               frmTrans = t,

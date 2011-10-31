@@ -64,15 +64,15 @@ where
                       conThrds :: [ThreadEntry],
                       conErrs  :: [F.Frame],
                       conRecs  :: [Receipt],
-                      conAcks  :: [String]}
+                      conAcks  :: [P.MsgId]}
 
   mkConnection :: P.Connection -> ThreadId -> Connection
   mkConnection c myself = Connection c myself [] [] [] [] [] []
 
-  addAckToCon :: String -> Connection -> Connection
+  addAckToCon :: P.MsgId -> Connection -> Connection
   addAckToCon mid c = c {conAcks = mid : conAcks c} 
 
-  rmAckFromCon :: String -> Connection -> Connection
+  rmAckFromCon :: P.MsgId -> Connection -> Connection
   rmAckFromCon mid c = c {conAcks = delete mid $ conAcks c}
 
   addRecToCon :: Receipt -> Connection -> Connection
@@ -140,7 +140,7 @@ where
                        txTmo     :: Int,
                        txAbrtAck :: Bool,
                        txAbrtRc  :: Bool,
-                       txAcks    :: [String],
+                       txAcks    :: [P.MsgId],
                        txRecs    :: [Receipt]
                      }
 
@@ -159,24 +159,33 @@ where
   ------------------------------------------------------------------------
   data Topt = 
             -- | The timeout in milliseconds (not microseconds!)
-            --   to wait for pending receipts.
-            --   If no timeout or a timeout /<= 0/, but 
-            --   'OWithReceipts' is given,
-            --   the transaction will immediately terminate
-            --   with 'TxException';
+            --   to wait for /pending receipts/.
+            --   If receipts are pending, when the transaction
+            --   is ready to terminate,
+            --   and no timeout or a timeout /<= 0/ is given, 
+            --   and the option 'OWithReceipts' 
+            --   was passed to 'withTransaction',
+            --   the transaction will be aborted with 'TxException';
             --   otherwise it will wait until all pending
             --   ineractions with the broker have terminated
             --   or the timeout has expired - whatever comes first.
             --   If the timeout expires first, 'TxException' is raised. 
             OTimeout Int 
-            -- | If this option is given,
-            --   interactions of the transaction with the broker,
-            --   /i.e./ starting and ending the transaction,
-            --   will request a receipt from the broker.
+            -- | This option has two effects:
+            --   1) Internal interactions of the transaction
+            --      with the broker will request receipts;
+            --   2) before ending the transaction,
+            --      the library will check for receipts
+            --      that have not yet been confirmed by the broker.
+            --
             --   If receipts are pending, when the transaction
             --   is ready to terminate and 'OTimeout' with
             --   a value /> 0/ is given, the transaction will
-            --   wait for pending receipts.
+            --   wait for pending receipts; otherwise
+            --   the transaction will be aborted with 'TxException'.
+            --   Note that it, usually, does not make sense to use
+            --   this options without 'OTimeout',
+            --   since the risk to lose a receipt is very high.
             | OWithReceipts 
             -- | If a message was received from a 
             --   queue with 'OMode' option other 
@@ -208,10 +217,10 @@ where
   setTxState :: TxState -> Transaction -> Transaction
   setTxState st t = t {txState = st}
 
-  addAckToTx :: String -> Transaction -> Transaction
+  addAckToTx :: P.MsgId -> Transaction -> Transaction
   addAckToTx mid t = t {txAcks = mid : txAcks t}
 
-  rmAckFromTx :: String -> Transaction -> Transaction
+  rmAckFromTx :: P.MsgId -> Transaction -> Transaction
   rmAckFromTx mid t = t {txAcks = delete mid $ txAcks t}
 
   addRecToTx :: Receipt -> Transaction -> Transaction
@@ -337,13 +346,13 @@ where
                                          deleteBy eq (tid, ts) $ conThrds c)}
                       return (c', ())
 
-  addAck :: Con -> String -> IO ()
+  addAck :: Con -> P.MsgId -> IO ()
   addAck cid mid = do
     let toTx  = addAckToTx  mid
     let toCon = addAckToCon mid
     withCon cid $ updCurTx toTx toCon
 
-  rmAck :: Con -> String -> IO ()
+  rmAck :: Con -> P.MsgId -> IO ()
   rmAck cid mid = do
     let fromTx  = rmAckFromTx  mid
     let fromCon = rmAckFromCon mid

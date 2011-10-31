@@ -73,11 +73,6 @@ module Network.Mom.Stompl.Client.Queue (
 where
   ----------------------------------------------------------------
   -- todo
-  -- - review OWithReceipts (Transaction):
-  --   - one option to say wait for Receipts
-  --   - another to say use receipts
-  -- - msgId: String -> MsgId
-  -- - nack
   -- - Heartbeat
   -- - test/check for deadlocks
   ----------------------------------------------------------------
@@ -224,18 +219,18 @@ where
 
   {- $stomp_trans
 
-     Transactions are atomic units of interactions with
-     a Stomp Broker, including sending messages to queues
-     and acknowledge the receipt of messages.
-     All messages sent during in a transaction
+     Transactions are units of interactions with
+     a Stomp broker, including sending messages to queues
+     and acknowledging the receipt of messages.
+     All messages sent during a transaction
      are buffered in the broker.
      Only when the application terminates the transaction
-     with /commit/ the messages will be processed.
+     with /commit/ the messages will be eventually processed.
      If an error occurs during the transaction,
      it can be /aborted/ by the client. 
      Transactions, in consequence, can be used
      to ensure atomicity,
-     /i.e./ all single steps are performed or 
+     /i.e./ either all single steps are performed or 
      no step is performed.
 
      In the Stompl Client library, transactions
@@ -407,7 +402,7 @@ where
                    -- if an exception is raised in the post-action
                    -- we at least will remove the connection
                    -- from our state -- and then reraise 
-                   (\l -> do 
+                   (\l -> 
                        Ex.catch (do killThread l
                                     -- unsubscribe all queues?
                                     _ <- P.disconnect c ""
@@ -637,7 +632,7 @@ where
     c <- getCon cid
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $ 
-                 "Not connected (" ++ (show cid) ++ ")"
+                 "Not connected (" ++ show cid ++ ")"
       else newRecvQ cid c qn dst os hs conv
   
   ------------------------------------------------------------------------
@@ -653,11 +648,11 @@ where
   ------------------------------------------------------------------------
   newWriter :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                OutBound a -> IO (Writer a)
-  newWriter cid qn dst os hs conv = do
+  newWriter cid qn dst os _ conv = do
     c <- getCon cid
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $ 
-                 "Not connected (" ++ (show cid) ++ ")"
+                 "Not connected (" ++ show cid ++ ")"
       else newSendQ cid qn dst os conv
 
   ------------------------------------------------------------------------
@@ -705,9 +700,9 @@ where
               wCon  = cid,
               wDest = dst,
               wName = qn,
-              wRec  = if hasQopt OWithReceipt os then True else False,
-              wWait = if hasQopt OWaitReceipt os then True else False,
-              wTx   = if hasQopt OForceTx     os then True else False,
+              wRec  = hasQopt OWithReceipt os, 
+              wWait = hasQopt OWaitReceipt os, 
+              wTx   = hasQopt OForceTx     os, 
               wTo   = conv}
     in return q
 
@@ -723,8 +718,8 @@ where
     let au   = hasQopt OAck os
     let with = hasQopt OWithReceipt os || hasQopt OWaitReceipt os
     sid <- mkUniqueSubId
-    rc  <- (if with then mkUniqueRecc else return NoRec)
-    P.subscribe (conCon c) (P.mkSub (show sid) dst am) (show rc) hs
+    rc  <- if with then mkUniqueRecc else return NoRec
+    P.subscribe (conCon c) (P.mkSub sid dst am) (show rc) hs
     ch <- newChan 
     addSub  cid (sid, ch) 
     addDest cid (dst, ch) 
@@ -750,16 +745,14 @@ where
     let cid = rCon  q
     let sid = rSub  q
     let dst = rDest q
-    rc <- (if rRec q then mkUniqueRecc else return NoRec) 
+    rc <- if rRec q then mkUniqueRecc else return NoRec
     c  <- getCon cid
     finally (P.unsubscribe (conCon c) 
-                           (P.mkSub (show sid) dst F.Client)
+                           (P.mkSub sid dst F.Client)
                            (show rc) [])
             (do rmSub  cid sid
                 rmDest cid dst)
-    if rRec q 
-      then waitReceipt cid rc
-      else return ()
+    when (rRec q) $ waitReceipt cid rc
 
   ------------------------------------------------------------------------
   -- | Removes the oldest message from the queue
@@ -795,16 +788,16 @@ where
   readQ q = do
     c <- getCon (rCon q)
     if not $ P.connected (conCon c)
-      then throwIO $ QueueException $ "Not connected: " ++ (show $ rCon q)
+      then throwIO $ QueueException $ "Not connected: " ++ show (rCon q)
       else case getSub (rSub q) c of
              Nothing -> throwIO $ QueueException $ 
-                           "Unknown queue " ++ (rName q)
+                           "Unknown queue " ++ rName q
              Just ch -> do
-               m <- (readChan ch >>= frmToMsg q)
-               if (rMode q) /= F.Auto
-                 then if (rAuto q) then ack (rCon q) m
-                      else addAck (rCon q)  (P.msgId m)
-                 else return ()
+               m <- readChan ch >>= frmToMsg q
+               when (rMode q /= F.Auto) $
+                 if rAuto q
+                   then ack (rCon q) m
+                   else addAck (rCon q)  (P.msgId m)
                return m
 
   ------------------------------------------------------------------------
@@ -858,25 +851,25 @@ where
     c <- getCon (wCon q)
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
-                 "Not connected (" ++ (show $ wCon q) ++ ")"
+                 "Not connected (" ++ show (wCon q) ++ ")"
       else do
-        tx <- (getCurTx c >>= (\mbT -> 
+        tx <- getCurTx c >>= (\mbT -> 
                  case mbT of
-                   Nothing     -> return ""
-                   Just (i, _) -> return (show i)))
-        if (null tx) && (wTx q)
+                   Nothing     -> return NoTx
+                   Just (i, _) -> return i)
+        if tx == NoTx && wTx q
           then throwIO $ QueueException $
-                 "Queue '" ++ (wName q) ++ 
+                 "Queue '" ++ wName q ++ 
                  "' with OForceTx used outside Transaction"
           else do
             let conv = wTo q
             s  <- conv x
-            rc <- (if wRec q then mkUniqueRecc else return NoRec)
-            let m = P.mkMessage "" (wDest q) (wDest q) 
+            rc <- if wRec q then mkUniqueRecc else return NoRec
+            let m = P.mkMessage P.NoMsg NoSub (wDest q) 
                                 mime (B.length s) tx s x
             when (wRec q) $ addRec (wCon q) rc 
             P.send (conCon c) m (show rc) hs 
-            if (wRec q) && (wWait q) 
+            if wRec q && wWait q 
               then waitReceipt (wCon q) rc >> return rc
               else return rc
 
@@ -888,8 +881,8 @@ where
   ------------------------------------------------------------------------
   ack :: Con -> P.Message a -> IO ()
   ack cid msg = do
-    ack' cid False msg
-    rmAck cid (P.msgId msg)
+    ack' cid True False msg
+    rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
   -- | Acknowledges the arrival of 'P.Message' to the broker,
@@ -903,15 +896,17 @@ where
   ------------------------------------------------------------------------
   ackWith :: Con -> P.Message a -> IO ()
   ackWith cid msg = do
-    ack' cid True msg  
-    rmAck cid (P.msgId msg)
+    ack' cid True True msg  
+    rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
   -- | Not-Acknowledges the arrival of 'P.Message' to the broker.
   --   For more details see 'ack'.
   ------------------------------------------------------------------------
   nack :: Con -> P.Message a -> IO ()
-  nack cid msg = undefined
+  nack cid msg = do
+    ack' cid False False msg
+    rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
   -- | Not-Acknowledges the arrival of 'P.Message' to the broker,
@@ -919,7 +914,9 @@ where
   --   For more details see 'ackWith'.
   ------------------------------------------------------------------------
   nackWith :: Con -> P.Message a -> IO ()
-  nackWith cid msg = undefined
+  nackWith cid msg = do
+    ack' cid False True msg
+    rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
   -- Checks for Transaction,
@@ -929,28 +926,30 @@ where
   -- If called with True for "with receipt"
   -- the function creates a receipt and waits for its confirmation. 
   ------------------------------------------------------------------------
-  ack' :: Con -> Bool -> P.Message a -> IO ()
-  ack' cid with msg = do
+  ack' :: Con -> Bool -> Bool -> P.Message a -> IO ()
+  ack' cid ok with msg = do
     c <- getCon cid
     if not $ P.connected (conCon c) 
       then throwIO $ ConnectException $ 
-             "Not connected (" ++ (show cid) ++ ")"
-      else if null (P.msgId msg)
+             "Not connected (" ++ show cid ++ ")"
+      else if null (show $ P.msgId msg)
            then throwIO $ ProtocolException "No message id in message!"
            else do
-             tx <- (getCurTx c >>= (\mbT -> 
+             tx <- getCurTx c >>= (\mbT -> 
                        case mbT of
-                         Nothing     -> return ""
-                         Just (x, _) -> return $ show x))
+                         Nothing     -> return NoTx
+                         Just (x, _) -> return x)
              let msg' = msg {P.msgTx = tx}
              if with 
                then do
                  rc <- mkUniqueRecc
                  addRec cid rc
-                 P.ack  (conCon c) msg' $ show rc
+                 if ok then P.ack  (conCon c) msg' $ show rc
+                       else P.nack (conCon c) msg' $ show rc
                  waitReceipt cid rc 
-               else do
-                 P.ack (conCon c) msg' ""
+               else 
+                 if ok then P.ack  (conCon c) msg' ""
+                       else P.nack (conCon c) msg' ""
 
   ------------------------------------------------------------------------
   -- | Variant of 'withTransaction' that does not return anything.
@@ -970,16 +969,11 @@ where
   --   the termination of a transaction may vary,
   --   refer to 'Topt' for details.
   --
-  --   Transactions must not be shared among threads.
+  --   Transactions cannot be shared among threads.
   --   Transactions are internally protected against
-  --   access from any thread that is not the owner
-  --   of this transaction, where owner is the thread
-  --   that has started the transaction.
-  --   The attempt to access a transaction that is not owned
-  --   by the caller causes an exception to be raised
-  --   to the caller. 
+  --   access from any thread that has not started the transaction.
   --
-  --   It is not advisable to use 'withTransaction' with /timeout/.
+  --   It is /not/ advisable to use 'withTransaction' with /timeout/.
   --   It is preferred to use /timeout/ on the 
   --   the actions executed within this transaction.
   --   Whether and how much time the transaction
@@ -1009,7 +1003,7 @@ where
     c <- getCon cid
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
-             "Not connected (" ++ (show cid) ++ ")"
+             "Not connected (" ++ show cid ++ ")"
       else finally (do addTx (tx, t) cid
                        startTx cid c tx t 
                        x <- op cid
@@ -1018,9 +1012,9 @@ where
                    -- if an exception is raised in terminate
                    -- we at least will remove the transaction
                    -- from our state and then reraise 
-                   (do Ex.catch (terminateTx tx cid)
-                          (\e -> do rmThisTx tx cid
-                                    throwIO (e::SomeException)))
+                   (Ex.catch (terminateTx tx cid)
+                             (\e -> do rmThisTx tx cid
+                                       throwIO (e::SomeException)))
   
   ------------------------------------------------------------------------
   -- | Waits for the 'Receipt' to be confirmed by the broker.
@@ -1031,13 +1025,12 @@ where
   waitReceipt cid r =
     case r of
       NoRec -> return ()
-      _     -> waitForMe cid 
-    where waitForMe cid = do
+      _     -> waitForMe 
+    where waitForMe = do
             ok <- checkReceipt cid r
-            if ok then return ()
-              else do 
-                threadDelay $ ms 1
-                waitForMe cid 
+            unless ok $ do
+              threadDelay $ ms 1
+              waitForMe 
 
   ------------------------------------------------------------------------
   -- | Aborts the transaction immediately by raising 'AppException'.
@@ -1058,13 +1051,9 @@ where
     mbT <- getTx tx c
     case mbT of
       Nothing -> throwIO $ OuchException $ 
-                   "Transaction disappeared: " ++ (show tx)
-      Just t  -> 
-        if txState t /= TxEnded
-          then endTx False cid c tx t
-          else
-            if (txReceipts t) || (txPendingAck t)
-              then do
+                   "Transaction disappeared: " ++ show tx
+      Just t | txState t /= TxEnded -> endTx False cid c tx t
+             | txReceipts t || txPendingAck t -> do 
                 ok <- waitTx tx cid $ txTmo t
                 if ok
                   then endTx True cid c tx t
@@ -1073,7 +1062,7 @@ where
                     let m = if txPendingAck t then "Acks" else "Receipts"
                     throwIO $ TxException $
                        "Transaction aborted: Missing " ++ m
-              else endTx True cid c tx t
+             | otherwise -> endTx True cid c tx t
 
   -----------------------------------------------------------------------
   -- Send begin frame
@@ -1083,7 +1072,7 @@ where
   -----------------------------------------------------------------------
   startTx :: Con -> Connection -> Tx -> Transaction -> IO ()
   startTx cid c tx t = do
-    rc <- (if txAbrtRc t then mkUniqueRecc else return NoRec)
+    rc <- if txAbrtRc t then mkUniqueRecc else return NoRec
     when (txAbrtRc t) $ addRec cid rc 
     P.begin (conCon c) (show tx) (show rc)
 
@@ -1095,12 +1084,12 @@ where
   endTx :: Bool -> Con -> Connection -> Tx -> Transaction -> IO ()
   endTx x cid c tx t = do
     let w = txAbrtRc t && txTmo t > 0 
-    rc <- (if w then mkUniqueRecc else return NoRec)
+    rc <- if w then mkUniqueRecc else return NoRec
     when w $ addRec cid rc 
     if x then P.commit (conCon c) (show tx) (show rc)
          else P.abort  (conCon c) (show tx) (show rc)
-    mbR <- (if w then timeout (ms $ txTmo t) $ waitReceipt cid rc
-                 else return $ Just ())
+    mbR <- if w then timeout (ms $ txTmo t) $ waitReceipt cid rc
+                else return $ Just ()
     rmTx cid
     case mbR of
       Just _  -> return ()
@@ -1120,33 +1109,34 @@ where
     mbT <- getTx tx c
     case mbT of
       Nothing -> return True
-      Just t  -> 
-        if (txPendingAck t) then return False
-        else if (txReceipts t)
-          then 
-            if delay <= 0 then return False
-              else do
-                threadDelay $ ms 1
-                waitTx tx cid (delay - 1)
-          else return True
+      Just t  | txPendingAck t -> return False
+              | txReceipts   t -> 
+                  if delay <= 0 then return False
+                    else do
+                      threadDelay $ ms 1
+                      waitTx tx cid (delay - 1)
+              | otherwise -> return True
 
   -----------------------------------------------------------------------
-  -- Transform a frame into the message
+  -- Transform a frame into a message
   -- using the queue's application callback
   -----------------------------------------------------------------------
   frmToMsg :: Reader a -> F.Frame -> IO (P.Message a)
   frmToMsg q f = do
     let b = F.getBody f
     let conv = rFrom q
+    let sid  = if  null (F.getSub f) || not (numeric $ F.getSub f)
+                 then NoSub else Sub $ read $ F.getSub f
     x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
-    let m = P.mkMessage (F.getId     f)
-                        (F.getSub    f)
+    let m = P.mkMessage (P.MsgId $ F.getId f) sid
                         (F.getDest   f) 
                         (F.getMime   f)
                         (F.getLength f)
-                        "" b x
+                        NoTx 
+                        b -- raw bytestring
+                        x -- converted context
     return m {P.msgHdrs = F.getHeaders f}
-    
+
   -----------------------------------------------------------------------
   -- Connection listener
   -----------------------------------------------------------------------
@@ -1160,12 +1150,13 @@ where
                    ProtocolException $ "Receive Error: " ++ e
       Right f -> 
         case F.typeOf f of
-          F.Message -> handleMessage cid f
-          F.Error   -> handleError   cid f
-          F.Receipt -> handleReceipt cid f
-          _         -> throwTo (conOwner c) $ 
-                         ProtocolException $ "Unexpected Frame: " ++ 
-                         (show $ F.typeOf f)
+          F.Message   -> handleMessage cid f
+          F.Error     -> handleError   cid f
+          F.Receipt   -> handleReceipt cid f
+          F.HeartBeat -> handleBeat    cid f
+          _           -> throwTo (conOwner c) $ 
+                           ProtocolException $ "Unexpected Frame: " ++
+                           show (F.typeOf f)
 
   -----------------------------------------------------------------------
   -- Handle Message Frame
@@ -1175,7 +1166,7 @@ where
     c <- getCon cid
     case getCh c of
       Nothing -> throwTo (conOwner c) $ 
-                 ProtocolException $ "Unknown Queue: " ++ (show f)
+                 ProtocolException $ "Unknown Queue: " ++ show f
       Just ch -> writeChan ch f
     where getCh c = let dst = F.getDest f
                         sid = F.getSub  f
@@ -1191,7 +1182,7 @@ where
   handleError :: Con -> F.Frame -> IO ()
   handleError cid f = do
     c <- getCon cid
-    let e = F.getMsg f ++ ": " ++ (U.toString $ F.getBody f)
+    let e = F.getMsg f ++ ": " ++ U.toString (F.getBody f)
     throwTo (conOwner c) (BrokerException e) 
 
   -----------------------------------------------------------------------
@@ -1203,4 +1194,13 @@ where
     case parseRec $ F.getReceipt f of
       Just r  -> forceRmRec cid r -- rmRec cid r
       Nothing -> throwTo (conOwner c) $ 
-                 ProtocolException $ "Invalid Receipt: " ++ (show f)
+                 ProtocolException $ "Invalid Receipt: " ++ show f
+
+  -----------------------------------------------------------------------
+  -- Handle Beat Frame
+  -----------------------------------------------------------------------
+  handleBeat :: Con -> F.Frame -> IO ()
+  handleBeat cid _ = undefined
+
+ 
+

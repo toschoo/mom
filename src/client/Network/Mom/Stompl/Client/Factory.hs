@@ -20,17 +20,19 @@ where
   instance Show Con where
     show (Con i) = show i
 
-  newtype Sub = Sub Int
+  data Sub = Sub Int | NoSub
     deriving (Eq)
 
   instance Show Sub where
     show (Sub i) = show i
+    show (NoSub) = ""
 
-  newtype Tx = Tx Int
+  data Tx = Tx Int | NoTx
     deriving (Eq)
 
   instance Show Tx where
     show (Tx i) = show i
+    show (NoTx) = ""
 
   ------------------------------------------------------------------------
   -- | A receipt is sent to the broker as part of an interaction.

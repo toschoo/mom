@@ -6,12 +6,14 @@ module Protocol (Connection, mkConnection,
                  subscribe, unsubscribe,
                  begin, commit, abort,
                  Message(..), mkMessage,
+                 MsgId(..),
                  send, ack, nack)
                  
                  
 where
 
-  import qualified Socket as S
+  import qualified Socket  as S
+  import qualified Factory as Fac
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
   import           Network.Socket (Socket)
@@ -47,15 +49,22 @@ where
                        conBrk  :: Bool}
 
   data Subscription = Sub {
-                        subId   :: String,
+                        subId   :: Fac.Sub,
                         subName :: String,
                         subMode :: F.AckMode}
 
-  mkSub :: String -> String -> F.AckMode -> Subscription
+  mkSub :: Fac.Sub -> String -> F.AckMode -> Subscription
   mkSub sid qn am = Sub {
                       subId   = sid,
                       subName = qn,
                       subMode = am}
+
+  data MsgId = MsgId String | NoMsg
+    deriving (Eq)
+
+  instance Show MsgId where
+    show (MsgId s) = s
+    show (NoMsg)   = ""
 
   ------------------------------------------------------------------------
   -- | Any content received from a queue
@@ -64,9 +73,9 @@ where
   ------------------------------------------------------------------------
   data Message a = Msg {
                      -- | The message Identifier
-                     msgId   :: String,
+                     msgId   :: MsgId,
                      -- | The subscription
-                     msgSub  :: String,
+                     msgSub  :: Fac.Sub,
                      -- | The destination
                      msgDest :: String,
                      -- | The Stompl headers
@@ -78,16 +87,16 @@ where
                      -- | The length of the 
                      --   encoded content
                      msgLen  :: Int,
-                     -- | The transaction where 
+                     -- | The transaction, in which 
                      --   the message was received
-                     msgTx   :: String,
+                     msgTx   :: Fac.Tx,
                      -- | The encoded content             
                      msgRaw  :: B.ByteString,
                      -- | The content             
                      msgCont :: a}
   
-  mkMessage :: String -> String -> String -> 
-               Mime.Type -> Int -> String -> 
+  mkMessage :: MsgId -> Fac.Sub -> String -> 
+               Mime.Type -> Int -> Fac.Tx -> 
                B.ByteString -> a -> Message a
   mkMessage mid sub dst typ len tx raw cont = Msg {
                                           msgId   = mid,
@@ -144,10 +153,6 @@ where
   getErr :: Connection -> String
   getErr = conErrM
 
-  ok :: Connection -> Bool
-  ok c = (0 == conErr c) &&
-         (null $ conErrM c)
-
   getVersion :: Connection -> F.Version
   getVersion c = if null (conVers c) 
                    then defVersion
@@ -188,7 +193,7 @@ where
   ack c m receipt = sendFrame c m receipt [] mkAckF
 
   nack :: Connection -> Message a -> String -> IO ()
-  nack c mid receipt = undefined
+  nack c m receipt = sendFrame c m receipt [] mkNackF
 
   subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   subscribe c sub receipt hs = sendFrame c sub receipt hs mkSubF
@@ -290,7 +295,7 @@ where
 
   mkSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkSubF sub receipt hs = 
-    F.mkSubFrame $ [F.mkIdHdr   $ subId sub,
+    F.mkSubFrame $ [F.mkIdHdr   $ show $ subId sub,
                     F.mkDestHdr $ subName sub,
                     F.mkAckHdr  $ show $ subMode sub] ++ 
                    (mkReceipt receipt) ++ hs
@@ -298,7 +303,7 @@ where
   mkUnSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkUnSubF sub receipt hs =
     let dh = if null $ subName sub then [] else [F.mkDestHdr $ subName sub]
-    in  F.mkUSubFrame $ [F.mkIdHdr $ subId sub] ++ dh ++ 
+    in  F.mkUSubFrame $ [F.mkIdHdr $ show $ subId sub] ++ dh ++ 
                         (mkReceipt receipt)     ++ hs
 
   mkReceipt :: String -> [F.Header]
@@ -306,16 +311,27 @@ where
 
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
-    Right $ F.mkSend (msgDest msg) (msgTx msg)  receipt 
+    Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
                      (msgType msg) (msgLen msg) hs 
                      (msgRaw msg) 
 
   mkAckF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkAckF msg receipt _ =
-    let sh = if null $ msgSub msg then [] else [F.mkSubHdr $ msgSub msg]
-        th = if null $ msgTx  msg then [] else [F.mkTrnHdr $ msgTx msg]
+    let sh = if null $ show $ msgSub msg then [] 
+               else [F.mkSubHdr $ show $ msgSub msg]
+        th = if null $ show $ msgTx msg 
+               then [] else [F.mkTrnHdr $ show $ msgTx msg]
         rh = mkReceipt receipt
-    in F.mkAckFrame ([F.mkMIdHdr $ msgId msg] ++ sh ++ rh ++ th)
+    in F.mkAckFrame ([F.mkMIdHdr $ show $ msgId msg] ++ sh ++ rh ++ th)
+
+  mkNackF :: Message a -> String -> [F.Header] -> Either String F.Frame
+  mkNackF msg receipt _ =
+    let sh = if null $ show $ msgSub msg then [] 
+               else [F.mkSubHdr $ show $ msgSub msg]
+        th = if null $ show $ msgTx msg 
+               then [] else [F.mkTrnHdr $ show $ msgTx msg]
+        rh = mkReceipt receipt
+    in F.mkAckFrame ([F.mkMIdHdr $ show $ msgId msg] ++ sh ++ rh ++ th)
 
   mkBeginF :: String -> String -> [F.Header] -> Either String F.Frame
   mkBeginF tx receipt _ = 

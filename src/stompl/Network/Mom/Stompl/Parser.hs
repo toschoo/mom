@@ -32,6 +32,7 @@ where
   stompParser = do
     t <- msgType
     case t of
+      ""            -> beat
       "CONNECT"     -> connect
       "STOMP"       -> connect
       "CONNECTED"   -> connected
@@ -43,6 +44,7 @@ where
       "COMMIT"      -> commit 
       "ABORT"       -> abort
       "ACK"         -> ack
+      "NACK"        -> nack
       "MESSAGE"     -> message
       "RECEIPT"     -> receipt
       "ERROR"       -> prsError
@@ -55,6 +57,9 @@ where
     skipWhite
     terminal
     return $ U.toString t
+
+  beat :: Parser Frame
+  beat = atEnd >> return mkBeat
 
   send :: Parser Frame
   send = bodyFrame mkSndFrame
@@ -102,6 +107,9 @@ where
 
   ack :: Parser Frame
   ack = genericFrame mkAckFrame
+
+  nack :: Parser Frame
+  nack = genericFrame mkNackFrame
   
   receipt :: Parser Frame
   receipt = genericFrame mkRecFrame

@@ -41,7 +41,10 @@ where
 
   mkTestDir :: [Test]
   mkTestDir = 
-    [(TDesc "Simple connect" 
+    [(TDesc "HeartBeat"
+            HeartBeat (Just . id) Pass
+            [], "beat.txt"),
+     (TDesc "Simple connect" 
             Connect (Just . id) Pass 
             [("login", "guest"),
              ("passcode", "guest")], "con.txt"),
@@ -95,6 +98,11 @@ where
             [("subscription", "sub-1"),
              ("message-id", "1234"),
              ("transaction", "trn-12345")], "ack1-1.1.txt"),
+     (TDesc "Nack 1.1" 
+            Nack (Just . id) Pass 
+            [("subscription", "sub-1"),
+             ("message-id", "1234"),
+             ("transaction", "trn-12345")], "nack1-1.1.txt"),
      (TDesc "Simple Subscription (1.0)" 
             Subscribe (Just . id) Pass 
             [("destination", "/queue/test"),
