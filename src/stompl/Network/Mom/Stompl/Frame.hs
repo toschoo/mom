@@ -496,10 +496,10 @@ where
           recv = (cleanWhite . drop 1 . dropWhile (/= ',')) s
 
   putFrame :: Frame -> B.ByteString
-  putFrame f = 
-    putCommand f >|<
-    putHeaders f >|<
-    putBody    f
+  putFrame BeatFrame = putCommand mkBeat
+  putFrame f         = putCommand f >|<
+                       putHeaders f >|<
+                       putBody    f
 
   toString :: Frame -> String
   toString = U.toString . putFrame
@@ -520,6 +520,7 @@ where
               Message     -> "MESSAGE"
               Receipt     -> "RECEIPT"
               Error       -> "ERROR"
+              HeartBeat   -> ""
     in B.pack (s ++ "\n")
 
   putHeaders :: Frame -> B.ByteString

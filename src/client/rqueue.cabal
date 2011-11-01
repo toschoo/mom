@@ -33,7 +33,8 @@ Library
                    split       >= 0.1.4.1,
                    network     >= 2.3.0.4,
                    stompl      >= 0.0.1,
-                   mime        >= 0.3.3
+                   mime        >= 0.3.3,
+                   time        >= 1.1.4
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    

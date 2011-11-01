@@ -7,6 +7,7 @@ module State (
          TxState(..),
          Receipt,
          mkConnection,
+         logSend, logReceive,
          addCon, updCon, rmCon, getCon,
          addSub, addDest, getSub, getDest,
          rmSub, rmDest,
@@ -33,6 +34,7 @@ where
 
   import           Data.List (find, deleteBy, delete)
   import           Data.Char (isDigit)
+  import           Data.Time.Clock
 
   ------------------------------------------------------------------------
   -- | Returns the content of the message in the format 
@@ -57,17 +59,19 @@ where
   -- Connection
   ------------------------------------------------------------------------
   data Connection = Connection {
-                      conCon   :: P.Connection,
-                      conOwner :: ThreadId,
-                      conSubs  :: [SubEntry],
-                      conDests :: [DestEntry], 
-                      conThrds :: [ThreadEntry],
-                      conErrs  :: [F.Frame],
-                      conRecs  :: [Receipt],
-                      conAcks  :: [P.MsgId]}
+                      conCon     :: P.Connection,
+                      conOwner   :: ThreadId,
+                      conHisBeat :: UTCTime,
+                      conMyBeat  :: UTCTime, 
+                      conSubs    :: [SubEntry],
+                      conDests   :: [DestEntry], 
+                      conThrds   :: [ThreadEntry],
+                      conErrs    :: [F.Frame],
+                      conRecs    :: [Receipt],
+                      conAcks    :: [P.MsgId]}
 
-  mkConnection :: P.Connection -> ThreadId -> Connection
-  mkConnection c myself = Connection c myself [] [] [] [] [] []
+  mkConnection :: P.Connection -> ThreadId -> UTCTime -> Connection
+  mkConnection c myself t = Connection c myself t t [] [] [] [] [] []
 
   addAckToCon :: P.MsgId -> Connection -> Connection
   addAckToCon mid c = c {conAcks = mid : conAcks c} 
@@ -114,15 +118,11 @@ where
   rmDestFromCon d c = c {conDests = ds}
     where ds = deleteBy eq d (conDests c)
 
-  txPendingAck :: Transaction -> Bool
-  txPendingAck t = if (txAbrtAck t)
-                     then if (null $ txAcks t) then False else True
-                     else False
+  setHisTime :: UTCTime -> Connection -> Connection
+  setHisTime t c = c {conHisBeat = t}
 
-  txReceipts :: Transaction -> Bool
-  txReceipts t = if (txAbrtRc t) 
-                   then if (null $ txRecs t) then False else True
-                   else False
+  setMyTime  :: UTCTime -> Connection -> Connection
+  setMyTime t c = c {conMyBeat = t}
 
   ------------------------------------------------------------------------
   -- Connection Entry
@@ -234,6 +234,16 @@ where
                          Nothing -> True
                          Just _  -> False
 
+  txPendingAck :: Transaction -> Bool
+  txPendingAck t = if (txAbrtAck t)
+                     then if (null $ txAcks t) then False else True
+                     else False
+
+  txReceipts :: Transaction -> Bool
+  txReceipts t = if (txAbrtRc t) 
+                   then if (null $ txRecs t) then False else True
+                   else False
+
   ------------------------------------------------------------------------
   -- State 
   ------------------------------------------------------------------------
@@ -264,6 +274,16 @@ where
          (c', x) <- op (cid, c)
          let cs' = updCon (cid, c') cs
          return (cs', x))
+
+  logTime :: Con -> (UTCTime -> Connection -> Connection) -> IO ()
+  logTime cid f = 
+    getCurrentTime >>= \t -> withCon cid (\(_, c) -> return (f t c, ()))
+
+  logSend :: Con -> IO ()
+  logSend cid = logTime cid setMyTime
+
+  logReceive :: Con -> IO ()
+  logReceive cid = logTime cid setHisTime
 
   addSub :: Con -> SubEntry -> IO ()
   addSub cid s  = withCon cid $ \(_, c) -> return (addSubToCon s c, ())

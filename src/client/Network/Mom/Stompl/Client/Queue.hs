@@ -87,15 +87,16 @@ where
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
+  import           Data.List (find)
+  import           Data.Time.Clock
+  import           Data.Maybe (isJust, fromJust)
 
   import           Control.Concurrent 
-  -- import           Control.Applicative ((<$>))
+  import           Control.Applicative ((<$>))
   import           Control.Monad
   import           Control.Exception (bracket, finally, 
                                       throwIO, SomeException)
   import qualified Control.Exception as Ex (catch)
-
-  import           Data.List (find)
 
   import           Codec.MIME.Type as Mime (Type)
   import           System.Timeout (timeout)
@@ -394,22 +395,37 @@ where
   withConnection host port mx usr pwd beat act = do
     me  <- myThreadId
     cid <- mkUniqueConId
+    now <- getCurrentTime
     c   <- P.connect host port mx usr pwd vers beat
+    -- putStrLn $ show $ P.conBeat c
     if not $ P.connected c 
       then throwIO $ ConnectException $ P.getErr c
-      else bracket (do addCon (cid, mkConnection c me)
-                       forkIO $ listen cid)
+      else bracket (do addCon (cid, mkConnection c me now)
+                       l <- forkIO $ listen    cid
+                       b <- if period c > 0 
+                              then do x <- forkIO $ heartBeat cid $ period c
+                                      return $ Just x
+                              else    return Nothing 
+                       return (l, b))
                    -- if an exception is raised in the post-action
                    -- we at least will remove the connection
                    -- from our state -- and then reraise 
-                   (\l -> 
+                   (\(l, b) -> 
                        Ex.catch (do killThread l
+                                    when (isThrd b) (killThread $ thrd b)
                                     -- unsubscribe all queues?
                                     _ <- P.disconnect c ""
                                     rmCon cid)
                                 (\e -> do rmCon cid
                                           throwIO (e::SomeException)))
                    (\_ -> act cid)
+    where period = snd . P.conBeat 
+
+  isThrd :: Maybe a -> Bool
+  isThrd = isJust
+
+  thrd :: Maybe a -> a
+  thrd = fromJust
     
   ------------------------------------------------------------------------
   -- | A Queue for sending messages.
@@ -719,6 +735,7 @@ where
     let with = hasQopt OWithReceipt os || hasQopt OWaitReceipt os
     sid <- mkUniqueSubId
     rc  <- if with then mkUniqueRecc else return NoRec
+    logSend cid
     P.subscribe (conCon c) (P.mkSub sid dst am) (show rc) hs
     ch <- newChan 
     addSub  cid (sid, ch) 
@@ -747,6 +764,7 @@ where
     let dst = rDest q
     rc <- if rRec q then mkUniqueRecc else return NoRec
     c  <- getCon cid
+    logSend cid
     finally (P.unsubscribe (conCon c) 
                            (P.mkSub sid dst F.Client)
                            (show rc) [])
@@ -868,6 +886,7 @@ where
             let m = P.mkMessage P.NoMsg NoSub (wDest q) 
                                 mime (B.length s) tx s x
             when (wRec q) $ addRec (wCon q) rc 
+            logSend $ wCon q
             P.send (conCon c) m (show rc) hs 
             if wRec q && wWait q 
               then waitReceipt (wCon q) rc >> return rc
@@ -940,6 +959,7 @@ where
                          Nothing     -> return NoTx
                          Just (x, _) -> return x)
              let msg' = msg {P.msgTx = tx}
+             logSend cid
              if with 
                then do
                  rc <- mkUniqueRecc
@@ -1075,6 +1095,7 @@ where
     rc <- if txAbrtRc t then mkUniqueRecc else return NoRec
     when (txAbrtRc t) $ addRec cid rc 
     P.begin (conCon c) (show tx) (show rc)
+    logSend cid
 
   -----------------------------------------------------------------------
   -- Send commit or abort frame
@@ -1086,6 +1107,7 @@ where
     let w = txAbrtRc t && txTmo t > 0 
     rc <- if w then mkUniqueRecc else return NoRec
     when w $ addRec cid rc 
+    logSend cid
     if x then P.commit (conCon c) (show tx) (show rc)
          else P.abort  (conCon c) (show tx) (show rc)
     mbR <- if w then timeout (ms $ txTmo t) $ waitReceipt cid rc
@@ -1142,9 +1164,10 @@ where
   -----------------------------------------------------------------------
   listen :: Con -> IO ()
   listen cid = forever $ do
-    c <- getCon cid
+    c   <- getCon cid
     let cc = conCon c
     eiF <- S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc)
+    logReceive cid
     case eiF of
       Left e  -> throwTo (conOwner c) $ 
                    ProtocolException $ "Receive Error: " ++ e
@@ -1192,7 +1215,7 @@ where
   handleReceipt cid f = do
     c <- getCon cid
     case parseRec $ F.getReceipt f of
-      Just r  -> forceRmRec cid r -- rmRec cid r
+      Just r  -> forceRmRec cid r 
       Nothing -> throwTo (conOwner c) $ 
                  ProtocolException $ "Invalid Receipt: " ++ show f
 
@@ -1200,7 +1223,43 @@ where
   -- Handle Beat Frame
   -----------------------------------------------------------------------
   handleBeat :: Con -> F.Frame -> IO ()
-  handleBeat cid _ = undefined
+  handleBeat _ _ = return () -- putStrLn "Beat!"
 
- 
+  -----------------------------------------------------------------------
+  -- My Beat 
+  -----------------------------------------------------------------------
+  heartBeat :: Con -> Int -> IO ()
+  heartBeat cid period = forever $ do
+    now <- getCurrentTime
+    c   <- getCon cid
+    let me = myMust  c 
+    let he = hisMust c 
+    when (now > he) $ throwTo (conOwner c) $ 
+                         ProtocolException $ 
+                           "Missing HeartBeat, last was " ++
+                           show (now `diffUTCTime` he)    ++ 
+                           " seconds ago!"
+    when (now >= me) $ do
+      logSend  cid -- not necessary
+      putStrLn "Sending beat..."
+      P.sendBeat $ conCon c
+    threadDelay $ ms period
+
+  myMust :: Connection -> UTCTime
+  myMust c = let t = conMyBeat c
+                 p = snd $ P.conBeat $ conCon c
+             in  timeAdd t p
+
+  hisMust :: Connection -> UTCTime
+  hisMust c = let t   = conHisBeat c
+                  tol = 4
+                  b   = fst $ P.conBeat $ conCon c
+                  p   = tol * b
+              in  timeAdd t p
+
+  timeAdd :: UTCTime -> Int -> UTCTime
+  timeAdd t p = ms2nominal p `addUTCTime` t
+
+  ms2nominal :: Int -> NominalDiffTime
+  ms2nominal ms = (fromIntegral ms) / (1000::NominalDiffTime)
 

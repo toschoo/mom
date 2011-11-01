@@ -1,3 +1,4 @@
+{-# Language CPP #-}
 module Socket (Writer, Receiver, 
                initWriter, initReceiver,
                connect, disconnect, send, receive)
@@ -97,7 +98,9 @@ where
   send wr sock f = do
     let s = F.putFrame f
     lock wr
-    -- putStrLn $ U.toString s
+#ifdef _DEBUG
+    putStrLn $ U.toString s
+#endif
     n <- finally (do BS.send sock s)
                  (do release wr)
     if n == B.length s then return ()
@@ -111,7 +114,7 @@ where
                    Maybe Result -> Int -> IO (Either String F.Frame)
   handlePartial rec sock max mbR step = do
     eiS <- getInput rec sock max
-    case eiS of -- heart beats!
+    case eiS of 
       Left  e -> return $ Left e
       Right s -> do
         let prs = case mbR of 
@@ -127,27 +130,29 @@ where
               else handlePartial rec sock max (Just r) (step + 1)
                      
           A.Done str f     -> do
-            let str' = B.dropWhile white str
-            if B.null str' 
+            if B.null str 
               then return $ Right f
               else do
-                putBuffer rec str'
+                putBuffer rec str
                 return $ Right f
           
   getInput :: Receiver -> S.Socket -> Int -> IO (Either String B.ByteString)
   getInput rec sock max = do
     mbB <- getBuffer rec
     case mbB of
-      Just s  -> return $ Right s
+      Just s  -> do
+#ifdef _DEBUG
+        putStrLn $ U.toString s
+#endif
+        return $ Right s
       Nothing -> do
         s <- BS.recv sock max
         if B.null s 
           then return $ Left "Peer disconnected"
           else do
-            let s' = s -- B.dropWhile white s
-            if B.null s' 
+#ifdef _DEBUG
+            putStrLn $ U.toString s
+#endif
+            if B.null s
               then getInput rec sock max
-              else return $ Right s'
-
-  white :: Char -> Bool
-  white c = c == '\n'
+              else return $ Right s

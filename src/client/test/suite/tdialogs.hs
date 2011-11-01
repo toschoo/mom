@@ -1,3 +1,4 @@
+{-# Language CPP #-}
 module Main
 where
 
@@ -42,7 +43,11 @@ where
   oconv = return . U.fromString
 
   tmo :: IO a -> IO (Maybe a)
+#ifndef _DEBUG
   tmo = timeout 100000
+#else
+  tmo = timeout 500000
+#endif
 
   text1, text2, text3, text4, utf8 :: String
   text1 = "whose woods these are I think I know"
@@ -120,11 +125,12 @@ where
         t350  = mkTest "Nested con - independent " $ testNstConInd  p
         t360  = mkTest "Nested con - interleaved " $ testNstConX    p
         t370  = mkTest "Nested con - inner fails " $ testNstConFail p
+        t380  = mkTest "HeartBeat                " $ testBeat       p
     in  mkGroup "Dialogs" (Stop (Fail "")) 
         [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t180, t190, t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t290, t300,
-         t310, t320, t330, t340, t350, t360, t370] 
+         t310, t320, t330, t340, t350, t360, t370, t380] 
 
   ------------------------------------------------------------------------
   -- Create a Reader without options
@@ -1192,6 +1198,35 @@ where
                                            (msgContent m)
         Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
         Right _ -> return $ Fail   "No exception was thrown!"
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
+  ------------------------------------------------------------------------
+  -- Siimple HeartBeat Test
+  ------------------------------------------------------------------------
+  -- connect with heartbeat
+  -- delay thread longer than heartbeat
+  -- then do something
+  -- delay thread longer than heartbeat
+  -- shall not throw exception
+  ------------------------------------------------------------------------
+  testBeat :: Int -> IO TestResult
+  testBeat p = do
+    let b = (500,500)
+    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \c -> do
+      oQ  <- newWriter c "OUT" tQ1 [] [] oconv
+      iQ  <- newReader c "IN"  tQ1 [] [] iconv
+      threadDelay $ 1000 * 1000
+      writeQ oQ nullType [] text1
+      mbM <- tmo $ readQ iQ
+      case mbM of
+        Nothing -> return $ Fail "No message received!"
+        Just m  -> if msgContent m /= text1 
+                     then return $ Fail $ "Unexpected message: " ++ 
+                                   msgContent m
+                     else do threadDelay $ 1000 * 1000
+                             return Pass
     case eiR of
        Left  e -> return $ Fail $ show e
        Right r -> return r

@@ -1,10 +1,11 @@
-module Protocol (Connection, mkConnection,
+module Protocol (Connection, mkConnection, 
+                 conBeat,
                  getSock, getWr, getRc,
                  connected, getErr, conMax,
                  connect, disconnect,
                  Subscription, mkSub,
                  subscribe, unsubscribe,
-                 begin, commit, abort,
+                 begin, commit, abort, sendBeat,
                  Message(..), mkMessage,
                  MsgId(..),
                  send, ack, nack)
@@ -205,6 +206,9 @@ where
   send c msg receipt hs = 
     sendFrame c msg receipt hs mkSendF
 
+  sendBeat :: Connection -> IO ()
+  sendBeat c = sendFrame c () "" [] (\_ _ _ -> Right F.mkBeat)
+
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
                (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
   sendFrame c m receipt hs mkF = 
@@ -258,8 +262,11 @@ where
              Left e  -> return c {conErrM = e}
              Right r -> do
                let c' = handleConnected r
-                          c {conRcv = Just rc, conWrt = Just wr} 
-               return c'
+                          c {conRcv = Just rc, conWrt = Just wr}
+               if period c' > 0 && period c' < fst beat
+                 then return c {conErrM = "Beat frequency too high"}
+                 else return c'
+    where period = snd . conBeat
 
   handleConnected :: F.Frame -> Connection -> Connection
   handleConnected f c = 

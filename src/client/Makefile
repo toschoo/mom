@@ -66,6 +66,9 @@ $(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs
 $(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(TDIR)/tdialogsdbg:	$(TDIR)/tdialogs.hs $(SUBSRC)
+			$(GHC) -o $@ $(FLGS) -D_DEBUG $(INC) $(TDIR)/tdialogs.hs
+
 $(TDIR)/tmime:		$(TDIR)/tmime.hs
 			$(GHC) $(FLGS) $(INC) $@
 
