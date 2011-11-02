@@ -517,6 +517,7 @@ where
               Commit      -> "COMMIT"
               Abort       -> "ABORT"
               Ack         -> "ACK"
+              Nack        -> "NACK"
               Message     -> "MESSAGE"
               Receipt     -> "RECEIPT"
               Error       -> "ERROR"
@@ -578,11 +579,13 @@ where
   toHeaders (AckFrame i s t r) = 
     let sh = if null s then [] else [mkSubHdr s]
         rh = if null r then [] else [mkRecHdr r]
-    in mkTrnHdr t : ([mkMIdHdr i] ++ sh ++ rh)
+        th = if null t then [] else [mkTrnHdr t]
+    in ([mkMIdHdr i] ++ th ++ sh ++ rh)
   toHeaders (NackFrame i s t r) = 
     let sh = if null s then [] else [mkSubHdr s]
         rh = if null r then [] else [mkRecHdr r]
-    in mkTrnHdr t : ([mkMIdHdr i] ++ sh ++ rh)
+        th = if null t then [] else [mkTrnHdr t]
+    in ([mkMIdHdr i] ++ th ++ sh ++ rh)
   toHeaders (MsgFrame h s d i l m _)  = 
     let sh = if null s then [] else [mkSubHdr  s]
         dh = if null d then [] else [mkDestHdr d]

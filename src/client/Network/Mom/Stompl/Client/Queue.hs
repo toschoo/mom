@@ -73,7 +73,7 @@ module Network.Mom.Stompl.Client.Queue (
 where
   ----------------------------------------------------------------
   -- todo
-  -- - Heartbeat
+  -- -- pass a logger (name) to withConnection
   -- - test/check for deadlocks
   ----------------------------------------------------------------
 
@@ -749,10 +749,8 @@ where
                rAuto = au,
                rRec  = with,
                rFrom = conv}
-    if with 
-      then do waitReceipt cid rc
-              return q
-      else    return q
+    when with $ waitReceipt cid rc
+    return q
 
   ------------------------------------------------------------------------
   -- Unsubscribe a queue
@@ -814,8 +812,8 @@ where
                m <- readChan ch >>= frmToMsg q
                when (rMode q /= F.Auto) $
                  if rAuto q
-                   then ack (rCon q) m
-                   else addAck (rCon q)  (P.msgId m)
+                   then ack    (rCon q) m
+                   else addAck (rCon q) (P.msgId m)
                return m
 
   ------------------------------------------------------------------------
@@ -888,9 +886,8 @@ where
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
             P.send (conCon c) m (show rc) hs 
-            if wRec q && wWait q 
-              then waitReceipt (wCon q) rc >> return rc
-              else return rc
+            when (wRec q && wWait q) $ waitReceipt (wCon q) rc 
+            return rc
 
   ------------------------------------------------------------------------
   -- | Acknowledges the arrival of 'P.Message' to the broker.
@@ -959,17 +956,12 @@ where
                          Nothing     -> return NoTx
                          Just (x, _) -> return x)
              let msg' = msg {P.msgTx = tx}
+             rc <- if with then mkUniqueRecc else return NoRec
+             when with $ addRec cid rc
              logSend cid
-             if with 
-               then do
-                 rc <- mkUniqueRecc
-                 addRec cid rc
-                 if ok then P.ack  (conCon c) msg' $ show rc
-                       else P.nack (conCon c) msg' $ show rc
-                 waitReceipt cid rc 
-               else 
-                 if ok then P.ack  (conCon c) msg' ""
-                       else P.nack (conCon c) msg' ""
+             if ok then P.ack  (conCon c) msg' $ show rc
+                   else P.nack (conCon c) msg' $ show rc
+             when with $ waitReceipt cid rc 
 
   ------------------------------------------------------------------------
   -- | Variant of 'withTransaction' that does not return anything.
@@ -1094,8 +1086,8 @@ where
   startTx cid c tx t = do
     rc <- if txAbrtRc t then mkUniqueRecc else return NoRec
     when (txAbrtRc t) $ addRec cid rc 
-    P.begin (conCon c) (show tx) (show rc)
     logSend cid
+    P.begin (conCon c) (show tx) (show rc)
 
   -----------------------------------------------------------------------
   -- Send commit or abort frame
@@ -1166,6 +1158,7 @@ where
   listen cid = forever $ do
     c   <- getCon cid
     let cc = conCon c
+    -- catch, reraise to owner
     eiF <- S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc)
     logReceive cid
     case eiF of
@@ -1195,9 +1188,9 @@ where
                         sid = F.getSub  f
                     in if null sid
                       then getDest dst c
-                      else if not $ numeric sid
-                             then Nothing -- error handling
-                             else getSub (Sub $ read sid) c
+                      else if numeric sid
+                             then getSub (Sub $ read sid) c
+                             else Nothing 
 
   -----------------------------------------------------------------------
   -- Handle Error Frame
@@ -1220,7 +1213,7 @@ where
                  ProtocolException $ "Invalid Receipt: " ++ show f
 
   -----------------------------------------------------------------------
-  -- Handle Beat Frame
+  -- Handle Beat Frame, i.e. ignore them
   -----------------------------------------------------------------------
   handleBeat :: Con -> F.Frame -> IO ()
   handleBeat _ _ = return () -- putStrLn "Beat!"
@@ -1245,11 +1238,17 @@ where
       P.sendBeat $ conCon c
     threadDelay $ ms period
 
+  -----------------------------------------------------------------------
+  -- When we should have sent last heartbeat
+  -----------------------------------------------------------------------
   myMust :: Connection -> UTCTime
   myMust c = let t = conMyBeat c
                  p = snd $ P.conBeat $ conCon c
              in  timeAdd t p
 
+  -----------------------------------------------------------------------
+  -- When he should have sent last heartbeat
+  -----------------------------------------------------------------------
   hisMust :: Connection -> UTCTime
   hisMust c = let t   = conHisBeat c
                   tol = 4
@@ -1257,9 +1256,15 @@ where
                   p   = tol * b
               in  timeAdd t p
 
+  -----------------------------------------------------------------------
+  -- Adding a period to a point in time
+  -----------------------------------------------------------------------
   timeAdd :: UTCTime -> Int -> UTCTime
   timeAdd t p = ms2nominal p `addUTCTime` t
 
+  -----------------------------------------------------------------------
+  -- Convert milliseconds to seconds
+  -----------------------------------------------------------------------
   ms2nominal :: Int -> NominalDiffTime
-  ms2nominal ms = (fromIntegral ms) / (1000::NominalDiffTime)
+  ms2nominal m = fromIntegral m / (1000::NominalDiffTime)
 

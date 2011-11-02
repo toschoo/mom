@@ -59,7 +59,7 @@ where
     return $ U.toString t
 
   beat :: Parser Frame
-  beat = atEnd >> return mkBeat
+  beat = return mkBeat
 
   send :: Parser Frame
   send = bodyFrame mkSndFrame
