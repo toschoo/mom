@@ -57,11 +57,18 @@ $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+suite:	$(TDIR)/tprotocol \
+	$(TDIR)/responder \
+        $(TDIR)/tdialogs
 
-suite:	$(TDIR)/tprotocol
-
-$(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs
+$(TDIR)/responder:	$(TDIR)/responder.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/tprotocoldbg:	$(TDIR)/tprotocol.hs $(SUBSRC)
+			$(GHC) $(FLGS) -D_DEBUG -o $@ $(INC) $(TDIR)/tprotocol.hs
 
 $(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -69,23 +76,19 @@ $(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
 $(TDIR)/tdialogsdbg:	$(TDIR)/tdialogs.hs $(SUBSRC)
 			$(GHC) -o $@ $(FLGS) -D_DEBUG $(INC) $(TDIR)/tdialogs.hs
 
-$(TDIR)/tmime:		$(TDIR)/tmime.hs
-			$(GHC) $(FLGS) $(INC) $@
-
-all:
-	$(TDIR)/tframe      $(SDIR)
-	$(TDIR)/tparser ALL $(SDIR)
-
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
 	rm -f $(TDIR)/tdialogs
-	rm -f $(TDIR)/tmime
+	rm -f $(TDIR)/tdialogsdbg
+	rm -f $(TDIR)/responder
 	rm -f $(TDIR)/tprotocol
+	rm -f $(TDIR)/tprotocoldbg
 	rm -f $(SMOKEDIR)/listen2
 	rm -f $(SMOKEDIR)/send2
 	rm -f $(SMOKEDIR)/sendtx
 	rm -f $(SMOKEDIR)/sendf
+	rm -f $(SMOKEDIR)/sendjp
 	rm -f $(SMOKEDIR)/sendforever
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/frost

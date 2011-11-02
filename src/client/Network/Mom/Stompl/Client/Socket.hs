@@ -93,7 +93,7 @@ where
     let s = F.putFrame f
     lock wr
 #ifdef _DEBUG
-    putStrLn $ U.toString s
+    putStrLn $ "Sending: " ++ U.toString s
 #endif
     n <- finally (BS.send sock s)
                  (release wr)
@@ -133,7 +133,7 @@ where
     case mbB of
       Just s  -> 
 #ifdef _DEBUG
-        do putStrLn $ U.toString s
+        do putStrLn $ "In Buffer: " ++ U.toString s
 #endif
            return $ Right s
       Nothing -> do
@@ -142,7 +142,7 @@ where
           then return $ Left "Peer disconnected"
           else 
 #ifdef _DEBUG
-            do putStrLn $ U.toString s
+            do putStrLn $ "Receiving: " ++ U.toString s
 #endif
                if B.null s
                  then getInput rec sock mx

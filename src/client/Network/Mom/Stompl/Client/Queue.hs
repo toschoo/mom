@@ -21,17 +21,13 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Client.Queue (
                    -- * Connections
-
                    -- $stomp_con
-
                    withConnection, 
                    withConnection_, 
                    Factory.Con, 
                    F.Heart,
                    -- * Queues
-
                    -- $stomp_queues
-
                    Reader, Writer, 
                    newReader, newWriter, 
                    withReader, withReader_,
@@ -39,34 +35,23 @@ module Network.Mom.Stompl.Client.Queue (
                    InBound, OutBound, 
                    readQ, 
                    writeQ, writeQWith,
-
                    -- * Messages
                    P.Message, 
                    msgContent, P.msgRaw, 
                    P.msgType, P.msgLen, P.msgHdrs,
-
                    -- * Receipts
-
                    -- $stomp_receipts
-
                    Factory.Rec(..), Receipt,
                    waitReceipt,
                    -- * Transactions
-
                    -- $stomp_trans
-
                    withTransaction,
                    withTransaction_,
                    Topt(..), abort,
-
                    -- * Acknowledgments
-
                    -- $stomp_acks
-
                    ack, ackWith, nack, nackWith
-
                    -- * Complete Example
-
                    -- $stomp_sample
                    )
 
@@ -92,7 +77,6 @@ where
   import           Data.Maybe (isJust, fromJust)
 
   import           Control.Concurrent 
-  import           Control.Applicative ((<$>))
   import           Control.Monad
   import           Control.Exception (bracket, finally, 
                                       throwIO, SomeException)
@@ -414,7 +398,7 @@ where
                        Ex.catch (do killThread l
                                     when (isThrd b) (killThread $ thrd b)
                                     -- unsubscribe all queues?
-                                    _ <- P.disconnect c ""
+                                    _ <- P.disconnect c 
                                     rmCon cid)
                                 (\e -> do rmCon cid
                                           throwIO (e::SomeException)))
@@ -1158,7 +1142,10 @@ where
   listen cid = forever $ do
     c   <- getCon cid
     let cc = conCon c
-    -- catch, reraise to owner
+    -- eiF <- Ex.catch (S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc))
+    --                 (\e -> if e == ThreadKilled  
+    --                          then throwIO e
+    --                          else return $ Left $ show (e::SomeException))
     eiF <- S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc)
     logReceive cid
     case eiF of

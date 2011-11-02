@@ -1,5 +1,5 @@
 module Protocol (Connection, mkConnection, 
-                 conBeat,
+                 conBeat, getVersion,
                  getSock, getWr, getRc,
                  connected, getErr, conMax,
                  connect, disconnect,
@@ -21,12 +21,12 @@ where
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
+  import           Data.Maybe (fromMaybe)
 
-  import           Control.Concurrent
-  import           Control.Applicative ((<$>))
-  import           Control.Exception (throwIO)
+  import           Prelude hiding (catch)
+  import           Control.Exception (throwIO, catch, SomeException)
 
-  import           Codec.MIME.Type as Mime (Type, MIMEType, nullType) 
+  import           Codec.MIME.Type as Mime (Type) 
 
   defVersion :: F.Version
   defVersion = (1,0)
@@ -53,6 +53,7 @@ where
                         subId   :: Fac.Sub,
                         subName :: String,
                         subMode :: F.AckMode}
+    deriving (Show)
 
   mkSub :: Fac.Sub -> String -> F.AckMode -> Subscription
   mkSub sid qn am = Sub {
@@ -130,23 +131,17 @@ where
        conTcp  = False,
        conBrk  = False}
 
-  uncompleteErr :: String
-  uncompleteErr = "uncomplete Connection touched!"
+  incompleteErr :: String
+  incompleteErr = "uncomplete Connection touched!"
 
   getSock :: Connection -> Socket
-  getSock c = case conSock c of
-                Just s  -> s
-                Nothing -> error uncompleteErr
+  getSock = fromMaybe (error incompleteErr) . conSock 
 
   getWr :: Connection -> S.Writer
-  getWr c = case conWrt c of
-              Just w  -> w
-              Nothing -> error uncompleteErr
+  getWr = fromMaybe (error incompleteErr) . conWrt
 
   getRc :: Connection -> S.Receiver
-  getRc c = case conRcv c of
-              Just r  -> r
-              Nothing -> error uncompleteErr
+  getRc = fromMaybe (error incompleteErr) . conRcv
 
   connected :: Connection -> Bool
   connected c = conTcp c && conBrk c
@@ -159,27 +154,23 @@ where
                    then defVersion
                    else head $ conVers c
 
-  getReceipt :: Connection -> String
-  getReceipt _ = "rc-1"
-
   connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
   connect host port mx usr pwd vers beat = do
     let c = mkConnection host port mx usr pwd vers beat
     s <- S.connect host port
     connectBroker mx vers beat c {conSock = Just s, conTcp = True}
 
-  disconnect :: Connection -> String -> IO Connection
-  disconnect c receipt = 
-    if not $ connected c 
-      then return c {conErrM = "Not connected!"}
-      else 
-        if conBrk c
-          then case mkDiscF receipt of
-                 Left  e -> return c {conErrM = "Cannot create Frame: " ++ e}
-                 Right f -> do
-                   r <- S.send (getWr c) (getSock c) f 
-                   disc receipt c
-        else disc "" c
+  disconnect :: Connection -> IO Connection
+  disconnect c 
+    | not (connected c) = return c {conErrM = "Not connected!"}
+    | conBrk c          = case mkDiscF "" of
+                            Left  e -> return c {
+                                         conErrM = 
+                                           "Cannot create Frame: " ++ e}
+                            Right f -> do
+                              S.send (getWr c) (getSock c) f 
+                              disc c
+    | otherwise         = disc c
 
   begin :: Connection -> String -> String -> IO ()
   begin c tx receipt = sendFrame c tx receipt [] mkBeginF
@@ -191,10 +182,10 @@ where
   abort c tx receipt = sendFrame c tx receipt [] mkAbortF
 
   ack :: Connection -> Message a -> String -> IO ()
-  ack c m receipt = sendFrame c m receipt [] mkAckF
+  ack c m receipt = sendFrame c m receipt []  (mkAckF True)
 
   nack :: Connection -> Message a -> String -> IO ()
-  nack c m receipt = sendFrame c m receipt [] mkNackF
+  nack c m receipt = sendFrame c m receipt [] (mkAckF False)
 
   subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   subscribe c sub receipt hs = sendFrame c sub receipt hs mkSubF
@@ -203,8 +194,7 @@ where
   unsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
 
   send :: Connection -> Message a -> String -> [F.Header] -> IO ()
-  send c msg receipt hs = 
-    sendFrame c msg receipt hs mkSendF
+  send c msg receipt hs = sendFrame c msg receipt hs mkSendF
 
   sendBeat :: Connection -> IO ()
   sendBeat c = sendFrame c () "" [] (\_ _ _ -> Right F.mkBeat)
@@ -212,48 +202,32 @@ where
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
                (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
   sendFrame c m receipt hs mkF = 
-    if not $ connected c then throwIO $ ConnectException "Not connected!"
+    if not (connected c) then throwIO $ ConnectException "Not connected!"
       else case mkF m receipt hs of
              Left  e -> throwIO $ ProtocolException $
                           "Cannot create Frame: " ++ e
-             Right f -> do
+             Right f -> 
                S.send (getWr c) (getSock c) f
 
-  disc :: String -> Connection -> IO Connection
-  disc receipt c = do
+  disc :: Connection -> IO Connection
+  disc c = do
     let c' = c {conTcp  = False,
                 conBrk  = False,
                 conWrt  = Nothing,
                 conRcv  = Nothing,
                 conSock = Nothing}
-    if null receipt
-      then do 
-        S.disconnect (getSock c)
-        return c'
-      else do
-        eiC <- S.receive (getRc c) (getSock c) (conMax c)
-        S.disconnect (getSock c)
-        case eiC of
-          Left  e -> do
-            return c' {conErrM = "Cannot disconnect from Broker: " ++ e}
-          Right f ->
-            case F.typeOf f of
-              F.Receipt -> 
-                return $ if receipt == F.getReceipt f
-                            then c'
-                            else c' {conErrM = "Wrong receipt: " ++ F.getReceipt f}
-              F.Error     -> return c' {conErrM = errToMsg f}
-              _           -> return c' {conErrM = "Unexpected Frame: " ++ (U.toString $ F.putCommand f)}
+    S.disconnect (getSock c)
+    return c'
 
   connectBroker :: Int -> [F.Version] -> F.Heart -> Connection -> IO Connection
   connectBroker mx vers beat c = 
     case mkConF (conUsr c) (conPwd c) vers beat of
       Left e  -> return c {conErrM = e}
       Right f -> do
-        rc <- S.initReceiver
-        wr <- S.initWriter
-        eiR <- catch (S.send wr (getSock c) f >> (return $ Right c))
-                     (\e -> return $ Left $ show e)
+        rc  <- S.initReceiver
+        wr  <- S.initWriter
+        eiR <- catch (S.send wr (getSock c) f >> return (Right c))
+                     (\e -> return $ Left $ show (e::SomeException))
         case eiR of
           Left  e -> return c {conErrM = e}
           Right _ -> do
@@ -273,20 +247,20 @@ where
     case F.typeOf f of
       F.Connected -> c {
                       conSrv  =  let srv = F.getServer f
-                                 in (F.getSrvName srv) ++ "/"  ++
-                                    (F.getSrvVer  srv) ++ " (" ++
-                                    (F.getSrvCmts srv) ++ ")",
+                                 in F.getSrvName srv ++ "/"  ++
+                                    F.getSrvVer  srv ++ " (" ++
+                                    F.getSrvCmts srv ++ ")",
                       conBeat =  F.getBeat    f,
                       conVers = [F.getVersion f],
                       conSes  =  F.getSession f,
                       conBrk  = True}
       F.Error     -> c {conErrM = errToMsg f}
-      _           -> c {conErrM = "Unexpected Frame: " ++ (U.toString $ F.putCommand f)}
+      _           -> c {conErrM = "Unexpected Frame: " ++ U.toString (F.putCommand f)}
 
   errToMsg :: F.Frame -> String
-  errToMsg f = let msg = if (B.length $ F.getBody f) == 0 
+  errToMsg f = let msg = if B.length (F.getBody f) == 0 
                            then "."
-                           else ": " ++ (U.toString $ F.getBody f)
+                           else ": " ++ U.toString (F.getBody f)
                in F.getMsg f ++ msg
 
   mkConF :: String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
@@ -305,13 +279,13 @@ where
     F.mkSubFrame $ [F.mkIdHdr   $ show $ subId sub,
                     F.mkDestHdr $ subName sub,
                     F.mkAckHdr  $ show $ subMode sub] ++ 
-                   (mkReceipt receipt) ++ hs
+                   mkReceipt receipt ++ hs
 
   mkUnSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkUnSubF sub receipt hs =
-    let dh = if null $ subName sub then [] else [F.mkDestHdr $ subName sub]
+    let dh = if null (subName sub) then [] else [F.mkDestHdr $ subName sub]
     in  F.mkUSubFrame $ [F.mkIdHdr $ show $ subId sub] ++ dh ++ 
-                        (mkReceipt receipt)     ++ hs
+                        mkReceipt receipt ++ hs
 
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
@@ -320,35 +294,27 @@ where
   mkSendF msg receipt hs = 
     Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
                      (msgType msg) (msgLen msg) hs 
-                     (msgRaw msg) 
+                     (msgRaw  msg) 
 
-  mkAckF :: Message a -> String -> [F.Header] -> Either String F.Frame
-  mkAckF msg receipt _ =
+  mkAckF :: Bool -> Message a -> String -> [F.Header] -> Either String F.Frame
+  mkAckF ok msg receipt _ =
     let sh = if null $ show $ msgSub msg then [] 
                else [F.mkSubHdr $ show $ msgSub msg]
         th = if null $ show $ msgTx msg 
                then [] else [F.mkTrnHdr $ show $ msgTx msg]
         rh = mkReceipt receipt
-    in F.mkAckFrame ([F.mkMIdHdr $ show $ msgId msg] ++ sh ++ rh ++ th)
-
-  mkNackF :: Message a -> String -> [F.Header] -> Either String F.Frame
-  mkNackF msg receipt _ =
-    let sh = if null $ show $ msgSub msg then [] 
-               else [F.mkSubHdr $ show $ msgSub msg]
-        th = if null $ show $ msgTx msg 
-               then [] else [F.mkTrnHdr $ show $ msgTx msg]
-        rh = mkReceipt receipt
-    in F.mkAckFrame ([F.mkMIdHdr $ show $ msgId msg] ++ sh ++ rh ++ th)
+        mk = if ok then F.mkAckFrame else F.mkNackFrame
+    in mk $ F.mkMIdHdr (show $ msgId msg) : (sh ++ rh ++ th)
 
   mkBeginF :: String -> String -> [F.Header] -> Either String F.Frame
   mkBeginF tx receipt _ = 
-    F.mkBgnFrame $ [F.mkTrnHdr tx] ++ (mkReceipt receipt)
+    F.mkBgnFrame $ F.mkTrnHdr tx : mkReceipt receipt
 
   mkCommitF :: String -> String -> [F.Header] -> Either String F.Frame
   mkCommitF tx receipt _ =
-    F.mkCmtFrame $ [F.mkTrnHdr tx] ++ (mkReceipt receipt)
+    F.mkCmtFrame $ F.mkTrnHdr tx : mkReceipt receipt
 
   mkAbortF :: String -> String -> [F.Header] -> Either String F.Frame
   mkAbortF tx receipt _ =
-    F.mkAbrtFrame $ [F.mkTrnHdr tx] ++ (mkReceipt receipt)
+    F.mkAbrtFrame $ F.mkTrnHdr tx : mkReceipt receipt
 

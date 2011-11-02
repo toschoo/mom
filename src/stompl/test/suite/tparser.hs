@@ -158,6 +158,14 @@ where
              ("content-length", "16"),
              ("content-type", "text/plain"),
              ("receipt", "msg-123")], "send6-1.1.txt"),
+     (TDesc "send with special headers" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "16"),
+             ("content-type", "text/plain"),
+             ("receipt", "msg-123"),
+             ("special1", "xyz"),
+             ("special2", "123")], "send7-1.1.txt"),
      (TDesc "UTF" 
             Send (Just . id) Pass 
             [("destination", "/queue/test"),
@@ -170,6 +178,14 @@ where
              ("message-id", "msg-54321"),
              ("content-length", "13"),
              ("content-type", "text/plain")], "msg1-1.1.txt"),
+     (TDesc "Message with special headers" 
+            Message (Just . id) Pass
+            [("destination", "/queue/test"),
+             ("message-id", "msg-54321"),
+             ("content-length", "13"),
+             ("content-type", "text/plain"),
+             ("special1", "xyz"),
+             ("special2", "123")], "msg7-1.1.txt"),
      (TDesc "Message with some NULs in body" 
             Message (Just . id) Pass
             [("destination", "/queue/test"),
@@ -230,7 +246,12 @@ where
       "session"        -> getSession
       "server"         -> srvToStr  . getServer
       "host"           -> getHost
+      "special1"       -> getSpecial "special1"
+      "special2"       -> getSpecial "special2"
       _                -> (\_ -> "unknown")
+    where getSpecial k f = case lookup k $ getHeaders f of
+                             Nothing -> ""
+                             Just v  -> v
 
   type Tester a = Writer String a
 

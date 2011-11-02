@@ -20,6 +20,9 @@ where
   instance Show Con where
     show (Con i) = show i
 
+  ------------------------------------------------------------------------
+  -- Subscription Identifier
+  ------------------------------------------------------------------------
   data Sub = Sub Int | NoSub
     deriving (Eq)
 
@@ -27,6 +30,9 @@ where
     show (Sub i) = show i
     show (NoSub) = ""
 
+  ------------------------------------------------------------------------
+  -- Transaction Identifier
+  ------------------------------------------------------------------------
   data Tx = Tx Int | NoTx
     deriving (Eq)
 
@@ -59,24 +65,39 @@ where
     if numeric s then Just (Rec $ read s) else Nothing
 
   numeric :: String -> Bool
-  numeric = and . map isDigit
+  numeric = all isDigit
 
+  ------------------------------------------------------------------------
+  -- Source for unique connection identifiers
+  ------------------------------------------------------------------------
   {-# NOINLINE conid #-}
   conid :: MVar Con
   conid = unsafePerformIO $ newMVar (Con 1)
 
+  ------------------------------------------------------------------------
+  -- Source for unique subscription identifiers
+  ------------------------------------------------------------------------
   {-# NOINLINE subid #-}
   subid :: MVar Sub
   subid = unsafePerformIO $ newMVar (Sub 1)
 
+  ------------------------------------------------------------------------
+  -- Source for unique transaction identifiers
+  ------------------------------------------------------------------------
   {-# NOINLINE txid #-}
   txid :: MVar Tx
   txid = unsafePerformIO $ newMVar (Tx 1)
 
+  ------------------------------------------------------------------------
+  -- Source for unique receipts
+  ------------------------------------------------------------------------
   {-# NOINLINE recc #-}
   recc :: MVar Rec
   recc = unsafePerformIO $ newMVar (Rec 1)
 
+  ------------------------------------------------------------------------
+  -- Interfaces
+  ------------------------------------------------------------------------
   mkUniqueConId :: IO Con
   mkUniqueConId = mkUniqueId conid incCon
 
@@ -90,7 +111,7 @@ where
   mkUniqueRecc = mkUniqueId recc incRecc
 
   mkUniqueId :: MVar a -> (a -> a) -> IO a
-  mkUniqueId v f = modifyMVar v $ \x -> do
+  mkUniqueId v f = modifyMVar v $ \x -> 
     let x' = f x in return (x', x')
 
   incCon :: Con -> Con
@@ -98,9 +119,11 @@ where
 
   incSub :: Sub -> Sub
   incSub (Sub n) = Sub (incX n)
+  incSub NoSub   = NoSub
 
   incTx :: Tx -> Tx
   incTx (Tx n) = Tx (incX n)
+  incTx NoTx   = NoTx
 
   incRecc :: Rec -> Rec
   incRecc (Rec n) = Rec (incX n)

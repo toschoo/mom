@@ -11,7 +11,6 @@ where
   import           Control.Exception (throwIO)
   import           Control.Concurrent
 
-  import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Maybe
   import           Data.Char (isDigit)
@@ -21,7 +20,7 @@ where
   import           System.Environment
   import           System.Timeout
 
-  import           Codec.MIME.Type (nullType, Type)
+  import           Codec.MIME.Type (nullType)
   
   maxRcv :: Int
   maxRcv = 1024
@@ -102,8 +101,9 @@ where
         t150  = mkTest "With Receipt1            " $ testWith p testQWithReceipt
         t160  = mkTest "Wait on Receipt1         " $ testWith p testQWaitReceipt
         t170  = mkTest "ackWith                  " $ testWith p testTxAckWith
-        t180  = mkTest "Tx all nack'd            " $ testWith p testPendingNacksPass 
-        t190  = mkTest "nackWith                 " $ testWith p testTxNackWith
+        -- stompserver and coilmq do not support nack!
+        -- t180  = mkTest "Tx all nack'd            " $ testWith p testPendingNacksPass 
+        -- t190  = mkTest "nackWith                 " $ testWith p testTxNackWith
         t200  = mkTest "Begin Rec no Tmo, fast   " $ testWith p testTxRecsNoTmoFail
         t205  = mkTest "Begin Rec no Tmo, slow   " $ testWith p testTxRecsNoTmoPass
         t210  = mkTest "Pending Receipts    Tmo  " $ testWith p testTxRecsTmo
@@ -113,9 +113,8 @@ where
         t250  = mkTest "Nested Transactions      " $ testWith p testNestedTx
         t260  = mkTest "Nested Tx with foul one  " $ testWith p testNstTxAbort
         t270  = mkTest "Nested Tx one missing Ack" $ testWith p testNstTxMissingAck
-        -- how to provoke an error at the broker?
-        -- the library is designed to avoid that!
-        -- t280 = mkTest "BrokerException          " $ testWith p testBrokerEx 
+        --  unstable
+        -- t280  = mkTest "BrokerException          " $ testWith p testBrokerEx 
         t290  = mkTest "Converter error          " $ testWith p testConvertEx
         t300  = mkTest "Cassandra Complex        " $ testWith p testConvComplex
         t310  = mkTest "Share connection         " $ testWith p testShareCon 
@@ -128,7 +127,7 @@ where
         t380  = mkTest "HeartBeat                " $ testBeat       p
     in  mkGroup "Dialogs" (Stop (Fail "")) 
         [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,  t90, t100,
-         t110, t120, t130, t140, t150, t160, t170, t180, t190, t200, t205,
+         t110, t120, t130, t140, t150, t160, t170,             t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t380] 
 
@@ -794,20 +793,25 @@ where
 
   ------------------------------------------------------------------------
   -- Broker Exception
+  -- the trick is that some brokers do not support nack
   ------------------------------------------------------------------------
   testBrokerEx :: Con -> IO TestResult
   testBrokerEx c = do
-    iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
-    oQ <- newWriter c "OUT" tQ1 [] [] oconv
-    writeQ oQ nullType [] text1
-    m <- readQ iQ
-    ack c m
-    eiA <- try $ ack c m
-    case eiA of
-      Left (BrokerException e) -> do
-        putStrLn $ "BrokerException: " ++ (show e)
-        return Pass
-      Left e  -> return $ Fail $ "Unknown Exception: " ++ (show e)
+    eiR <- try $ do 
+      iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+      oQ <- newWriter c "OUT" tQ1 [] [] oconv
+      writeQ oQ nullType [] text1
+      m <- readQ iQ
+      nack c m
+      putStrLn "after nack!"
+      threadDelay 50000
+    case eiR of
+      Left (BrokerException   _) -> return Pass
+      Left (ProtocolException e) -> do
+        if "Peer disconnected" `isSuffixOf` e then return Pass
+          else  
+            return $ Fail $ "Not suffixOf: " ++ show e -- Unexpected Exception: " ++ (show e)
+      Left e  -> return $ Fail $ "Unexpected Exception: " ++ (show e)
       Right _ -> return $ Fail $ "Double Ack had no effect!"
 
   ------------------------------------------------------------------------

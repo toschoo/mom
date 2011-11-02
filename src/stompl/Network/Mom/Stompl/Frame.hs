@@ -44,7 +44,7 @@ where
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
-  import           Data.List (find)
+  import           Data.List (find, foldl')
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes)
   import           Codec.MIME.Type as Mime (showType, Type, nullType)
@@ -495,6 +495,14 @@ where
     where send = (cleanWhite . takeWhile (/= ',')) s
           recv = (cleanWhite . drop 1 . dropWhile (/= ',')) s
 
+  rmHdrs :: [Header] -> [String] -> [Header]
+  rmHdrs = foldl' rmHdr 
+
+  rmHdr :: [Header] -> String -> [Header]
+  rmHdr [] _ = []
+  rmHdr ((k,v):hs) key | k == key  = rmHdr hs key
+                       | otherwise = (k,v) : rmHdr hs key
+
   putFrame :: Frame -> B.ByteString
   putFrame BeatFrame = putCommand mkBeat
   putFrame f         = putCommand f >|<
@@ -528,7 +536,7 @@ where
   putHeaders f = 
     let hs = toHeaders f
         s  = B.concat $ map putHeader hs
-    in s |> '\n'
+    in  s |> '\n'
 
   putHeader :: Header -> B.ByteString
   putHeader h =
@@ -557,7 +565,7 @@ where
     in mkDestHdr d : (ah ++ sh ++ ih ++ rh)
   toHeaders (USubFrame d i r) =
     let ih = if null i then [] else [mkIdHdr i]
-        dh = if null i then [] else [mkDestHdr d]
+        dh = if null d then [] else [mkDestHdr d]
         rh = if null r then [] else [mkRecHdr r]
     in dh ++ ih ++ rh
   toHeaders (SndFrame h d t r l m _) = 
@@ -565,8 +573,7 @@ where
         rh = if null r then [] else [mkRecHdr r]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in [mkDestHdr d, 
-        mkMimeHdr (showType m)] 
-       ++ th ++ rh ++ lh ++ h
+        mkMimeHdr (showType m)] ++ th ++ rh ++ lh ++ h
   toHeaders (BgnFrame  t r) = 
     let rh = if null r then [] else [mkRecHdr r]
     in  [mkTrnHdr t] ++ rh
@@ -647,7 +654,8 @@ where
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in SEND Frame"
       Just d  -> Right $ SndFrame {
-                           frmHdrs  = hs,
+                           frmHdrs  = rmHdrs hs [hdrMime, hdrTrn, hdrRec,
+                                                 hdrDest, hdrLen],
                            frmDest  = d,
                            frmLen   = l,
                            frmMime  = case lookup hdrMime hs of
@@ -778,7 +786,9 @@ where
                    Nothing -> Left "No message id in MESSAGE Frame"
                    Just i  ->
                      Right $ MsgFrame {
-                               frmHdrs = hs,
+                               frmHdrs = rmHdrs hs [hdrSub, hdrMime, 
+                                                    hdrLen, hdrDest,
+                                                    hdrMId],
                                frmDest = d,
                                frmSub  = case lookup hdrSub hs of
                                            Nothing -> ""

@@ -5,19 +5,17 @@ where
 
   import qualified Protocol as P
   import qualified Socket   as Sock
+  import qualified Factory  as Fac
  
+  import           Network.Mom.Stompl.Client.Exception 
   import qualified Network.Mom.Stompl.Frame as F
-  import           Network.Mom.Stompl.Parser 
+
+  import           Codec.MIME.Type (nullType)
 
   import qualified Network.Socket as S
-  import           Network.BSD (getProtocolNumber) 
-  import           Control.Concurrent
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
-  import qualified Network.Socket.ByteString as SB
-
-  import qualified Data.Attoparsec as A
 
   import           System.Exit
   
@@ -28,7 +26,7 @@ where
   host = "127.0.0.1"
 
   port :: Int
-  port = 1111
+  port = 22222
 
   vers :: [F.Version]
   vers = [(1,0), (1,1)]
@@ -36,12 +34,23 @@ where
   beat :: F.Heart
   beat = (0,0)
 
+  msg1, q1, text1 :: String
+  msg1  = "msg-1"
+  q1    = "/q/test-1"
+  text1 = "what is just to say..."
+
+  tx1, rc1, sub1 :: Int
+  tx1   = 1
+  rc1   = 1
+  sub1  = 1
+  
+
   main :: IO ()
   main = do
     r <- runTests mkTests
     case r of
       Pass   -> exitSuccess
-      Fail e -> exitFailure
+      Fail _ -> exitFailure
 
   runTests :: TestGroup IO -> IO TestResult
   runTests g = do
@@ -51,15 +60,159 @@ where
 
   mkTests :: TestGroup IO
   mkTests = 
-    let t10 = mkTest "Socket Connect " testConFrame
-        t20 = mkTest "Protocl Connect" testConnect
+    let t10  = mkTest "Socket   Connect" testConFrame
+        t20  = mkTest "Protocol Connect" testConnect
+        t30  = mkTest "Begin           " $ testWith (\c -> P.begin  c (show tx1) 
+                                                                      (show Fac.NoRec)) 
+                                                    (F.mkBegin  (show tx1) 
+                                                                (show Fac.NoRec)) 
+        t40  = mkTest "Begin with Rc   " $ testWith (\c -> P.begin  c (show tx1) (show rc1)) 
+                                                    (F.mkBegin  (show tx1) (show rc1)) 
+        t50  = mkTest "Commit          " $ testWith (\c -> P.commit c (show tx1) 
+                                                                      (show Fac.NoRec)) 
+                                                    (F.mkCommit (show tx1) 
+                                                                (show Fac.NoRec))
+        t60  = mkTest "Commit with Rc  " $ testWith (\c -> P.commit c (show tx1) (show rc1)) 
+                                                    (F.mkCommit (show tx1) (show rc1))
+        t70  = mkTest "Abort           " $ testWith (\c -> P.abort  c (show tx1) 
+                                                                      (show Fac.NoRec)) 
+                                                    (F.mkAbort  (show tx1) 
+                                                                (show Fac.NoRec))
+        t80  = mkTest "Abort with Rc   " $ testWith (\c -> P.abort  c (show tx1) (show rc1)) 
+                                                    (F.mkAbort  (show tx1) (show rc1))
+        t100 = mkTest "Ack             " $ testWith (testAck True  
+                                                             Fac.NoTx 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             Fac.NoRec)
+                                                    (F.mkAck  msg1 "" "" "")
+        t110 = mkTest "Nack            " $ testWith (testAck False 
+                                                             Fac.NoTx 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             Fac.NoRec) 
+                                                    (F.mkNack msg1 "" "" "")
+        t120 = mkTest "Ack with Tx     " $ testWith (testAck True  
+                                                             (Fac.Tx tx1) 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             Fac.NoRec) 
+                                                    (F.mkAck  msg1 "" (show tx1) "")
+        t130 = mkTest "Nack with Tx    " $ testWith (testAck False 
+                                                             (Fac.Tx tx1) 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             Fac.NoRec) 
+                                                    (F.mkNack msg1 "" (show tx1) "")
+        t140 = mkTest "Ack with Rc     " $ testWith (testAck True  
+                                                             (Fac.Tx tx1) 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             (Fac.Rec rc1)) 
+                                                    (F.mkAck  msg1 "" (show tx1) (show rc1))
+        t150 = mkTest "Nack with Rc    " $ testWith (testAck False 
+                                                             (Fac.Tx tx1) 
+                                                             Fac.NoSub 
+                                                             text1 
+                                                             (Fac.Rec rc1)) 
+                                                    (F.mkNack msg1 "" (show tx1) (show rc1))
+        t160 = mkTest "Ack with Sub    " $ testWith (testAck True  
+                                                             (Fac.Tx tx1) 
+                                                             (Fac.Sub sub1)
+                                                             text1 
+                                                             (Fac.Rec rc1)) 
+                                                    (F.mkAck  msg1 (show sub1) (show tx1) (show rc1))
+        t170 = mkTest "Nack with Sub   " $ testWith (testAck False 
+                                                             (Fac.Tx tx1) 
+                                                             (Fac.Sub sub1)
+                                                             text1 
+                                                             (Fac.Rec rc1)) 
+                                                    (F.mkNack msg1 (show sub1) (show tx1) (show rc1))
+        t180 = mkTest "Send            " $ testWith (testSend 
+                                                       Fac.NoTx Fac.NoRec text1 [])
+                                                    (mkSend
+                                                       Fac.NoTx Fac.NoRec text1 [])
+        t190 = mkTest "Send with Hdrs  " $ testWith (testSend 
+                                                       Fac.NoTx Fac.NoRec text1 
+                                                       [("special","some text"),
+                                                        ("another","more text")])
+                                                    (mkSend
+                                                       Fac.NoTx Fac.NoRec text1 
+                                                       [("special","some text"),
+                                                        ("another","more text")])
+        t200 = mkTest "Send with Tx    " $ testWith (testSend 
+                                                       (Fac.Tx tx1)
+                                                       Fac.NoRec text1 [])
+                                                    (mkSend
+                                                       (Fac.Tx tx1)
+                                                       Fac.NoRec text1 [])
+        t210 = mkTest "Send with Rc    " $ testWith (testSend 
+                                                       (Fac.Tx tx1)
+                                                       (Fac.Rec rc1) text1 [])
+                                                    (mkSend
+                                                       (Fac.Tx tx1)
+                                                       (Fac.Rec rc1) text1 [])
+        t220 = mkTest "Subscribe       " $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub Fac.NoSub q1
+                                                                    F.Auto)  
+                                                           (show Fac.NoRec) [])
+                                                    (F.mkSubscribe q1 F.Auto "" 
+                                                             (show Fac.NoSub)
+                                                             (show Fac.NoRec))
+        t230 = mkTest "Sub with Sub    " $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.Auto)  
+                                                           (show Fac.NoRec) [])
+                                                    (F.mkSubscribe q1 F.Auto "" 
+                                                             (show $ Fac.Sub sub1)
+                                                             (show Fac.NoRec))
+        t240 = mkTest "Sub with Rc     " $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.Auto)  
+                                                           (show $ Fac.Rec rc1) [])
+                                                    (F.mkSubscribe q1 F.Auto "" 
+                                                             (show $ Fac.Sub sub1)
+                                                             (show $ Fac.Rec rc1))
+        t250 = mkTest "Sub with Client " $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.Client)  
+                                                           (show $ Fac.Rec rc1) [])
+                                                    (F.mkSubscribe q1 F.Client "" 
+                                                             (show $ Fac.Sub sub1)
+                                                             (show $ Fac.Rec rc1))
+        t260 = mkTest "Sub with ClientI" $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.ClientIndi)  
+                                                           (show $ Fac.Rec rc1) [])
+                                                    (F.mkSubscribe q1 F.ClientIndi "" 
+                                                             (show $ Fac.Sub sub1)
+                                                             (show $ Fac.Rec rc1))
+        t270 = mkTest "Sub with Sel.   " $ testWith (\c -> P.subscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.Client)
+                                                           (show $ Fac.Rec rc1) 
+                                                           [("selector","@x='y'")])
+                                                    (F.mkSubscribe q1 F.Client "@x='y'" 
+                                                             (show $ Fac.Sub sub1)
+                                                             (show $ Fac.Rec rc1))
+        t280 = mkTest "Unsub           " $ testWith (\c -> P.unsubscribe c
+                                                           (P.mkSub (Fac.Sub sub1) q1
+                                                                    F.Client)
+                                                           (show $ Fac.Rec rc1) [])
+                                                    (F.mkUnsubscribe q1  
+                                                             (show $ Fac.Sub sub1)
+                                                             (show $ Fac.Rec rc1))
+        t290 = mkTest "Unsub no Sub    " $ testWith (\c -> do let sub = P.mkSub Fac.NoSub q1
+                                                                                F.Client
+                                                              P.unsubscribe c sub
+                                                                  (show $ Fac.Rec rc1) [])
+                                                    (F.mkUnsubscribe q1  
+                                                             (show   Fac.NoSub)
+                                                             (show $ Fac.Rec rc1))
     in  mkGroup "Protocol Tests" (Stop (Fail "")) 
-          [t10, t20]
-    
-  testConFrameThere :: S.Socket -> B.ByteString -> IO TestResult
-  testConFrameThere _ b = case parse b of
-                            Left  e -> return $ Fail e
-                            Right _ -> return Pass
+          [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,       t100,
+           t110, t120, t130, t140, t150, t160, t170, t180, t190, t200,
+           t210, t220, t230, t240, t250, t260, t270, t280, t290]
 
   testConFrame :: IO TestResult
   testConFrame = 
@@ -68,111 +221,90 @@ where
                        F.mkAcVerHdr $ F.versToVal vers, 
                        F.mkBeatHdr  $ F.beatToVal beat] of
       Left  e -> return $ Fail e
-      Right f -> do
-        (s, rc, wr) <- baseConnect host port testConFrameThere
-        Sock.send wr s f
-        b <- SB.recv s maxRcv
-        S.sClose s
-        threadDelay 100000
-        return $ streamToResult b
-
-  testConnectThere :: S.Socket -> B.ByteString -> IO TestResult
-  testConnectThere s b = 
-    case parse b of
-      Left  e  -> return $ Fail e
-      Right c ->
-        case F.typeOf c of
-          F.Connect ->
-            case F.mkCondFrame [F.mkVerHdr  "1.1",
-                                F.mkBeatHdr "0.0"] of
+      Right cf -> do
+        eiC <- connect 
+        case eiC of 
+          Left e -> return $ Fail e
+          Right (s, rc, wr) -> do
+            Sock.send wr s cf
+            eiF <- Sock.receive rc s maxRcv
+            S.sClose s
+            case eiF of
               Left  e -> return $ Fail e
-              Right f -> do
-                wr <- Sock.initWriter
-                Sock.send wr s f
-                return Pass
+              Right f -> case F.typeOf f of
+                           F.Connected -> return Pass
+                           _           -> return $ Fail $ 
+                                            "Unexpected Frame: " ++ show f
 
   testConnect :: IO TestResult
   testConnect = do
+    c <- P.connect host port maxRcv "guest" "guest" vers beat
+    if not (P.connected c)
+      then return $ Fail $ P.getErr c
+      else P.disconnect c >>= (\_ -> return Pass)
+
+  testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> Fac.Rec -> P.Connection -> IO ()
+  testAck ok tx sub m rc c = do
+    let b   = U.fromString m
+    let msg = P.mkMessage (P.MsgId msg1) sub q1 
+                          nullType (B.length b) 
+                          tx b m
+    if ok then P.ack  c msg (show rc)
+          else P.nack c msg (show rc)
+
+  testSend :: Fac.Tx -> Fac.Rec -> String -> [F.Header] -> P.Connection -> IO ()
+  testSend tx rc m hs c = do
+    let b   = U.fromString m
+    let msg = P.mkMessage P.NoMsg Fac.NoSub q1 nullType (B.length b) tx b m
+    P.send c msg (show rc) hs
+
+  mkSend :: Fac.Tx -> Fac.Rec -> String -> [F.Header] -> F.Frame
+  mkSend tx rc m hs =
+    let b = U.fromString m
+        l = B.length b
+    in F.mkSend q1 
+       (show tx) (show rc) nullType l hs b
+    
+  testWith :: (P.Connection -> IO ()) -> F.Frame -> IO TestResult
+  testWith act tertium = do
+    c <- P.connect host port maxRcv "guest" "guest" vers beat
+    if not (P.connected c)
+      then return $ Fail $ P.getErr c
+      else do
+        eiR <- try $ act c
+        case eiR of
+          Left e  -> return $ Fail $ show e
+          Right _ -> do
+            eiF <- Sock.receive (P.getRc c) (P.getSock c) (P.conMax c)
+            _ <- P.disconnect c 
+            case eiF of
+              Left  e -> return $ Fail e
+              Right f -> 
+                -- analyse frame
+                if f == tertium then return Pass
+                  else return $ Fail $ "Frame does not equal pattern, " ++
+                          "expected: "   ++ show tertium ++
+                          ", received: " ++ show f
+
+  connect :: IO (Either String (S.Socket, Sock.Receiver, Sock.Writer))
+  connect = 
     case F.mkConFrame [F.mkLogHdr  "guest",
                        F.mkPassHdr "guest",
                        F.mkAcVerHdr $ F.versToVal vers, 
                        F.mkBeatHdr  $ F.beatToVal beat] of
-      Left  e -> return $ Fail e
+      Left  e -> return $ Left e
       Right c -> do
-        (s, rc, wr) <- baseConnect host port testConFrameThere
+        s  <- Sock.connect host port
+        rc <- Sock.initReceiver
+        wr <- Sock.initWriter
         Sock.send wr s c
-        mbF <- Sock.receive rc s maxRcv
-        case mbF of
+        eiF <- Sock.receive rc s maxRcv
+        case eiF of
           Left e  -> do
             S.sClose s
-            return $ Fail e
-          Right f -> do
-            b <- SB.recv s maxRcv
-            S.sClose s
-            return $ streamToResult b
+            return $ Left e
+          Right f -> 
+            case F.typeOf f of
+              F.Connected -> return $ Right (s, rc, wr)
+              _           -> return $ Left $ "Unexpected Frame: " ++ show f
 
-  baseConnect :: String -> Int -> 
-                 (S.Socket -> B.ByteString -> IO TestResult) 
-                 -> IO (S.Socket, Sock.Receiver, Sock.Writer)
-  baseConnect h p t = do
-    startListener h ((fromIntegral p)::S.PortNumber) t
-    s  <- Sock.connect h p
-    rc <- Sock.initReceiver
-    wr <- Sock.initWriter
-    return (s, rc, wr)
-
-  parse :: B.ByteString -> Either String F.Frame
-  parse b = 
-    case A.parse stompParser b of
-      A.Fail str ctx e  -> Left $ 
-                             (U.toString str) ++ " - " ++ e
-      A.Partial x       -> Left "Partial Result"
-      A.Done str f      -> 
-        case F.typeOf f of
-          F.Connect -> 
-            Right f
-          x         -> Left $ "Unexpected Frame: " ++ (show x)
-
-  mkSocket :: String -> S.PortNumber -> IO S.Socket
-  mkSocket h p = do
-    proto <- getProtocolNumber "tcp"
-    sock  <- S.socket S.AF_INET S.Stream proto
-    addr  <- S.inet_addr h
-    S.bindSocket sock (S.SockAddrInet p addr)
-    return sock
-
-  startListener :: String -> S.PortNumber -> 
-                   (S.Socket -> B.ByteString -> IO TestResult) -> IO ()
-  startListener h p test = do
-    s <- mkSocket h p
-    S.listen s 32 
-    _ <- forkIO (listen s test)
-    threadDelay 1000
-    return ()
-
-  listen :: S.Socket -> (S.Socket -> B.ByteString -> IO TestResult) -> IO ()
-  listen s test = do
-    (s', _) <- S.accept s
-    m <- SB.recv s' maxRcv
-    if B.length m == 0
-      then do
-        putStrLn "listen - peer disconnected!"
-        S.sClose s
-        return ()
-      else do
-        r <- test s' m
-        let b = resultToStream r
-        l <- SB.send s' b
-        threadDelay 100000
-        S.sClose s'
-        S.sClose s
-        if l /= B.length b
-          then putStrLn "Cannot send!"
-          else return ()
-
-  resultToStream :: TestResult -> B.ByteString
-  resultToStream = B.pack . show 
-
-  streamToResult :: B.ByteString -> TestResult
-  streamToResult = read . U.toString 
-  
