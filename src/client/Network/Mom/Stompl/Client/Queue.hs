@@ -78,7 +78,8 @@ where
 
   import           Control.Concurrent 
   import           Control.Monad
-  import           Control.Exception (bracket, finally, 
+  import           Control.Exception (bracket, finally, catches, 
+                                      AsyncException(..), Handler(..),
                                       throwIO, SomeException)
   import qualified Control.Exception as Ex (catch)
 
@@ -1142,22 +1143,23 @@ where
   listen cid = forever $ do
     c   <- getCon cid
     let cc = conCon c
-    -- eiF <- Ex.catch (S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc))
-    --                 (\e -> if e == ThreadKilled  
-    --                          then throwIO e
-    --                          else return $ Left $ show (e::SomeException))
-    eiF <- S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc)
-    logReceive cid
+    eiF <- catches (S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc))
+                   [Handler (\e -> case e of
+                                     ThreadKilled -> throwIO e
+                                     _ -> return $ Left $ show e),
+                    Handler (\e -> return $ Left $ 
+                                        show (e::SomeException))]
     case eiF of
-      Left e  -> throwTo (conOwner c) $ 
+      Left e  -> throwToOwner c $ 
                    ProtocolException $ "Receive Error: " ++ e
-      Right f -> 
+      Right f -> do
+        logReceive cid
         case F.typeOf f of
           F.Message   -> handleMessage cid f
           F.Error     -> handleError   cid f
           F.Receipt   -> handleReceipt cid f
           F.HeartBeat -> handleBeat    cid f
-          _           -> throwTo (conOwner c) $ 
+          _           -> throwToOwner c $ 
                            ProtocolException $ "Unexpected Frame: " ++
                            show (F.typeOf f)
 
@@ -1168,7 +1170,7 @@ where
   handleMessage cid f = do
     c <- getCon cid
     case getCh c of
-      Nothing -> throwTo (conOwner c) $ 
+      Nothing -> throwToOwner c $ 
                  ProtocolException $ "Unknown Queue: " ++ show f
       Just ch -> writeChan ch f
     where getCh c = let dst = F.getDest f
@@ -1186,7 +1188,18 @@ where
   handleError cid f = do
     c <- getCon cid
     let e = F.getMsg f ++ ": " ++ U.toString (F.getBody f)
-    throwTo (conOwner c) (BrokerException e) 
+    throwToOwner c (BrokerException e) 
+
+  -----------------------------------------------------------------------
+  -- Throw to owner
+  -- important: give the owner some time to react
+  --            before continuing and - probably - 
+  --            causing another exception
+  -----------------------------------------------------------------------
+  throwToOwner :: Connection -> StomplException -> IO ()
+  throwToOwner c e = do
+    throwTo (conOwner c) e
+    threadDelay 10000
 
   -----------------------------------------------------------------------
   -- Handle Receipt Frame
@@ -1196,8 +1209,8 @@ where
     c <- getCon cid
     case parseRec $ F.getReceipt f of
       Just r  -> forceRmRec cid r 
-      Nothing -> throwTo (conOwner c) $ 
-                 ProtocolException $ "Invalid Receipt: " ++ show f
+      Nothing -> throwToOwner c $ 
+                   ProtocolException $ "Invalid Receipt: " ++ show f
 
   -----------------------------------------------------------------------
   -- Handle Beat Frame, i.e. ignore them
@@ -1214,15 +1227,12 @@ where
     c   <- getCon cid
     let me = myMust  c 
     let he = hisMust c 
-    when (now > he) $ throwTo (conOwner c) $ 
+    when (now > he) $ throwToOwner c $ 
                          ProtocolException $ 
                            "Missing HeartBeat, last was " ++
                            show (now `diffUTCTime` he)    ++ 
                            " seconds ago!"
-    when (now >= me) $ do
-      logSend  cid -- not necessary
-      putStrLn "Sending beat..."
-      P.sendBeat $ conCon c
+    when (now >= me) $ P.sendBeat $ conCon c
     threadDelay $ ms period
 
   -----------------------------------------------------------------------
