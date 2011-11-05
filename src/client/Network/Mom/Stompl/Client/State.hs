@@ -8,12 +8,12 @@ module State (
          Receipt,
          mkConnection,
          logSend, logReceive,
-         addCon, updCon, rmCon, getCon,
+         addCon, rmCon, getCon,
          addSub, addDest, getSub, getDest,
          rmSub, rmDest,
          mkTrn,
          addTx,  getTx, rmTx, rmThisTx,
-         updTx, updCurTx, getCurTx,
+         getCurTx,
          updTxState,
          txPendingAck, txReceipts,
          addAck, rmAck, addRec, rmRec,
@@ -68,6 +68,7 @@ where
   -- Connection
   ------------------------------------------------------------------------
   data Connection = Connection {
+                      conId      :: Con,
                       conCon     :: P.Connection,
                       conOwner   :: ThreadId,
                       conHisBeat :: UTCTime,
@@ -79,8 +80,14 @@ where
                       conRecs    :: [Receipt],
                       conAcks    :: [P.MsgId]}
 
-  mkConnection :: P.Connection -> ThreadId -> UTCTime -> Connection
-  mkConnection c myself t = Connection c myself t t [] [] [] [] [] []
+  instance Eq Connection where
+    c1 == c2 = conId c1 == conId c2
+
+  findCon :: Con -> [Connection] -> Maybe Connection
+  findCon cid = find (\c -> conId c == cid)
+
+  mkConnection :: Con -> P.Connection -> ThreadId -> UTCTime -> Connection
+  mkConnection cid c myself t = Connection cid c myself t t [] [] [] [] [] []
 
   addAckToCon :: P.MsgId -> Connection -> Connection
   addAckToCon mid c = c {conAcks = mid : conAcks c} 
@@ -100,12 +107,11 @@ where
                          Just _  -> False
 
   ------------------------------------------------------------------------
-  -- Sub, Dest, Thread and Tx Entry
+  -- Sub, Dest and Thread Entry
   ------------------------------------------------------------------------
   type SubEntry    = (Sub, Chan F.Frame)
   type DestEntry   = (String, Chan F.Frame)
-  type ThreadEntry = (ThreadId, [TxEntry])
-  type TxEntry     = (Tx, Transaction)
+  type ThreadEntry = (ThreadId, [Transaction])
 
   addSubToCon :: SubEntry -> Connection -> Connection
   addSubToCon s c = c {conSubs = s : conSubs c}
@@ -133,18 +139,14 @@ where
   setMyTime  :: UTCTime -> Connection -> Connection
   setMyTime t c = c {conMyBeat = t}
 
-  ------------------------------------------------------------------------
-  -- Connection Entry
-  ------------------------------------------------------------------------
-  type ConEntry = (Con, Connection)
-
-  updCon :: ConEntry -> [ConEntry] -> [ConEntry]
-  updCon c cs = c : deleteBy eq c cs
+  updCon :: Connection -> [Connection] -> [Connection]
+  updCon c cs = c : delete c cs
   
   ------------------------------------------------------------------------
   -- Transaction 
   ------------------------------------------------------------------------
   data Transaction = Trn {
+                       txId      :: Tx,
                        txState   :: TxState,
                        txTmo     :: Int,
                        txAbrtAck :: Bool,
@@ -153,15 +155,21 @@ where
                        txRecs    :: [Receipt]
                      }
 
-  mkTrn :: [Topt] -> Transaction
-  mkTrn os = Trn {
-               txState   = TxStarted,
-               txTmo     = tmo os,
-               txAbrtAck = hasTopt OAbortMissingAcks os,
-               txAbrtRc  = hasTopt OWithReceipts     os,
-               txAcks    = [],
-               txRecs    = []
-             }
+  instance Eq Transaction where
+    t1 == t2 = txId t1 == txId t2
+
+  findTx :: Tx -> [Transaction] -> Maybe Transaction
+  findTx tx = find (\x -> txId x == tx) 
+
+  mkTrn :: Tx -> [Topt] -> Transaction
+  mkTrn tx os = Trn {
+                  txId      = tx,
+                  txState   = TxStarted,
+                  txTmo     = tmo os,
+                  txAbrtAck = hasTopt OAbortMissingAcks os,
+                  txAbrtRc  = hasTopt OWithReceipts     os,
+                  txAcks    = [],
+                  txRecs    = []}
 
   ------------------------------------------------------------------------
   -- | Options passed to a transaction.
@@ -253,43 +261,43 @@ where
   -- State 
   ------------------------------------------------------------------------
   {-# NOINLINE con #-}
-  con :: MVar [ConEntry]
+  con :: MVar [Connection]
   con = unsafePerformIO $ newMVar []
  
   ------------------------------------------------------------------------
   -- Add connection to state
   ------------------------------------------------------------------------
-  addCon :: ConEntry -> IO ()
+  addCon :: Connection -> IO ()
   addCon c = modifyMVar_ con $ \cs -> return (c:cs)
 
   ------------------------------------------------------------------------
   -- get connection from state
   ------------------------------------------------------------------------
   getCon :: Con -> IO Connection
-  getCon cid = withCon cid $ \(_, c) -> return (c, c) 
+  getCon cid = withCon cid $ \c -> return (c, c) 
 
   ------------------------------------------------------------------------
   -- remove connection from state
   ------------------------------------------------------------------------
   rmCon :: Con -> IO ()
   rmCon cid = modifyMVar_ con $ \cs -> 
-    case lookup cid cs of
+    case findCon cid cs of
       Nothing -> return cs
       Just c  -> 
-        return $ deleteBy eq (cid, c) cs
+        return $ delete c cs
 
   ------------------------------------------------------------------------
   -- Apply an action that may change a connection to the state
   ------------------------------------------------------------------------
-  withCon :: Con -> (ConEntry -> IO (Connection, a)) -> IO a
+  withCon :: Con -> (Connection -> IO (Connection, a)) -> IO a
   withCon cid op = modifyMVar con (\cs -> 
-     case lookup cid cs of
+     case findCon cid cs of
        Nothing   -> 
          throwIO $ ConnectException $
                  "No such Connection: " ++ show cid
        Just c    -> do
-         (c', x) <- op (cid, c)
-         let cs' = updCon (cid, c') cs
+         (c', x) <- op c
+         let cs' = updCon c' cs
          return (cs', x))
 
   ------------------------------------------------------------------------
@@ -297,7 +305,7 @@ where
   ------------------------------------------------------------------------
   logTime :: Con -> (UTCTime -> Connection -> Connection) -> IO ()
   logTime cid f = 
-    getCurrentTime >>= \t -> withCon cid (\(_, c) -> return (f t c, ()))
+    getCurrentTime >>= \t -> withCon cid (\c -> return (f t c, ()))
 
   logSend :: Con -> IO ()
   logSend cid = logTime cid setMyTime
@@ -309,29 +317,29 @@ where
   -- add and remove sub and dest
   ------------------------------------------------------------------------
   addSub :: Con -> SubEntry -> IO ()
-  addSub cid s  = withCon cid $ \(_, c) -> return (addSubToCon s c, ())
+  addSub cid s  = withCon cid $ \c -> return (addSubToCon s c, ())
 
   addDest :: Con -> DestEntry -> IO ()
-  addDest cid d = withCon cid $ \(_, c) -> return (addDestToCon d c, ())
+  addDest cid d = withCon cid $ \c -> return (addDestToCon d c, ())
 
   rmSub :: Con -> Sub -> IO ()
   rmSub cid sid = withCon cid rm
-    where rm (_, c) = case getSub sid c of 
-                        Nothing -> return (c, ())
-                        Just ch -> return (rmSubFromCon (sid, ch) c, ())
+    where rm c = case getSub sid c of 
+                   Nothing -> return (c, ())
+                   Just ch -> return (rmSubFromCon (sid, ch) c, ())
 
   rmDest :: Con -> String -> IO ()
   rmDest cid dst = withCon cid rm
-    where rm (_, c) = case getDest dst c of 
-                        Nothing -> return (c, ())
-                        Just ch -> return (rmDestFromCon (dst, ch) c, ())
+    where rm c = case getDest dst c of 
+                   Nothing -> return (c, ())
+                   Just ch -> return (rmDestFromCon (dst, ch) c, ())
 
   ------------------------------------------------------------------------
   -- add transaction to connection
   -- Note: transactions are kept per threadId
   ------------------------------------------------------------------------
-  addTx :: TxEntry -> Con -> IO ()
-  addTx t cid = withCon cid $ \(_, c) -> do
+  addTx :: Transaction -> Con -> IO ()
+  addTx t cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> 
@@ -350,26 +358,26 @@ where
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> return Nothing
-      Just ts -> return $ lookup tx ts
+      Just ts -> return $ findTx tx ts
 
   ------------------------------------------------------------------------
   -- apply an action that may change a transaction to the state
   ------------------------------------------------------------------------
   updTx :: Tx -> Con -> (Transaction -> Transaction) -> IO ()
-  updTx tx cid f = withCon cid $ \(_, c) -> do
+  updTx tx cid f = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> return (c, ())
       Just ts -> 
-        case lookup tx ts of
+        case findTx tx ts of
           Nothing -> return (c, ())
           Just t  -> 
             let t' = f t
             in  return (c {conThrds = 
-                             updTxInThrds (tx, t') tid (conThrds c) ts}, 
+                             updTxInThrds t' tid (conThrds c) ts}, 
                         ())
     where updTxInThrds t tid ts trns =
-            (tid, t : deleteBy eq t trns) : deleteBy eq (tid, trns) ts
+            (tid, t : delete t trns) : deleteBy eq (tid, trns) ts
 
   ------------------------------------------------------------------------
   -- update transaction state
@@ -380,13 +388,13 @@ where
   ------------------------------------------------------------------------
   -- get current transaction for thread
   ------------------------------------------------------------------------
-  getCurTx :: Connection -> IO (Maybe TxEntry)
+  getCurTx :: Connection -> IO (Maybe Tx)
   getCurTx c = do
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> return Nothing
       Just ts -> if null ts then return Nothing
-                   else return $ Just $ head ts
+                   else return $ Just $ (txId . head) ts
 
   ------------------------------------------------------------------------
   -- apply a change of the current transaction 
@@ -394,19 +402,19 @@ where
   ------------------------------------------------------------------------
   updCurTx :: (Transaction -> Transaction) ->
               (Connection  -> Connection)  ->
-              ConEntry -> IO (Connection, ())
-  updCurTx onTx onCon (_, c) = do
+              Connection -> IO (Connection, ())
+  updCurTx onTx onCon c = do
     tid  <- myThreadId
     case lookup tid $ conThrds c of
       Nothing -> return (onCon c, ())
       Just ts -> if null ts 
                    then return (onCon c, ())
                    else do
-                      let (tx, t) = head ts
-                      let t'      = onTx t 
-                      let ts'     = (tx, t') : tail ts
-                      let c'      = c {conThrds = 
-                                         (tid, ts') : 
+                      let t   = head ts
+                      let t'  = onTx t 
+                      let ts' = t' : tail ts
+                      let c'  = c {conThrds = 
+                                      (tid, ts') : 
                                          deleteBy eq (tid, ts) (conThrds c)}
                       return (c', ())
 
@@ -456,14 +464,13 @@ where
   ------------------------------------------------------------------------
   forceRmRec :: Con -> Receipt -> IO ()
   forceRmRec cid r = withCon cid doRmRec 
-    where doRmRec (_, c) = 
+    where doRmRec c = 
             case find (== r) $ conRecs c of
               Just _  -> return (rmRecFromCon r c, ())
               Nothing -> 
                 let thrds = map rmRecFromThrd $ conThrds c
                 in  return (c {conThrds = thrds}, ()) 
-          rmRecFromThrd   (thrd, ts) = (thrd, map rmRecFromTxEntry ts)
-          rmRecFromTxEntry (tid, tx) = (tid,      rmRecFromTx    r tx)
+          rmRecFromThrd   (thrd, ts) = (thrd, map (rmRecFromTx r) ts)
 
   ------------------------------------------------------------------------
   -- check a condition either on the current transaction or
@@ -478,7 +485,7 @@ where
     case lookup tid $ conThrds c of
       Nothing -> return $ onCon c
       Just ts -> if null ts then return $ onCon c
-                   else return $ onTx $ (snd . head) ts
+                   else return $ onTx $ head ts
 
   ------------------------------------------------------------------------
   -- check a receipt
@@ -493,7 +500,7 @@ where
   -- remove a specific transaction
   ------------------------------------------------------------------------
   rmThisTx :: Tx -> Con -> IO ()
-  rmThisTx tx cid = withCon cid $ \(_, c) -> do
+  rmThisTx tx cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> return (c, ())
@@ -501,10 +508,10 @@ where
         if null ts 
           then return (c {conThrds = deleteBy eq (tid, []) (conThrds c)}, ())
           else 
-            case lookup tx ts of
+            case findTx tx ts of
               Nothing -> return (c, ())
               Just t  -> do
-                let ts' = deleteBy eq (tx, t) ts
+                let ts' = delete t ts
                 if null ts' 
                   then return (c {conThrds = 
                                    deleteBy eq (tid, ts) (conThrds c)},  ())
@@ -515,7 +522,7 @@ where
   -- remove the current transaction
   ------------------------------------------------------------------------
   rmTx :: Con -> IO ()
-  rmTx cid = withCon cid $ \(_, c) -> do
+  rmTx cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
       Nothing -> return (c, ())

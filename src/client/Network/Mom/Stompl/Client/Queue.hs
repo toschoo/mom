@@ -385,8 +385,8 @@ where
     -- putStrLn $ show $ P.conBeat c
     if not $ P.connected c 
       then throwIO $ ConnectException $ P.getErr c
-      else bracket (do addCon (cid, mkConnection c me now)
-                       l <- forkIO $ listen    cid
+      else bracket (do addCon $ mkConnection cid c me now
+                       l <- forkIO $ listen  cid
                        b <- if period c > 0 
                               then do x <- forkIO $ heartBeat cid $ period c
                                       return $ Just x
@@ -398,7 +398,6 @@ where
                    (\(l, b) -> 
                        Ex.catch (do killThread l
                                     when (isThrd b) (killThread $ thrd b)
-                                    -- unsubscribe all queues?
                                     _ <- P.disconnect c 
                                     rmCon cid)
                                 (\e -> do rmCon cid
@@ -697,7 +696,7 @@ where
   newSendQ :: Con -> String -> String -> [Qopt] -> 
               OutBound a -> IO (Writer a)
   newSendQ cid qn dst os conv = 
-    let q = SendQ {
+    return SendQ {
               wCon  = cid,
               wDest = dst,
               wName = qn,
@@ -705,7 +704,6 @@ where
               wWait = hasQopt OWaitReceipt os, 
               wTx   = hasQopt OForceTx     os, 
               wTo   = conv}
-    in return q
 
   ------------------------------------------------------------------------
   -- Creating a ReceivQ, however, involves some more hassle,
@@ -713,7 +711,7 @@ where
   ------------------------------------------------------------------------
   newRecvQ :: Con        -> Connection -> String -> String -> 
               [Qopt]     -> [F.Header] ->
-              InBound a -> IO (Reader a)
+              InBound a  -> IO (Reader a)
   newRecvQ cid c qn dst os hs conv = do
     let am   = ackMode os
     let au   = hasQopt OAck os
@@ -857,7 +855,7 @@ where
         tx <- getCurTx c >>= (\mbT -> 
                  case mbT of
                    Nothing     -> return NoTx
-                   Just (i, _) -> return i)
+                   Just  t     -> return t)
         if tx == NoTx && wTx q
           then throwIO $ QueueException $
                  "Queue '" ++ wName q ++ 
@@ -938,8 +936,8 @@ where
            else do
              tx <- getCurTx c >>= (\mbT -> 
                        case mbT of
-                         Nothing     -> return NoTx
-                         Just (x, _) -> return x)
+                         Nothing -> return NoTx
+                         Just x  -> return x)
              let msg' = msg {P.msgTx = tx}
              rc <- if with then mkUniqueRecc else return NoRec
              when with $ addRec cid rc
@@ -996,13 +994,13 @@ where
   withTransaction :: Con -> [Topt] -> (Con -> IO a) -> IO a
   withTransaction cid os op = do
     tx <- mkUniqueTxId
-    let t = mkTrn os
+    let t = mkTrn tx os
     c <- getCon cid
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
              "Not connected (" ++ show cid ++ ")"
-      else finally (do addTx (tx, t) cid
-                       startTx cid c tx t 
+      else finally (do addTx t cid
+                       startTx cid c t 
                        x <- op cid
                        updTxState tx cid TxEnded
                        return x)
@@ -1067,12 +1065,12 @@ where
   -- we will wait for receipts 
   -- on terminating the transaction anyway
   -----------------------------------------------------------------------
-  startTx :: Con -> Connection -> Tx -> Transaction -> IO ()
-  startTx cid c tx t = do
+  startTx :: Con -> Connection -> Transaction -> IO ()
+  startTx cid c t = do
     rc <- if txAbrtRc t then mkUniqueRecc else return NoRec
     when (txAbrtRc t) $ addRec cid rc 
     logSend cid
-    P.begin (conCon c) (show tx) (show rc)
+    P.begin (conCon c) (show $ txId t) (show rc)
 
   -----------------------------------------------------------------------
   -- Send commit or abort frame

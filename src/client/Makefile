@@ -76,6 +76,9 @@ $(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
 $(TDIR)/tdialogsdbg:	$(TDIR)/tdialogs.hs $(SUBSRC)
 			$(GHC) -o $@ $(FLGS) -D_DEBUG $(INC) $(TDIR)/tdialogs.hs
 
+$(TDIR)/tstate:		$(TDIR)/tstate.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
@@ -84,6 +87,7 @@ clean:
 	rm -f $(TDIR)/responder
 	rm -f $(TDIR)/tprotocol
 	rm -f $(TDIR)/tprotocoldbg
+	rm -f $(TDIR)/tstate
 	rm -f $(SMOKEDIR)/listen2
 	rm -f $(SMOKEDIR)/send2
 	rm -f $(SMOKEDIR)/sendtx
