@@ -235,7 +235,8 @@ where
         case eiR of
           Left  e -> return c {conErrM = e}
           Right _ -> do
-           eiC <- S.receive rc (getSock c) mx 
+           eiC <- catch (S.receive rc (getSock c) mx)
+                        (\e -> return $ Left $ show (e::SomeException)) 
            case eiC of
              Left e  -> return c {conErrM = e}
              Right r -> do
