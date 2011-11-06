@@ -6,12 +6,12 @@ where
   import qualified Network.Mom.Stompl.Frame as F
 
   import qualified Network.Socket as S
+  import qualified Network.Socket.ByteString as SB
   import           Network.BSD (getProtocolNumber) 
   import           Control.Monad (forever)
-  import           Control.Exception (bracket)
-
+  import           Control.Exception (bracket, SomeException, throwIO)
+  import qualified Control.Exception as Ex (catch) 
   import qualified Data.ByteString.Char8 as B
-  import qualified Network.Socket.ByteString as SB
 
   maxRcv :: Int
   maxRcv = 1024
@@ -37,17 +37,18 @@ where
     proto <- getProtocolNumber "tcp"
     sock  <- S.socket S.AF_INET S.Stream proto
     addr  <- S.inet_addr h
-    S.bindSocket sock (S.SockAddrInet p addr)
+    Ex.catch (S.bindSocket sock (S.SockAddrInet p addr))
+             (\e -> S.sClose sock >> throwIO (e::SomeException))
     return sock
 
   listen :: S.Socket -> IO ()
   listen s = do
     (s', _) <- S.accept s
     rc      <- Sock.initReceiver
-    session s' rc
+    session True s' rc
 
-  session :: S.Socket -> Sock.Receiver -> IO ()
-  session s rc = do
+  session :: Bool -> S.Socket -> Sock.Receiver -> IO ()
+  session beats s rc = do
     mbF <- Sock.receive rc s maxRcv
     case mbF of
       Left e  -> do
@@ -57,18 +58,19 @@ where
         case F.typeOf f of
           F.Connect    -> connect s rc f
           F.Disconnect -> S.sClose s
-          _          -> do
-            let b = F.putFrame f
-            l <- SB.send s b
-            if l == B.length b then session s rc
-              else do
-                putStrLn "Cannot send Frame!"
-                S.sClose s
+          _ | not beats && F.typeOf f == F.HeartBeat -> session beats s rc
+            | otherwise -> do
+                let b = F.putFrame f
+                l <- SB.send s b
+                if l == B.length b then session beats s rc
+                  else do
+                    putStrLn "Cannot send Frame!"
+                    S.sClose s
 
   connect :: S.Socket -> Sock.Receiver -> F.Frame -> IO ()
-  connect s rc _ = 
+  connect s rc fc = 
      case F.mkCondFrame [F.mkVerHdr  "1.1",
-                                F.mkBeatHdr "0,0"] of
+                         F.mkBeatHdr $ getBeat fc] of
        Left  e -> do
          putStrLn $ "Cannot make CondFrame: " ++ e
          S.sClose s
@@ -76,7 +78,11 @@ where
          let b = F.putFrame f
          l <- SB.send s b
          if l == B.length b
-           then session s rc
+           then let beats = F.getBeat fc /= (50,50)
+                in  session beats s rc
            else do
              putStrLn "Cannot send Connected!"
              S.sClose s
+
+  getBeat :: F.Frame -> String
+  getBeat = F.beatToVal . F.getBeat 

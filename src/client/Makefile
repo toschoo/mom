@@ -58,19 +58,25 @@ $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 suite:	$(TDIR)/tprotocol \
+	$(TDIR)/tstate    \
 	$(TDIR)/responder \
         $(TDIR)/tdialogs
+
+run:	$(suite)
+	$(TDIR)/tprotocol
+	$(TDIR)/tstate
+	$(TDIR)/tdialogs 61613
 
 $(TDIR)/responder:	$(TDIR)/responder.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs $(SUBSRC)
+$(TDIR)/tprotocol:	$(TDIR)/tprotocol.hs $(TDIR)/responder $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/tprotocoldbg:	$(TDIR)/tprotocol.hs $(SUBSRC)
 			$(GHC) $(FLGS) -D_DEBUG -o $@ $(INC) $(TDIR)/tprotocol.hs
 
-$(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(SUBSRC)
+$(TDIR)/tdialogs:	$(TDIR)/tdialogs.hs $(TDIR)/responder $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/tdialogsdbg:	$(TDIR)/tdialogs.hs $(SUBSRC)

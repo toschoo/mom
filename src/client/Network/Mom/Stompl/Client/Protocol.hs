@@ -25,7 +25,7 @@ where
 
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catch, SomeException)
-
+  import           Control.Applicative ((<$>))
   import           Codec.MIME.Type as Mime (Type) 
 
   defVersion :: F.Version
@@ -157,8 +157,12 @@ where
   connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
   connect host port mx usr pwd vers beat = do
     let c = mkConnection host port mx usr pwd vers beat
-    s <- S.connect host port
-    connectBroker mx vers beat c {conSock = Just s, conTcp = True}
+    eiS <- catch (Right <$> S.connect host port)
+                 (\e -> return $ Left $ show (e::SomeException))
+    case eiS of
+      Left  e -> return c {conErrM = e}
+      Right s ->
+        connectBroker mx vers beat c {conSock = Just s, conTcp = True}
 
   disconnect :: Connection -> IO Connection
   disconnect c 

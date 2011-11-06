@@ -58,12 +58,15 @@ where
   maxVers :: [Version] -> Version
   maxVers = foldr maxVer (1,0)
 
-  maxVer :: Version -> Version -> Version
-  maxVer v1 v2 = 
-    if major1 > major2        then v1
-      else if major1 < major2 then v2
-             else if minor1 >= minor2 then v1 
-                                      else v2 
+  maxVer, minVer :: Version -> Version -> Version
+  maxVer = chooseVer (>)
+  minVer = chooseVer (<)
+
+  chooseVer :: (Int -> Int -> Bool) -> Version -> Version -> Version
+  chooseVer cmp v1 v2 | major1 `cmp` major2 = v1
+                      | major2 `cmp` major1 = v2
+                      | minor1 `cmp` minor1 = v1
+                      | otherwise           = v2
     where major1 = fst v1
           minor1 = snd v1
           major2 = fst v2
@@ -99,10 +102,10 @@ where
   defMime =  Mime.nullType
 
   defVerStr :: String
-  defVerStr = "1.1"
+  defVerStr = "1.0"
 
   defVersion :: Version
-  defVersion = (1, 1)
+  defVersion = (1, 0)
 
   noSrvDesc :: SrvDesc
   noSrvDesc = ("","","")

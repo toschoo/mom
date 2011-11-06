@@ -43,7 +43,6 @@ where
   tx1   = 1
   rc1   = 1
   sub1  = 1
-  
 
   main :: IO ()
   main = do
@@ -209,10 +208,12 @@ where
                                                     (F.mkUnsubscribe q1  
                                                              (show   Fac.NoSub)
                                                              (show $ Fac.Rec rc1))
-    in  mkGroup "Protocol Tests" (Stop (Fail "")) 
-          [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,       t100,
+        t300 = mkTest "HeartBeat       " $ testWith P.sendBeat 
+                                                    F.mkBeat
+    in  mkGroup "Protocol Tests" (Stop (Fail "")) [
+            t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,       t100,
            t110, t120, t130, t140, t150, t160, t170, t180, t190, t200,
-           t210, t220, t230, t240, t250, t260, t270, t280, t290]
+           t210, t220, t230, t240, t250, t260, t270, t280, t290, t300]
 
   testConFrame :: IO TestResult
   testConFrame = 
@@ -232,16 +233,18 @@ where
             case eiF of
               Left  e -> return $ Fail e
               Right f -> case F.typeOf f of
-                           F.Connected -> return Pass
-                           _           -> return $ Fail $ 
-                                            "Unexpected Frame: " ++ show f
+                              F.Connected -> return Pass
+                              _           -> return $ Fail $ 
+                                               "Unexpected Frame: " ++ show f
 
   testConnect :: IO TestResult
   testConnect = do
     c <- P.connect host port maxRcv "guest" "guest" vers beat
-    if not (P.connected c)
-      then return $ Fail $ P.getErr c
-      else P.disconnect c >>= (\_ -> return Pass)
+    let r = if P.connected c 
+              then Pass
+              else Fail $ "Not connected: " ++ P.getErr c
+    _ <- P.disconnect c 
+    return r
 
   testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> Fac.Rec -> P.Connection -> IO ()
   testAck ok tx sub m rc c = do
@@ -273,14 +276,15 @@ where
       else do
         eiR <- try $ act c
         case eiR of
-          Left e  -> return $ Fail $ show e
+          Left e  -> do
+            _ <- P.disconnect c 
+            return $ Fail $ show e
           Right _ -> do
             eiF <- Sock.receive (P.getRc c) (P.getSock c) (P.conMax c)
-            _ <- P.disconnect c 
+            _   <- P.disconnect c 
             case eiF of
               Left  e -> return $ Fail e
               Right f -> 
-                -- analyse frame
                 if f == tertium then return Pass
                   else return $ Fail $ "Frame does not equal pattern, " ++
                           "expected: "   ++ show tertium ++

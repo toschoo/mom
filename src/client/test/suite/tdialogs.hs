@@ -3,18 +3,18 @@ module Main
 where
 
   import Test
-  import Protocol (Message(..))
 
   import           Network.Mom.Stompl.Client.Queue
   import           Network.Mom.Stompl.Client.Exception 
 
   import           Control.Exception (throwIO)
   import           Control.Concurrent
+  import           Control.Monad (unless)
 
   import qualified Data.ByteString.UTF8  as U
   import           Data.Maybe
   import           Data.Char (isDigit)
-  import           Data.List (isSuffixOf)
+  import           Data.List (isSuffixOf, isInfixOf)
 
   import           System.Exit
   import           System.Environment
@@ -52,7 +52,7 @@ where
   text1 = "whose woods these are I think I know"
   text2 = "his house is in the village though"
   text3 = "he will not see me stopping here"
-  text4 = "to watch is woods fill up with snow"
+  text4 = "to watch his woods fill up with snow"
 
   utf8  = "此派男野人です。\n" ++
           "此派男野人です。それ派個共です。\n" ++
@@ -62,8 +62,8 @@ where
   main = do
     os <- getArgs
     case os of
-      [p] -> do
-        if not $ (and . map isDigit) p
+      [p] -> 
+        if not (all isDigit p)
           then do
             putStrLn $ "Port number '" ++ p ++ "' is not numeric!"
             exitFailure
@@ -79,7 +79,7 @@ where
   runTests :: TestGroup IO -> IO TestResult
   runTests g = do
     (r, s) <- execGroup g
-    putStrLn $ s 
+    putStrLn s 
     return r
 
   mkTests :: Int -> TestGroup IO
@@ -124,11 +124,13 @@ where
         t360  = mkTest "Nested con - interleaved " $ testNstConX    p
         t370  = mkTest "Nested con - inner fails " $ testNstConFail p
         t380  = mkTest "HeartBeat                " $ testBeat       p
+        t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
+        t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
         [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170,             t200, t205,
          t210, t220, t230, t240, t250, t260, t270, t280, t290, t300,
-         t310, t320, t330, t340, t350, t360, t370, t380] 
+         t310, t320, t330, t340, t350, t360, t370, t380, t390, t400] 
 
   ------------------------------------------------------------------------
   -- Create a Reader without options
@@ -156,7 +158,7 @@ where
     mbQ <- tmo $ newReader c "IN"  tQ1 
                    [OWaitReceipt] [] iconv
     case mbQ of
-      Nothing -> return $ Fail $ "No Receipt"
+      Nothing -> return $ Fail "No Receipt"
       Just _  -> return Pass
 
   ------------------------------------------------------------------------
@@ -171,7 +173,7 @@ where
     mbQ <- tmo $ newReader c "IN"  tQ1 
                    [OWithReceipt] [] iconv
     case mbQ of
-      Nothing -> return $ Fail $ "No Receipt"
+      Nothing -> return $ Fail "No Receipt"
       Just _  -> return Pass
 
   ------------------------------------------------------------------------
@@ -204,9 +206,9 @@ where
     oQ <- newWriter c "OUT" tQ1 []    [] oconv
     writeQ oQ nullType [] text1
     m <- readQ iQ
-    if msgCont m == text1
+    if msgContent m == text1
       then return Pass
-      else return $ Fail $ "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+      else return $ Fail $ "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- With Reader 
@@ -225,7 +227,7 @@ where
         Nothing -> return $ Left "Can't read from queue!"
         Just m  -> if msgContent m == text1 then return $ Right q
                      else return $ Left $ "Wrong message: " ++ 
-                                            (msgContent m)
+                                            msgContent m
     case eiQ of
       Left  e -> return $ Fail e
       Right q -> do
@@ -236,9 +238,8 @@ where
           Just eiM  -> case eiM of
                          Left (QueueException _) -> return Pass
                          Left e -> return $ Fail $ 
-                                       "Unexpected Exception: " ++
-                                       (show e)
-                         Right _ -> return $ Fail $                               
+                                       "Unexpected Exception: " ++ show e
+                         Right _ -> return $ Fail 
                                         "Received message from dead queue!" 
 
   ------------------------------------------------------------------------
@@ -255,9 +256,9 @@ where
     oQ <- newWriter c "OUT" tQ1 [] [] oconv
     writeQ oQ nullType [] utf8
     m <- readQ iQ
-    if msgCont m == utf8
+    if msgContent m == utf8
       then return Pass
-      else return $ Fail $ "Received: " ++ (msgCont m) ++ " - Expected: " ++ utf8
+      else return $ Fail $ "Received: " ++ msgContent m ++ " - Expected: " ++ utf8
 
   ------------------------------------------------------------------------
   -- Converter Error
@@ -280,9 +281,9 @@ where
       Left (ConvertException e) -> 
         if errmsg `isSuffixOf` e then return Pass
             else return $ Fail $ "Wrong exception text: " ++ e 
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
       Right m -> return $ Fail $ "Received message on exception: " ++ 
-                                    (msgContent m)
+                                    msgContent m
 
   ------------------------------------------------------------------------
   -- Converter including more complex task
@@ -300,16 +301,15 @@ where
     writeQ oQ nullType [] text1
     eiM <- try $ readQ iQ
     case eiM of
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
       Right m -> 
         if msgContent m == text1 then return Pass
           else return $ Fail $ "Unexpected message: " ++ 
-                                (msgContent m)
+                                msgContent m
     where cmpconv _ _ _ b = do
             v <- newEmptyMVar 
             _ <- forkIO (putMVar v $ U.toString b)
-            x <- takeMVar v
-            return x
+            takeMVar v
 
   ------------------------------------------------------------------------
   -- Transaction
@@ -342,14 +342,14 @@ where
         mbM3 <- tmo $ readQ iQ
         mbM4 <- tmo $ readQ iQ
         let ms = catMaybes [mbM1, mbM2, mbM3, mbM4]
-        if (length ms) /= 4
-          then return $ Fail $ "Did not receive all messages: " ++ (show $ length ms)
+        if length ms /= 4
+          then return $ Fail $ "Did not receive all messages: " ++ show (length ms)
           else let zs = zip ms [text1, text2, text3, text4]
-                   ts = map (\x -> (msgCont . fst) x == snd x) zs
+                   ts = map (\x -> (msgContent . fst) x == snd x) zs
                in if and ts then return Pass
                             else return $ Fail $
                                      "Messages are in wrong order: " ++ 
-                                     (show $ map msgCont ms)
+                                     show (map msgContent ms)
 
   ------------------------------------------------------------------------
   -- Abort
@@ -375,10 +375,10 @@ where
           Nothing -> if appmsg `isSuffixOf` e then return Pass
                        else return $ Fail $
                            "Exception text differs: " ++ e
-          Just _  -> return $ Fail $
+          Just _  -> return $ Fail
                          "Aborted Transaction sends message!"
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
-      Right _ -> return $ Fail $ "Transaction not aborted!"
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
+      Right _ -> return $ Fail   "Transaction not aborted!"
       
   ------------------------------------------------------------------------
   -- Exception
@@ -396,7 +396,7 @@ where
     oQ <- newWriter c "OUT" tQ1 []    [] oconv
     mbT <- try $ withTransaction c [] $ \_ -> do
         writeQ oQ nullType [] text1    -- send m1
-        throwIO $ AppException $ "Test Exception!!!"
+        throwIO $ AppException   "Test Exception!!!"
     case mbT of
       Left (AppException e) -> do
         mbM <- tmo $ readQ iQ
@@ -404,10 +404,10 @@ where
           Nothing -> if appmsg `isSuffixOf` e then return Pass
                        else return $ Fail $ 
                            "Exception text differs: " ++ e
-          Just _  -> return $ Fail $
+          Just _  -> return $ Fail
                          "Aborted Transaction sends message!"
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
-      Right _ -> return $ Fail $ "Transaction not aborted!"
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
+      Right _ -> return $ Fail   "Transaction not aborted!"
       
   ------------------------------------------------------------------------
   -- Force Tx
@@ -421,7 +421,7 @@ where
   testForceTx c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
     oQ <- newWriter c "OUT" tQ1 [OForceTx]    [] oconv
-    withTransaction c [] $ \_ -> do
+    withTransaction c [] $ \_ -> 
         writeQ oQ nullType [] text1    -- send m1
     mbM <- tmo $ readQ iQ
     case mbM of
@@ -431,7 +431,7 @@ where
         case eiX of
           Left (QueueException _) -> return Pass
           Left e  -> return $ Fail $
-                          "Unexpected exception: " ++ (show e)
+                          "Unexpected exception: " ++ show e
           Right _ -> return $ Fail $
                           "No exception on writing to queue with OForceTX " ++
                           " outside transaction!"
@@ -485,7 +485,7 @@ where
         case mbM2 of
           Nothing -> return $ Fail "no message from committed TX received!"
           Just m2 -> 
-            if (msgContent m2) == text2 
+            if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
 
@@ -517,7 +517,7 @@ where
         case mbM2 of
           Nothing -> return $ Fail "no message from committed TX received!"
           Just m2 -> 
-            if (msgContent m2) == text2 
+            if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
 
@@ -550,7 +550,7 @@ where
         case mbM2 of
           Nothing -> return $ Fail "no message from committed TX received!"
           Just m2 -> 
-            if (msgContent m2) == text2 
+            if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
 
@@ -583,7 +583,7 @@ where
         case mbM2 of
           Nothing -> return $ Fail "no message from committed TX received!"
           Just m2 -> 
-            if (msgContent m2) == text2 
+            if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
 
@@ -611,7 +611,7 @@ where
         case mbM2 of
           Nothing -> return $ Fail "no message from committed TX received!"
           Just m2 -> 
-            if (msgContent m2) == text2 
+            if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
 
@@ -632,7 +632,7 @@ where
           then return Pass
           else return $ Fail $ "Wrong text in exception: " ++ e
       Left e               -> return $ Fail $ show e
-      Right _              -> return $ Fail $ 
+      Right _              -> return $ Fail 
                                 "Tx not aborted with pending receipt!"
 
   ------------------------------------------------------------------------
@@ -648,7 +648,7 @@ where
     eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> threadDelay 10000
     case eiT of
       Left e               -> return $ Fail $ show e
-      Right _              -> return Pass
+      Right _              -> return   Pass
 
   ------------------------------------------------------------------------
   -- Tx with Receipts + Tmo passes 
@@ -661,7 +661,7 @@ where
     eiT <- try $ withTransaction c [OWithReceipts, OTimeout 100] $ \_ -> return ()
     case eiT of
       Left e               -> return $ Fail $ show e
-      Right _              -> return $ Pass
+      Right _              -> return   Pass
 
   ------------------------------------------------------------------------
   -- Tx with Receipts + pending receipt
@@ -675,7 +675,7 @@ where
   testTxQRec c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
     oQ <- newWriter c "OUT" tQ1 [OWithReceipt] [] oconv
-    eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> do
+    eiT <- try $ withTransaction c [OWithReceipts] $ \_ -> 
         writeQ oQ nullType [] text1    -- send m1
     case eiT of
       Left (TxException e) -> 
@@ -724,7 +724,7 @@ where
   testTxQRecTmo c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
     oQ <- newWriter c "OUT" tQ1 [OWithReceipt] [] oconv
-    eiT <- try $ withTransaction c [OWithReceipts, OTimeout 100] $ \_ -> do
+    eiT <- try $ withTransaction c [OWithReceipts, OTimeout 100] $ \_ -> 
         writeQ oQ nullType [] text1    -- send m1
     case eiT of
       Left e               -> return $ Fail $ show e
@@ -757,10 +757,10 @@ where
         case mbM of
           Nothing -> return $ Fail "No Message received"
           Just m  ->
-            if msgCont m == text1
+            if msgContent m == text1
               then return Pass
               else return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- writeQWith and waitReceipt
@@ -781,9 +781,9 @@ where
     case mbM of
       Nothing -> return $ Fail "No Message received"
       Just m  ->
-        if msgCont m /= text1
+        if msgContent m /= text1
           then return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
           else do
             mbOk <- tmo $ waitReceipt c r
             case mbOk of
@@ -809,8 +809,8 @@ where
         if "Peer disconnected" `isSuffixOf` e then return Pass
           else  
             return $ Fail $ "Not suffixOf: " ++ show e -- Unexpected Exception: " ++ (show e)
-      Left e  -> return $ Fail $ "Unexpected Exception: " ++ (show e)
-      Right _ -> return $ Fail $ "Double Ack had no effect!"
+      Left e  -> return $ Fail $ "Unexpected Exception: " ++ show e
+      Right _ -> return $ Fail "Double Ack had no effect!"
 
   ------------------------------------------------------------------------
   -- NestedTx
@@ -829,9 +829,9 @@ where
     oQ <- newWriter c "OUT" tQ1 [] [] oconv
     r  <- withTransaction c [] $ \_ -> do
         writeQ oQ nullType [] text1
-        t <- ((testTx c iQ oQ) ?> 
-              (testTx c iQ oQ) ?> 
-              (testTx c iQ oQ))
+        t <- testTx c iQ oQ ?> 
+             testTx c iQ oQ ?> 
+             testTx c iQ oQ
         case t of
           Fail e -> return $ Fail e
           Pass   -> do
@@ -846,10 +846,10 @@ where
         case mbM of
           Nothing -> return $ Fail "Message not obtained after commit"
           Just m  -> 
-            if msgCont m == text1 
+            if msgContent m == text1 
               then return Pass
               else return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- NestedTx with one foul
@@ -868,9 +868,9 @@ where
     oQ <- newWriter c "OUT" tQ1 [] [] oconv
     r  <- withTransaction c [] $ \_ -> do
         writeQ oQ nullType [] text1
-        t <- ((testTx c iQ oQ)       ?> 
-              (testNstAbort c iQ oQ) ?> 
-              (testTx c iQ oQ))
+        t <- testTx c iQ oQ       ?> 
+             testNstAbort c iQ oQ ?> 
+             testTx c iQ oQ
         case t of
           Fail e -> return $ Fail e
           Pass   -> do
@@ -885,10 +885,10 @@ where
         case mbM of
           Nothing -> return $ Fail "Message not obtained after commit"
           Just m  -> 
-            if msgCont m == text1 
+            if msgContent m == text1 
               then return Pass
               else return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- NestedTx with foul one (missing ack)
@@ -908,11 +908,11 @@ where
     writeQ oQ nullType [] text2
     r  <- withTransaction c [] $ \_ -> do
         writeQ oQ nullType [] text1
-        t <- ((testNstMissingAck c iQ) ?> -- note: this one has to run first
-                                          --       it has to consume text2
-                                          --       to get a missing ack!
-              (testTx c iQ oQ)         ?> 
-              (testTx c iQ oQ))
+        t <- testNstMissingAck c iQ ?> -- note: this one has to run first
+                                       --       it has to consume text2
+                                       --       to get a missing ack!
+             testTx c iQ oQ         ?> 
+             testTx c iQ oQ
         case t of
           Fail e -> return $ Fail e
           Pass   -> do
@@ -927,10 +927,10 @@ where
         case mbM of
           Nothing -> return $ Fail "Message not obtained after commit"
           Just m  -> 
-            if msgCont m == text1 
+            if msgContent m == text1 
               then return Pass
               else return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- Share queue among threads
@@ -957,18 +957,18 @@ where
         case eiM2 of
           Left  e   -> return $ Fail e
           Right m2 -> 
-            if ((msgContent m  == text1)  &&
-                (msgContent m2 == text2)) ||
-               ((msgContent m  == text2)  &&
-                (msgContent m2 == text1)) 
+            if (msgContent m  == text1  &&
+                msgContent m2 == text2) ||
+               (msgContent m  == text2  &&
+                msgContent m2 == text1) 
               then return Pass
               else return $ Fail $ 
                             "Unexpected message: " ++
-                            (msgContent m)
+                            msgContent m
     where readme v q = do
             mbM <- tmo $ readQ q
             case mbM of
-              Nothing -> putMVar v $ Left  $ "No message received!"
+              Nothing -> putMVar v $ Left  "No message received!"
               Just m  -> putMVar v $ Right m
 
   ------------------------------------------------------------------------
@@ -992,7 +992,7 @@ where
     where readme v r = do
             mbR <- tmo $ waitReceipt c r
             case mbR of
-              Nothing -> putMVar v $ Fail $ "No Receipt!"
+              Nothing -> putMVar v $ Fail "No Receipt!"
               Just _  -> putMVar v   Pass
 
   ------------------------------------------------------------------------
@@ -1024,13 +1024,13 @@ where
       Left  (TxException e) -> 
         if e == "Transaction aborted: Missing Acks" then return Pass
           else return $ Fail $ "Unexpected text in exception: " ++ e
-      Left e  -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Left e  -> return $ Fail $ "Unexpected exception: " ++ show e
       Right _ -> return $ Fail "Transaction passed with missing acks!"
     where ackMe v m = do
             eiR <- try $ ack c m
             case eiR of
                Left e  -> putMVar v $ Fail $ 
-                           "Unexpected exception: " ++ (show e)
+                           "Unexpected exception: " ++ show e
                Right _ -> putMVar v Pass
 
   ------------------------------------------------------------------------
@@ -1056,16 +1056,16 @@ where
       mbM <- tmo $ readQ iQ
       case mbM of
         Nothing -> forkIO (abortMe v appmsg) >>= (\_ -> takeMVar v)
-        Just _  -> return $ Fail $ "Message received before end of Tx!"
+        Just _  -> return $ Fail "Message received before end of Tx!"
     case eiT of
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
       Right r -> do 
         mbM <- tmo $ readQ iQ
         case mbM of
           Nothing -> return $ Fail "Transaction aborted!"
           Just m  -> if msgContent m == text1 then return r
                        else return $ Fail $ "Unexpected message: " ++
-                                         (msgContent m)
+                                         msgContent m
     where abortMe v msg = do
             eiR <- try $ abort msg
             case eiR of
@@ -1074,7 +1074,7 @@ where
                    else putMVar v $ Fail $ 
                            "Unexpected text in exception: " ++ e 
                Left e  -> putMVar v $ Fail $ 
-                           "Unexpected exception: " ++ (show e)
+                           "Unexpected exception: " ++ show e
                Right _ -> putMVar v $ Fail "Abort did not fire!"
 
   ------------------------------------------------------------------------
@@ -1101,22 +1101,22 @@ where
         writeQ oQ2 nullType [] text2
         mbM2 <- tmo $ readQ iQ2
         case mbM2 of
-          Nothing -> return $ Fail $ "No message received (2)"
+          Nothing -> return $ Fail "No message received (2)"
           Just m  -> if msgContent m == text2 then return Pass
                        else return $ Fail $ "Unexpected message: " ++ 
-                                      (msgContent m)
+                                      msgContent m
       case eiR2 of
-        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
         Right r -> case r of 
                      Pass -> do
                        mbM <- tmo $ readQ iQ
                        case mbM of
-                         Nothing -> return $ Fail $ "No message received!"
+                         Nothing -> return $ Fail "No message received!"
                          Just m  -> if msgContent m == text1 
                                       then return Pass
                                       else return $ Fail $ 
                                              "Unexpected message " ++ 
-                                             (msgContent m)
+                                             msgContent m
                      Fail e -> return $ Fail e
     case eiR of
        Left  e -> return $ Fail $ show e
@@ -1142,27 +1142,27 @@ where
       eiR2 <- try $ stdCon p $ \_ -> do
         mbM2 <- tmo $ readQ iQ
         case mbM2 of
-          Nothing -> return $ Fail $ "No message received (2)"
+          Nothing -> return $ Fail "No message received (2)"
           Just m  -> 
             if msgContent m /= text1 
               then return $ Fail $ "Unexpected message: " ++ 
-                                   (msgContent m)
+                                   msgContent m
               else do
                 writeQ oQ nullType [] text2
                 return Pass
       case eiR2 of
-        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
         Right r -> case r of 
                      Fail e -> return $ Fail e
                      Pass -> do
                        mbM <- tmo $ readQ iQ
                        case mbM of
-                         Nothing -> return $ Fail $ "No message received!"
+                         Nothing -> return $ Fail "No message received!"
                          Just m  -> if msgContent m == text2 
                                       then return Pass
                                       else return $ Fail $ 
                                              "Unexpected message " ++ 
-                                             (msgContent m)
+                                             msgContent m
     case eiR of
        Left  e -> return $ Fail $ show e
        Right r -> return r
@@ -1192,20 +1192,20 @@ where
             else do 
               mbM <- tmo $ readQ iQ
               case mbM of
-                Nothing -> return $ Fail $ "No message received!"
+                Nothing -> return $ Fail "No message received!"
                 Just m  -> if msgContent m == text1
                              then return Pass
                              else return $ Fail $ 
                                            "Unexpected message " ++ 
-                                           (msgContent m)
-        Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
+                                           msgContent m
+        Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
         Right _ -> return $ Fail   "No exception was thrown!"
     case eiR of
        Left  e -> return $ Fail $ show e
        Right r -> return r
 
   ------------------------------------------------------------------------
-  -- Siimple HeartBeat Test
+  -- Simple HeartBeat Test
   ------------------------------------------------------------------------
   -- connect with heartbeat
   -- delay thread longer than heartbeat
@@ -1234,6 +1234,45 @@ where
        Right r -> return r
 
   ------------------------------------------------------------------------
+  -- HeartBeat Test with Responder 
+  -- (which will "mirror" heartbeats) 
+  ------------------------------------------------------------------------
+  -- connect with heartbeat
+  -- delay thread longer than heartbeat
+  -- shall not throw exception
+  ------------------------------------------------------------------------
+  testBeatR :: Int -> IO TestResult
+  testBeatR p = do
+    let b = (100,100)
+    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \_ -> do
+      threadDelay $ 1000 * 1000
+      return Pass
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
+  ------------------------------------------------------------------------
+  -- HeartBeat Test with Responder 
+  -- (which will ignore heartbeats) 
+  ------------------------------------------------------------------------
+  -- connect with heartbeat
+  -- delay thread longer than heartbeat
+  -- shall throw exception
+  ------------------------------------------------------------------------
+  testBeatRfail :: Int -> IO TestResult
+  testBeatRfail p = do
+    let b = (50,50) -- this beat signals responder to ignore heartbeats
+    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \_ -> do
+      threadDelay $ 1000 * 1000
+      return Pass
+    case eiR of
+       Right _ -> return $ Fail "heartbeats do not matter!"
+       Left (ProtocolException e) ->
+         if "Missing HeartBeat," `isInfixOf` e then return Pass
+           else return $ Fail $ "Unexpected Protocol Exception: " ++ e
+       Left  e -> return $ Fail $ "Unexpected Exception: " ++ show e
+
+  ------------------------------------------------------------------------
   -- Simple Tx
   ------------------------------------------------------------------------
   -- shall start transaction
@@ -1256,10 +1295,10 @@ where
         case mbM of
           Nothing -> return $ Fail "Message not obtained after end of Tx!"
           Just m  -> 
-            if msgCont m == text2
+            if msgContent m == text2
               then return Pass
               else return $ Fail $ 
-                       "Received: " ++ (msgCont m) ++ " - Expected: " ++ text1
+                       "Received: " ++ msgContent m ++ " - Expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- Nested Abort
@@ -1281,10 +1320,9 @@ where
           Nothing -> if appmsg `isSuffixOf` e then return Pass
                        else return $ Fail $
                            "Exception text differs: " ++ e
-          Just _  -> return $ Fail $
-                         "Aborted Transaction sends message!"
-      Left  e -> return $ Fail $ "Unexpected exception: " ++ (show e)
-      Right _ -> return $ Fail $ "Transaction not aborted!"
+          Just _  -> return $ Fail "Aborted Transaction sends message!"
+      Left  e -> return $ Fail $   "Unexpected exception: " ++ show e
+      Right _ -> return $ Fail     "Transaction not aborted!"
 
   ------------------------------------------------------------------------
   -- Nested with pending acks
@@ -1299,9 +1337,9 @@ where
         mbM <- tmo $ readQ iQ
         case mbM of
           Nothing -> throwIO $ AppException "Message not received!"
-          Just m  -> if msgContent m == text2 then return ()
-                       else throwIO $ AppException $ "Wrong message: " 
-                                      ++ (msgContent m)
+          Just m  -> unless (msgContent m == text2) $
+                       throwIO $ AppException $ "Wrong message: "
+                                 ++ msgContent m
       case eiT of
         Left (TxException _) -> return Pass
         Left  e              -> return $ Fail $ show e
@@ -1314,8 +1352,7 @@ where
   -- shall connect with passed parameters
   ------------------------------------------------------------------------
   stdCon :: Int -> (Con -> IO TestResult) -> IO TestResult
-  stdCon port act =
-    withConnection host port maxRcv "guest" "guest" beat act
+  stdCon port = withConnection host port maxRcv "guest" "guest" beat
 
   testWith :: Int -> (Con -> IO TestResult) -> IO TestResult
   testWith port act = do

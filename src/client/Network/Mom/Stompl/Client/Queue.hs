@@ -383,8 +383,11 @@ where
     now <- getCurrentTime
     c   <- P.connect host port mx usr pwd vers beat
     -- putStrLn $ show $ P.conBeat c
+    -- putStrLn $ show $ P.getVersion c
     if not $ P.connected c 
-      then throwIO $ ConnectException $ P.getErr c
+      then do
+        _ <- P.disconnect c -- we may have connected on TCP-level!
+        throwIO $ ConnectException $ P.getErr c
       else bracket (do addCon $ mkConnection cid c me now
                        l <- forkIO $ listen  cid
                        b <- if period c > 0 
