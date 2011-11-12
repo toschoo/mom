@@ -51,7 +51,9 @@ module Network.Mom.Stompl.Client.Queue (
                    Topt(..), abort,
                    -- * Acknowledgments
                    -- $stomp_acks
-                   ack, ackWith, nack, nackWith
+                   ack, ackWith, nack, nackWith,
+                   -- * Exceptions
+                   module Network.Mom.Stompl.Client.Exception
                    -- * Complete Example
                    -- $stomp_sample
                    )
@@ -83,7 +85,6 @@ where
   import           Control.Exception (bracket, finally, catches, onException,
                                       AsyncException(..), Handler(..),
                                       throwIO, SomeException)
-  import qualified Control.Exception as Ex (catch)
 
   import           Codec.MIME.Type as Mime (Type)
   import           System.Timeout (timeout)
@@ -112,13 +113,11 @@ where
      The details of the connection, including 
      protocol version and heartbeats are handled
      internally by the Stompl Client library.
-     The application, however, decides the life time
-     of the connection and the heartbeat frequency.
   -}
 
   {- $stomp_queues
 
-     The ineroperability means implemented by Stomp is based on queues.
+     Stomp program interoperability is based on queues.
      Queues are communication channels of arbitrary size
      that may be written by any client 
      currently connected to the broker.
@@ -263,7 +262,6 @@ where
   {- $stomp_sample
 
      > import Network.Mom.Stompl.Client.Queue
-     > import Network.Mom.Stompl.Client.Exception
      >
      > import System.Environment (getArgs)
      > import Network.Socket (withSocketsDo)
@@ -292,7 +290,7 @@ where
      >
      > ping :: String -> IO ()
      > ping qn = do 
-     >   withConnection_ "127.0.0.1" 61613 "guest" "guest" $ \c -> do
+     >   withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
      >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
@@ -335,7 +333,7 @@ where
   --   should not be returned from 'withConnection'.
   --   Connections, however, can be shared among threads.
   --   In this case, the programmer has to take care
-  --   of not terminating the action before all other threads
+  --   not to terminate the action before all other threads
   --   working on the connection have finished.
   --
   --   From the paramter types, we get some theorems for free:
@@ -344,38 +342,41 @@ where
   --
   --   * 'Int': The broker's port
   --
-  --   * 'Int': Max packet size. This is the maximum size of a
-  --            TCP/IP message received over the socket.
-  --            The maximum size of a Stomp frame is ten times
-  --            the message size.
-  --
   --   * 'String': The user to authenticate at the Stomp broker
   --
   --   * 'String': The password to authenticate at the Stomp broker
   --
-  --   * 'F.Heart': The heartbeat parameter, which is a tuple of
-  --                (the period 
-  --                   in which the client will send heartbeats,
-  --                 the period 
-  --                   the client wants the broker to send heartbeats)
+  --   * 'Copt': Control options passed to the connection
   --
-  --  * ('Con' -> 'IO' a): The action to execute.
-  --                       The action receives the connection handle
-  --                       and returns a value of type 'a' 
-  --                       in the 'IO' monad.
+  --   * ('Con' -> 'IO' a): The action to execute.
+  --                        The action receives the connection handle
+  --                        and returns a value of type 'a' 
+  --                        in the 'IO' monad.
   --
   -- 'withConnection' returns the result of the action passed into it.
   -- The client will always disconnect from the broker 
   -- when the action has terminated, even if an exception is raised.
   --
-  -- A usage example may be:
+  -- An example:
   --
-  -- > withConnection "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
+  -- > withConnection "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
   --
   -- This would connect to a broker listening to the loopback interface,
-  -- port number 61613, max packet size 1024, user and password are \"guest\"
-  -- and the client does not want to receive and won't send heartbeats.
+  -- port number 61613, user and password are \"guest\".
   -- The action is defined after the /hanging do/.
+  --
+  -- Internally, connections use concurrent threads;
+  -- errors are communicated by throwing exceptions
+  -- to the owner of the connection.
+  -- The owner is the thread that created the connection
+  -- by calling 'withConnection'.
+  -- It is therefore advisable to start different connections
+  -- in different threads, so that each thread will receive
+  -- only exceptions related to the connection it has opened.
+  -- 
+  -- Example:
+  --
+  -- > t <- forkIO $ withConnection "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
   ------------------------------------------------------------------------
   withConnection :: String -> Int -> String -> String -> [Copt] -> 
                     (Con -> IO a) -> IO a
@@ -405,13 +406,15 @@ where
                else return Nothing)
             (\b -> when (isThrd b) (killThread $ thrd b))
             (\_ -> do r  <- act cid
-                      rc <- mkUniqueRecc 
                       c' <- getCon cid
-                      _  <- P.disconnect c (show rc)
-                      when (conWait c' > 0) $ do
-                        addRec cid rc
-                        waitCon cid rc (conWait c') `onException` rmRec cid rc
-                      return r)
+                      -- wait for receipt on disconnect ----
+                      if (conWait c' <= 0) then return r
+                        else do
+                          rc <- mkUniqueRecc 
+                          _  <- P.disconnect c (show rc)
+                          addRec cid rc
+                          waitCon cid rc (conWait c') `onException` rmRec cid rc
+                          return r)
 
   isThrd :: Maybe a -> Bool
   isThrd = isJust
@@ -648,8 +651,7 @@ where
   --   in microseconds and 
   --   the result /mbQ/ of type 'Maybe' is:
   --
-  --   > mbQ <- timeout tmo $ newWriter c "TestQ" "/queue/test"
-  --   >                        [OWaitReceipt] [] oconv
+  --   > mbQ <- timeout tmo $ newWriter c "TestQ" "/queue/test" [OWaitReceipt] [] oconv
   ------------------------------------------------------------------------
   newReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                InBound a -> IO (Reader a)
@@ -823,6 +825,12 @@ where
                    then ack    (rCon q) m
                    else addAck (rCon q) (P.msgId m)
                return m
+
+  ------------------------------------------------------------------------
+  -- We do not support this, because of GHC ticket 4154:
+  -- deadlock on isEmptyChan with concurrent read
+  ------------------------------------------------------------------------
+  -- isEmptyQ :: Reader a -> IO Bool
 
   ------------------------------------------------------------------------
   -- | Writes the value /a/ as message at the end of the queue.
@@ -1032,9 +1040,7 @@ where
                    -- if an exception is raised in terminate
                    -- we at least will remove the transaction
                    -- from our state and then reraise 
-                   (Ex.catch (terminateTx tx cid)
-                             (\e -> do rmThisTx tx cid
-                                       throwIO (e::SomeException)))
+                   (terminateTx tx cid `onException` rmThisTx tx cid)
   
   ------------------------------------------------------------------------
   -- | Waits for the 'Receipt' to be confirmed by the broker.

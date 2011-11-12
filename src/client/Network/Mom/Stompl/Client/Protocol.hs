@@ -26,34 +26,44 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catch, 
                                       SomeException, bracketOnError)
-  -- import           Control.Applicative ((<$>))
   import           Codec.MIME.Type as Mime (Type) 
 
+  ---------------------------------------------------------------------
+  -- Default version, when broker does not send a version
+  ---------------------------------------------------------------------
   defVersion :: F.Version
   defVersion = (1,0)
 
+  ---------------------------------------------------------------------
+  -- Connection 
+  ---------------------------------------------------------------------
   data Connection = Connection {
-                       conAddr :: String,
-                       conPort :: Int,
-                       conVers :: [F.Version],
-                       conBeat :: F.Heart,
-                       conSrv  :: String,
-                       conSes  :: String,
-                       conUsr  :: String,
-                       conPwd  :: String,
-                       conMax  :: Int,
-                       conSock :: Maybe Socket,
-                       conRcv  :: Maybe S.Receiver,
-                       conWrt  :: Maybe S.Writer,
-                       conErr  :: Int,
+                       conAddr :: String,   -- the broker's IP address
+                       conPort :: Int,      -- the broker's port
+                       conVers :: [F.Version], -- the accepted versions
+                                               -- the agreed version 
+                                               -- after connect
+                       conBeat :: F.Heart, -- the heart beat
+                       conSrv  :: String, -- server descritpion
+                       conSes  :: String, -- session identifier (from broker)
+                       conUsr  :: String,      -- user
+                       conPwd  :: String,      -- passcode
+                       conMax  :: Int,         -- max receive
+                       conSock :: Maybe Socket,     -- if connected: socket
+                       conRcv  :: Maybe S.Receiver, -- if connected: receiver
+                       conWrt  :: Maybe S.Writer,   -- if connected: writer
                        conErrM :: String, -- connection error
-                       conTcp  :: Bool,
-                       conBrk  :: Bool}
+                       conTcp  :: Bool,  -- flag for tcp/ip connect
+                       conBrk  :: Bool}  -- flag fror broker connect
 
+  ---------------------------------------------------------------------
+  -- Subscribe abstraction
+  ---------------------------------------------------------------------
   data Subscription = Sub {
-                        subId   :: Fac.Sub,
-                        subName :: String,
-                        subMode :: F.AckMode}
+                        subId   :: Fac.Sub,   -- subscribe identifier
+                        subName :: String,    -- queue name
+                        subMode :: F.AckMode  -- ack mode
+                      }
     deriving (Show)
 
   mkSub :: Fac.Sub -> String -> F.AckMode -> Subscription
@@ -62,6 +72,9 @@ where
                       subName = qn,
                       subMode = am}
 
+  ---------------------------------------------------------------------
+  -- | Message Identifier
+  ---------------------------------------------------------------------
   data MsgId = MsgId String | NoMsg
     deriving (Eq)
 
@@ -98,6 +111,9 @@ where
                      -- | The content             
                      msgCont :: a}
   
+  ---------------------------------------------------------------------
+  -- Create a message
+  ---------------------------------------------------------------------
   mkMessage :: MsgId -> Fac.Sub -> String -> 
                Mime.Type -> Int -> Fac.Tx -> 
                B.ByteString -> a -> Message a
@@ -112,6 +128,9 @@ where
                                           msgRaw  = raw,
                                           msgCont = cont}
 
+  ---------------------------------------------------------------------
+  -- Make a connection
+  ---------------------------------------------------------------------
   mkConnection :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> Connection
   mkConnection host port mx usr pwd vers beat = 
     Connection {
@@ -127,14 +146,19 @@ where
        conSock = Nothing,
        conRcv  = Nothing,
        conWrt  = Nothing,
-       conErr  = 0,
        conErrM = "",
        conTcp  = False,
        conBrk  = False}
 
+  ---------------------------------------------------------------------
+  -- Error: we are not connected!
+  ---------------------------------------------------------------------
   incompleteErr :: String
   incompleteErr = "incomplete Connection touched!"
 
+  ---------------------------------------------------------------------
+  -- Connection interfaces
+  ---------------------------------------------------------------------
   getSock :: Connection -> Socket
   getSock = fromMaybe (error incompleteErr) . conSock 
 
@@ -155,11 +179,11 @@ where
                    then defVersion
                    else head $ conVers c
 
+  ---------------------------------------------------------------------
+  -- connect
+  ---------------------------------------------------------------------
   connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
   connect host port mx usr pwd vers beat = 
-    -- check host
-    -- check port
-    -- check mx
     bracketOnError (do s <- S.connect host port
                        let c = mkConnection host port mx 
                                             usr  pwd  vers beat
@@ -167,6 +191,9 @@ where
                    disc
                    (connectBroker mx vers beat) 
 
+  ---------------------------------------------------------------------
+  -- disconnect either on broker level or on tcp/ip level
+  ---------------------------------------------------------------------
   disconnect :: Connection -> String -> IO Connection
   disconnect c r
     | conBrk c  = case mkDiscF r of
@@ -179,33 +206,66 @@ where
     | conTcp c  = disc c
     | otherwise = return c {conErrM = "Not connected!"}
 
+  ---------------------------------------------------------------------
+  -- begin transaction
+  ---------------------------------------------------------------------
   begin :: Connection -> String -> String -> IO ()
   begin c tx receipt = sendFrame c tx receipt [] mkBeginF
 
+  ---------------------------------------------------------------------
+  -- commit transaction
+  ---------------------------------------------------------------------
   commit :: Connection -> String -> String -> IO ()
   commit c tx receipt = sendFrame c tx receipt [] mkCommitF
 
+  ---------------------------------------------------------------------
+  -- abort transaction
+  ---------------------------------------------------------------------
   abort :: Connection -> String -> String -> IO ()
   abort c tx receipt = sendFrame c tx receipt [] mkAbortF
 
+  ---------------------------------------------------------------------
+  -- ack
+  ---------------------------------------------------------------------
   ack :: Connection -> Message a -> String -> IO ()
   ack c m receipt = sendFrame c m receipt []  (mkAckF True)
 
+  ---------------------------------------------------------------------
+  -- nack
+  ---------------------------------------------------------------------
   nack :: Connection -> Message a -> String -> IO ()
   nack c m receipt = sendFrame c m receipt [] (mkAckF False)
 
+  ---------------------------------------------------------------------
+  -- subscribe
+  ---------------------------------------------------------------------
   subscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   subscribe c sub receipt hs = sendFrame c sub receipt hs mkSubF
 
+  ---------------------------------------------------------------------
+  -- unsubscribe
+  ---------------------------------------------------------------------
   unsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
   unsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
 
+  ---------------------------------------------------------------------
+  -- send
+  ---------------------------------------------------------------------
   send :: Connection -> Message a -> String -> [F.Header] -> IO ()
   send c msg receipt hs = sendFrame c msg receipt hs mkSendF
 
+  ---------------------------------------------------------------------
+  -- heart beat
+  ---------------------------------------------------------------------
   sendBeat :: Connection -> IO ()
   sendBeat c = sendFrame c () "" [] (\_ _ _ -> Right F.mkBeat)
 
+  ---------------------------------------------------------------------
+  -- generic sendFrame:
+  -- takes a connection some data (like subscribe, message, etc.)
+  -- some headers, a function that creates a frame or returns an error
+  -- creates the frame and sends it
+  ---------------------------------------------------------------------
   sendFrame :: Connection -> a -> String -> [F.Header] -> 
                (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
   sendFrame c m receipt hs mkF = 
@@ -216,6 +276,9 @@ where
              Right f -> 
                S.send (getWr c) (getSock c) f
 
+  ---------------------------------------------------------------------
+  -- hard disconnect (on tcp/ip) level
+  ---------------------------------------------------------------------
   disc :: Connection -> IO Connection
   disc c = do
     let c' = c {conTcp  = False,
@@ -226,6 +289,9 @@ where
     S.disconnect (getSock c)
     return c'
 
+  ---------------------------------------------------------------------
+  -- the hard work on connecting to a broker
+  ---------------------------------------------------------------------
   connectBroker :: Int -> [F.Version] -> F.Heart -> Connection -> IO Connection
   connectBroker mx vers beat c = 
     case mkConF (conUsr c) (conPwd c) vers beat of
@@ -247,6 +313,9 @@ where
                               conWrt = Just wr}
     where period = snd . conBeat
 
+  ---------------------------------------------------------------------
+  -- handle broker responds connect frame
+  ---------------------------------------------------------------------
   handleConnected :: F.Frame -> Connection -> Connection
   handleConnected f c = 
     case F.typeOf f of
@@ -261,18 +330,29 @@ where
       F.Error     -> c {conErrM = errToMsg f}
       _           -> c {conErrM = "Unexpected Frame: " ++ U.toString (F.putCommand f)}
 
+  ---------------------------------------------------------------------
+  -- transform an error frame into a string
+  ---------------------------------------------------------------------
   errToMsg :: F.Frame -> String
   errToMsg f = let msg = if B.length (F.getBody f) == 0 
                            then "."
                            else ": " ++ U.toString (F.getBody f)
                in F.getMsg f ++ msg
 
+  ---------------------------------------------------------------------
+  -- frame constructors
+  -- this needs review...
+  ---------------------------------------------------------------------
   mkConF :: String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
   mkConF usr pwd vers beat = 
+    -- Right $ F.mkConnect usr pwd "" beat vers
     F.mkConFrame [F.mkLogHdr  usr,
-                  F.mkPassHdr pwd,
-                  F.mkAcVerHdr $ F.versToVal vers, 
-                  F.mkBeatHdr  $ F.beatToVal beat]
+                   F.mkPassHdr pwd,
+                   F.mkAcVerHdr $ F.versToVal vers, 
+                   F.mkBeatHdr  $ F.beatToVal beat] 
+
+  mkReceipt :: String -> [F.Header]
+  mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =
@@ -290,9 +370,6 @@ where
     let dh = if null (subName sub) then [] else [F.mkDestHdr $ subName sub]
     in  F.mkUSubFrame $ [F.mkIdHdr $ show $ subId sub] ++ dh ++ 
                         mkReceipt receipt ++ hs
-
-  mkReceipt :: String -> [F.Header]
-  mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 

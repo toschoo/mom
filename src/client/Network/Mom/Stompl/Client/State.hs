@@ -86,11 +86,40 @@ where
   instance Eq Connection where
     c1 == c2 = conId c1 == conId c2
 
-  data Copt = OWaitBroker Int |
-              OMaxRecv    Int |
-              OHeartBeat  (F.Heart)
+  -------------------------------------------------------------------------
+  -- | Options passed to a connection
+  -------------------------------------------------------------------------
+  data Copt = 
+    -- | Tells the connection to wait /n/ milliseconds for the 'Receipt' 
+    --   sent with 'F.Disconnect' at the end of the session.
+    --   The /Stomp/ protocol advises to request a receipt 
+    --   and to wait for it before actually closing the 
+    --   the socket. Many brokers, however, do not 
+    --   implement this feature (or implement it incorrectly,
+    --   closing the connection immediately after sending 
+    --   the receipt).
+    --   'withConnection', for this reason, ignores 
+    --   the receipt by default and simply closes the socket
+    --   after having sent the 'F.Disconnect' frame.
+    --   If your broker shows a correct behaviour, 
+    --   it is advisable to use this option.
+    OWaitBroker Int |
+
+    -- | The maximum size of TCP/IP packets.
+    --   Indirectly, this options also defines the
+    --   maximum message size which is /10 * maxReceive/.
+    --   By default, the maximum packet size is 1024 bytes.
+    OMaxRecv    Int |
+
+    -- | This option defines the client\'s bid
+    --   for negotiating heart beats (see 'F.Heartbead'). 
+    --   By default, no heart beats are sent or accepted
+    OHeartBeat  (F.Heart)
     deriving (Eq, Show)
 
+  ------------------------------------------------------------------------
+  -- Same constructor
+  ------------------------------------------------------------------------
   is :: Copt -> Copt -> Bool
   is (OWaitBroker _) (OWaitBroker _) = True
   is (OMaxRecv    _) (OMaxRecv    _) = True

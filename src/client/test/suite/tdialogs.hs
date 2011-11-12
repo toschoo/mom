@@ -5,7 +5,6 @@ where
   import Test
 
   import           Network.Mom.Stompl.Client.Queue
-  import           Network.Mom.Stompl.Client.Exception 
 
   import           Control.Exception (throwIO)
   import           Control.Concurrent
@@ -187,6 +186,7 @@ where
   testMkOutQueue :: Con -> IO TestResult
   testMkOutQueue c = do
     eiQ <- try $ newWriter c "OUT"  tQ1 [] [] oconv
+    -- putStrLn "Through!"
     case eiQ of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass

@@ -38,5 +38,6 @@ Library
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
+  other-modules: Socket, Protocol, State, Factory
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, Network.Mom.Stompl.Client.Exception
 

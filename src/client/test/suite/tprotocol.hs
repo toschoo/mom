@@ -213,7 +213,7 @@ where
     in  mkGroup "Protocol Tests" (Stop (Fail "")) [
             t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,       t100,
            t110, t120, t130, t140, t150, t160, t170, t180, t190, t200,
-           t210, t220, t230, t240, t250, t260, t270, t280, t290, t300]
+           t210, t220, t230, t240, t250, t260, t270, t280, t290, t300] 
 
   testConFrame :: IO TestResult
   testConFrame = 
@@ -243,7 +243,8 @@ where
     let r = if P.connected c 
               then Pass
               else Fail $ "Not connected: " ++ P.getErr c
-    _ <- P.disconnect c ""
+    -- _ <- P.disc c
+    S.sClose (P.getSock c)
     return r
 
   testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> Fac.Rec -> P.Connection -> IO ()
@@ -277,11 +278,13 @@ where
         eiR <- try $ act c
         case eiR of
           Left e  -> do
-            _ <- P.disconnect c ""
+            _ <- P.disc c
             return $ Fail $ show e
           Right _ -> do
             eiF <- Sock.receive (P.getRc c) (P.getSock c) (P.conMax c)
-            _   <- P.disconnect c ""
+            -- c'   <- P.disconnect c "" -- this causes 'resource busy'
+                                         -- (laziness issue)
+            _ <- P.disc c
             case eiF of
               Left  e -> return $ Fail e
               Right f -> 

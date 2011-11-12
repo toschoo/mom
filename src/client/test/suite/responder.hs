@@ -29,7 +29,7 @@ where
   main = bracket (do s <- mkSocket host (fromIntegral port::S.PortNumber)
                      S.listen s 32
                      return s)
-                 S.sClose 
+                 S.sClose
                  (forever . listen)
 
   mkSocket :: String -> S.PortNumber -> IO S.Socket
