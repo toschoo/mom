@@ -2,4 +2,4 @@ others
 mydoc
 dist
 ./test
-./src/test/studies
+src/test/studies

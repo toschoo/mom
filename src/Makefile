@@ -9,6 +9,8 @@ clean:
 	rm -f test/studies/*.o
 	rm -f test/studies/*.hi
 	rm -f test/studies/bytestr
+	rm -f test/studies/tstfifo
+	rm -f test/studies/chan
 
 dist-clean:	clean
 	cd stompl; make dist-clean 
