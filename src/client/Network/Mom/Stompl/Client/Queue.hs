@@ -26,6 +26,7 @@ module Network.Mom.Stompl.Client.Queue (
                    withConnection_, 
                    Factory.Con, 
                    F.Heart,
+                   Copt(..),
                    -- * Queues
                    -- $stomp_queues
                    Reader, Writer, 
@@ -77,8 +78,9 @@ where
   import           Data.Maybe (isJust, fromJust)
 
   import           Control.Concurrent 
+  import           Control.Applicative ((<$>))
   import           Control.Monad
-  import           Control.Exception (bracket, finally, catches, 
+  import           Control.Exception (bracket, finally, catches, onException,
                                       AsyncException(..), Handler(..),
                                       throwIO, SomeException)
   import qualified Control.Exception as Ex (catch)
@@ -290,7 +292,7 @@ where
      >
      > ping :: String -> IO ()
      > ping qn = do 
-     >   withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
+     >   withConnection_ "127.0.0.1" 61613 "guest" "guest" $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
      >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
@@ -321,10 +323,10 @@ where
   ------------------------------------------------------------------------
   -- | A variant of 'withConnection' that returns nothing
   ------------------------------------------------------------------------
-  withConnection_ :: String -> Int -> Int -> String -> String -> 
-                     F.Heart -> (Con -> IO ()) -> IO ()
-  withConnection_ host port mx usr pwd beat act = 
-    withConnection host port mx usr pwd beat act >>= (\_ -> return ())
+  withConnection_ :: String -> Int -> String -> String -> 
+                     [Copt] -> (Con -> IO ()) -> IO ()
+  withConnection_ host port usr pwd os act = 
+    withConnection host port usr pwd os act >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- | Initialises a connection and executes an 'IO' action.
@@ -375,44 +377,64 @@ where
   -- and the client does not want to receive and won't send heartbeats.
   -- The action is defined after the /hanging do/.
   ------------------------------------------------------------------------
-  withConnection :: String -> Int -> Int -> String -> String -> F.Heart -> 
+  withConnection :: String -> Int -> String -> String -> [Copt] -> 
                     (Con -> IO a) -> IO a
-  withConnection host port mx usr pwd beat act = do
-    me  <- myThreadId
-    cid <- mkUniqueConId
-    now <- getCurrentTime
-    c   <- P.connect host port mx usr pwd vers beat
-    -- putStrLn $ show $ P.conBeat c
-    -- putStrLn $ show $ P.getVersion c
+  withConnection host port usr pwd os act = do
+    let beat = oHeartBeat os
+    let mx   = oMaxRecv   os
+    bracket (P.connect host port mx usr pwd vers beat)
+            P.disc -- important: At the end, we close the socket!
+            (whenConnected os act)
+
+  whenConnected :: [Copt] -> (Con -> IO a) -> P.Connection -> IO a
+  whenConnected os act c = 
     if not $ P.connected c 
-      then do
-        _ <- P.disconnect c -- we may have connected on TCP-level!
-        throwIO $ ConnectException $ P.getErr c
-      else bracket (do addCon $ mkConnection cid c me now
-                       l <- forkIO $ listen  cid
-                       b <- if period c > 0 
-                              then do x <- forkIO $ heartBeat cid $ period c
-                                      return $ Just x
-                              else    return Nothing 
-                       return (l, b))
-                   -- if an exception is raised in the post-action
-                   -- we at least will remove the connection
-                   -- from our state -- and then reraise 
-                   (\(l, b) -> 
-                       Ex.catch (do killThread l
-                                    when (isThrd b) (killThread $ thrd b)
-                                    _ <- P.disconnect c 
-                                    rmCon cid)
-                                (\e -> do rmCon cid
-                                          throwIO (e::SomeException)))
-                   (\_ -> act cid)
+      then throwIO $ ConnectException $ P.getErr c
+      else do
+        cid <- mkUniqueConId  -- connection id
+        me  <- myThreadId     -- connection owner
+        now <- getCurrentTime -- heartbeat
+        finally (do addCon $ mkConnection cid c me now os
+                    whenListening cid $ whenBeating cid)
+                (rmCon cid)
     where period = snd . P.conBeat 
+          whenListening cid = bracket (forkIO $ listen cid) killThread
+          whenBeating cid _ = bracket 
+            (if period c > 0 
+               then Just <$> (forkIO $ heartBeat cid $ period c)
+               else return Nothing)
+            (\b -> when (isThrd b) (killThread $ thrd b))
+            (\_ -> do r  <- act cid
+                      rc <- mkUniqueRecc 
+                      c' <- getCon cid
+                      _  <- P.disconnect c (show rc)
+                      when (conWait c' > 0) $ do
+                        addRec cid rc
+                        waitCon cid rc (conWait c') `onException` rmRec cid rc
+                      return r)
 
   isThrd :: Maybe a -> Bool
   isThrd = isJust
 
   thrd :: Maybe a -> a
   thrd = fromJust
+
+  ------------------------------------------------------------------------
+  -- wait for receipt
+  ------------------------------------------------------------------------
+  waitCon :: Con -> Receipt -> Int -> IO ()
+  waitCon cid rc delay = do
+    c <- getCon cid
+    case find (==rc) $ conRecs c of
+      Nothing -> return ()
+      Just _  -> 
+        if delay <= 0 
+          then throwIO $ ConnectException $ 
+                            "No receipt on disconnect (" ++ 
+                            show cid ++ ")."
+          else do
+            threadDelay $ ms 1
+            waitCon cid rc (delay - 1)
     
   ------------------------------------------------------------------------
   -- | A Queue for sending messages.

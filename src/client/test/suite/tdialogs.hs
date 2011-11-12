@@ -123,14 +123,15 @@ where
         t350  = mkTest "Nested con - independent " $ testNstConInd  p
         t360  = mkTest "Nested con - interleaved " $ testNstConX    p
         t370  = mkTest "Nested con - inner fails " $ testNstConFail p
+        t375  = mkTest "Wait Broker              " $ testWaitBroker p
         t380  = mkTest "HeartBeat                " $ testBeat       p
         t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,  t90, t100,
-         t110, t120, t130, t140, t150, t160, t170,             t200, t205,
-         t210, t220, t230, t240, t250, t260, t270, t280, t290, t300,
-         t310, t320, t330, t340, t350, t360, t370, t380, t390, t400] 
+        [ t10,  t20,  t30,  t40,  t50,  t60,  t70,        t80,  t90, t100,
+         t110, t120, t130, t140, t150, t160, t170,                   t200, t205,
+         t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
+         t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
 
   ------------------------------------------------------------------------
   -- Create a Reader without options
@@ -1205,6 +1206,28 @@ where
        Right r -> return r
 
   ------------------------------------------------------------------------
+  -- Test wait for Broker - probably fails, depending on broker
+  ------------------------------------------------------------------------
+  -- connect with WaitBroker
+  -- shall not throw exception
+  -- BUT: will probably throw an exception
+  --      since most broker do not send the final receipt
+  --      or close the socket immediately after sending the receipt
+  --      so we accept the case, where the socket is closed 
+  --      by the broker, instead of sending a receipt
+  ------------------------------------------------------------------------
+  testWaitBroker :: Int -> IO TestResult
+  testWaitBroker p = do
+    eiR <- try $ withConnection host p "guest" "guest" 
+                               [OWaitBroker 100] $ \_ -> return Pass
+    case eiR of
+       Left (ProtocolException e) -> 
+         if "Peer disconnected" `isSuffixOf` e then return Pass
+           else return $ Fail $ "Wrong Exception: " ++  e
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+  
+  ------------------------------------------------------------------------
   -- Simple HeartBeat Test
   ------------------------------------------------------------------------
   -- connect with heartbeat
@@ -1216,7 +1239,7 @@ where
   testBeat :: Int -> IO TestResult
   testBeat p = do
     let b = (500,500)
-    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \c -> do
+    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \c -> do
       oQ  <- newWriter c "OUT" tQ1 [] [] oconv
       iQ  <- newReader c "IN"  tQ1 [] [] iconv
       threadDelay $ 1000 * 1000
@@ -1244,7 +1267,7 @@ where
   testBeatR :: Int -> IO TestResult
   testBeatR p = do
     let b = (100,100)
-    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \_ -> do
+    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1262,7 +1285,7 @@ where
   testBeatRfail :: Int -> IO TestResult
   testBeatRfail p = do
     let b = (50,50) -- this beat signals responder to ignore heartbeats
-    eiR <- try $ withConnection host p maxRcv "guest" "guest" b $ \_ -> do
+    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1352,7 +1375,7 @@ where
   -- shall connect with passed parameters
   ------------------------------------------------------------------------
   stdCon :: Int -> (Con -> IO TestResult) -> IO TestResult
-  stdCon port = withConnection host port maxRcv "guest" "guest" beat
+  stdCon port = withConnection host port "guest" "guest" []
 
   testWith :: Int -> (Con -> IO TestResult) -> IO TestResult
   testWith port act = do

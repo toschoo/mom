@@ -2,7 +2,7 @@ module Protocol (Connection, mkConnection,
                  conBeat, getVersion,
                  getSock, getWr, getRc,
                  connected, getErr, conMax,
-                 connect, disconnect,
+                 connect, disconnect, disc,
                  Subscription, mkSub,
                  subscribe, unsubscribe,
                  begin, commit, abort, sendBeat,
@@ -24,8 +24,9 @@ where
   import           Data.Maybe (fromMaybe)
 
   import           Prelude hiding (catch)
-  import           Control.Exception (throwIO, catch, SomeException)
-  import           Control.Applicative ((<$>))
+  import           Control.Exception (throwIO, catch, 
+                                      SomeException, bracketOnError)
+  -- import           Control.Applicative ((<$>))
   import           Codec.MIME.Type as Mime (Type) 
 
   defVersion :: F.Version
@@ -132,7 +133,7 @@ where
        conBrk  = False}
 
   incompleteErr :: String
-  incompleteErr = "uncomplete Connection touched!"
+  incompleteErr = "incomplete Connection touched!"
 
   getSock :: Connection -> Socket
   getSock = fromMaybe (error incompleteErr) . conSock 
@@ -155,26 +156,28 @@ where
                    else head $ conVers c
 
   connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
-  connect host port mx usr pwd vers beat = do
-    let c = mkConnection host port mx usr pwd vers beat
-    eiS <- catch (Right <$> S.connect host port)
-                 (\e -> return $ Left $ show (e::SomeException))
-    case eiS of
-      Left  e -> return c {conErrM = e}
-      Right s ->
-        connectBroker mx vers beat c {conSock = Just s, conTcp = True}
+  connect host port mx usr pwd vers beat = 
+    -- check host
+    -- check port
+    -- check mx
+    bracketOnError (do s <- S.connect host port
+                       let c = mkConnection host port mx 
+                                            usr  pwd  vers beat
+                       return c {conSock = Just s, conTcp = True}) 
+                   disc
+                   (connectBroker mx vers beat) 
 
-  disconnect :: Connection -> IO Connection
-  disconnect c 
-    | not (connected c) = return c {conErrM = "Not connected!"}
-    | conBrk c          = case mkDiscF "" of
-                            Left  e -> return c {
-                                         conErrM = 
-                                           "Cannot create Frame: " ++ e}
-                            Right f -> do
-                              S.send (getWr c) (getSock c) f 
-                              disc c
-    | otherwise         = disc c
+  disconnect :: Connection -> String -> IO Connection
+  disconnect c r
+    | conBrk c  = case mkDiscF r of
+                    Left  e -> return c {
+                                 conErrM = 
+                                   "Cannot create Frame: " ++ e}
+                    Right f -> do
+                      S.send (getWr c) (getSock c) f 
+                      return c {conBrk = False}
+    | conTcp c  = disc c
+    | otherwise = return c {conErrM = "Not connected!"}
 
   begin :: Connection -> String -> String -> IO ()
   begin c tx receipt = sendFrame c tx receipt [] mkBeginF
@@ -230,21 +233,18 @@ where
       Right f -> do
         rc  <- S.initReceiver
         wr  <- S.initWriter
-        eiR <- catch (S.send wr (getSock c) f >> return (Right c))
-                     (\e -> return $ Left $ show (e::SomeException))
-        case eiR of
+        S.send wr (getSock c) f 
+        eiC <- catch (S.receive rc (getSock c) mx)
+                     (\e -> return $ Left $ show (e::SomeException)) 
+        case eiC of
           Left  e -> return c {conErrM = e}
-          Right _ -> do
-           eiC <- catch (S.receive rc (getSock c) mx)
-                        (\e -> return $ Left $ show (e::SomeException)) 
-           case eiC of
-             Left e  -> return c {conErrM = e}
-             Right r -> do
-               let c' = handleConnected r
-                          c {conRcv = Just rc, conWrt = Just wr}
-               if period c' > 0 && period c' < fst beat
-                 then return c {conErrM = "Beat frequency too high"}
-                 else return c'
+          Right r -> do
+            let c' = handleConnected r c
+            if period c' > 0 && period c' < fst beat
+              then return c  {conErrM = "Beat frequency too high"}
+              else return c' {conBrk = True,
+                              conRcv = Just rc,
+                              conWrt = Just wr}
     where period = snd . conBeat
 
   handleConnected :: F.Frame -> Connection -> Connection
@@ -257,8 +257,7 @@ where
                                     F.getSrvCmts srv ++ ")",
                       conBeat =  F.getBeat    f,
                       conVers = [F.getVersion f],
-                      conSes  =  F.getSession f,
-                      conBrk  = True}
+                      conSes  =  F.getSession f}
       F.Error     -> c {conErrM = errToMsg f}
       _           -> c {conErrM = "Unexpected Frame: " ++ U.toString (F.putCommand f)}
 

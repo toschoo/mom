@@ -2,6 +2,8 @@
 module State (
          msgContent, numeric, ms,
          Connection(..),
+         Copt(..),
+         oHeartBeat, oMaxRecv,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -73,6 +75,7 @@ where
                       conOwner   :: ThreadId,
                       conHisBeat :: UTCTime,
                       conMyBeat  :: UTCTime, 
+                      conWait    :: Int,
                       conSubs    :: [SubEntry],
                       conDests   :: [DestEntry], 
                       conThrds   :: [ThreadEntry],
@@ -83,11 +86,47 @@ where
   instance Eq Connection where
     c1 == c2 = conId c1 == conId c2
 
+  data Copt = OWaitBroker Int |
+              OMaxRecv    Int |
+              OHeartBeat  (F.Heart)
+    deriving (Eq, Show)
+
+  is :: Copt -> Copt -> Bool
+  is (OWaitBroker _) (OWaitBroker _) = True
+  is (OMaxRecv    _) (OMaxRecv    _) = True
+  is (OHeartBeat  _) (OHeartBeat  _) = True
+  is _               _               = False
+
+  noWait :: Int
+  noWait = 0
+
+  stdRecv :: Int
+  stdRecv = 1024
+
+  noBeat :: F.Heart
+  noBeat = (0,0)
+
+  oWaitBroker :: [Copt] -> Int
+  oWaitBroker os = case find (is $ OWaitBroker 0) os of
+                     Just (OWaitBroker d) -> d
+                     _   -> noWait
+
+  oMaxRecv :: [Copt] -> Int
+  oMaxRecv os = case find (is $ OMaxRecv 0) os of
+                  Just (OMaxRecv i) -> i
+                  _ -> stdRecv
+
+  oHeartBeat :: [Copt] -> F.Heart
+  oHeartBeat os = case find (is $ OHeartBeat (0,0)) os of
+                    Just (OHeartBeat b) -> b
+                    _ -> noBeat
+
   findCon :: Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)
 
-  mkConnection :: Con -> P.Connection -> ThreadId -> UTCTime -> Connection
-  mkConnection cid c myself t = Connection cid c myself t t [] [] [] [] [] []
+  mkConnection :: Con -> P.Connection -> ThreadId -> UTCTime -> [Copt] -> Connection
+  mkConnection cid c myself t os = Connection cid c myself t t (oWaitBroker os)
+                                              [] [] [] [] [] []
 
   addAckToCon :: P.MsgId -> Connection -> Connection
   addAckToCon mid c = c {conAcks = mid : conAcks c} 

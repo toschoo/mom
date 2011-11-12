@@ -23,7 +23,7 @@ where
 
   makeTransaction :: String -> IO ()
   makeTransaction qn = withSocketsDo $ do -- connectAndGo
-    withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
+    withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
       let conv = return . B.pack
       q <- newWriter c "Q-Hof" qn [] [] conv
       withTransaction_ c [] $ \_ -> do

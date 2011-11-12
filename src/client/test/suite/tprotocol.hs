@@ -243,7 +243,7 @@ where
     let r = if P.connected c 
               then Pass
               else Fail $ "Not connected: " ++ P.getErr c
-    _ <- P.disconnect c 
+    _ <- P.disconnect c ""
     return r
 
   testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> Fac.Rec -> P.Connection -> IO ()
@@ -277,11 +277,11 @@ where
         eiR <- try $ act c
         case eiR of
           Left e  -> do
-            _ <- P.disconnect c 
+            _ <- P.disconnect c ""
             return $ Fail $ show e
           Right _ -> do
             eiF <- Sock.receive (P.getRc c) (P.getSock c) (P.conMax c)
-            _   <- P.disconnect c 
+            _   <- P.disconnect c ""
             case eiF of
               Left  e -> return $ Fail e
               Right f -> 

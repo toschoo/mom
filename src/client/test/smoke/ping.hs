@@ -17,8 +17,7 @@ where
     os <- getArgs
     case os of
       [q] -> withSocketsDo $ ping q
-      _   -> return () 
-        -- error handling...
+      _   -> putStrLn "I need a queue name!"
   
   data Ping = Ping | Pong
     deriving (Show)
@@ -31,11 +30,11 @@ where
  
   ping :: String -> IO ()
   ping qn = do 
-    withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
+    withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
       let iconv _ _ _ = strToPing . U.toString
       let oconv = return . U.fromString . show
       inQ  <- newReader c "Q-Ping" qn [] [] iconv
-      outQ <- newWriter c "Q-Pong" qn []    [] oconv
+      outQ <- newWriter c "Q-Pong" qn [] [] oconv
       writeQ outQ nullType [] Pong
       listen inQ outQ
  

@@ -1,3 +1,4 @@
+{-# OPTIONS -fno-cse #-}
 module Main
 where
 
@@ -11,6 +12,7 @@ where
   import Data.Maybe
 
   import System.Exit
+  import System.IO.Unsafe
 
   import State
   import Factory
@@ -312,6 +314,13 @@ where
                     NonEmptyList Con  -> Property
   cmpBeforeAfter = testCon (\_ -> return ()) 
 
+  {-# NOINLINE con #-}
+  con :: MVar P.Connection
+  con = unsafePerformIO $ do
+    c <- P.connect "127.0.0.1" 61613 1024 "guest" "guest" [(1,0), (1,1)] (0,0)
+    _ <- P.disconnect c ""
+    newMVar c
+
   testCon :: (Con -> IO ()) ->
              ([Connection] -> [Connection] -> Bool) ->
              NonEmptyList Con -> Property
@@ -368,9 +377,8 @@ where
   mkC cid = do
     me  <- myThreadId
     now <- getCurrentTime
-    c   <- P.connect "127.0.0.1" 0 0 "guest" "guest" [(1,0), (1,1)] (0,0)
-    when (P.connected c) $ P.disconnect c >>= (\_ -> return ())
-    return $ mkConnection cid c me now
+    c   <- readMVar con
+    return $ mkConnection cid c me now []
 
   deepCheck :: (Testable p) => p -> IO Result
   deepCheck = quickCheckWithResult stdArgs{maxSuccess=100,

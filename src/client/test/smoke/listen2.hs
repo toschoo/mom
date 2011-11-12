@@ -26,7 +26,7 @@ where
 
   conAndListen :: String -> IO ()
   conAndListen qn = withSocketsDo $ do -- connectAndGo
-    withConnection_ "127.0.0.1" 61613 1024 "guest" "guest" (0,0) $ \c -> do
+    withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
       let conv _ _ _ = return . U.toString
       q <- newReader c "Q-Hof" qn [] [] conv
       listen2 q
