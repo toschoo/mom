@@ -289,7 +289,7 @@ where
      >                 _      -> convertError $ "Not a Ping: '" ++ s ++ "'"
      >
      > ping :: String -> IO ()
-     > ping qn = do 
+     > ping qn = 
      >   withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
@@ -472,7 +472,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Options that may be passed 
-  --   to 'newQueue' and its variants.
+  --   to 'newReader' and 'newWriter' and its variants.
   ------------------------------------------------------------------------
   data Qopt = 
             -- | A queue created with 'OWithReceipt' will request a receipt
@@ -651,7 +651,7 @@ where
   --   in microseconds and 
   --   the result /mbQ/ of type 'Maybe' is:
   --
-  --   > mbQ <- timeout tmo $ newWriter c "TestQ" "/queue/test" [OWaitReceipt] [] oconv
+  --   > mbQ <- timeout tmo $ newReader c "TestQ" "/queue/test" [OWaitReceipt] [] oconv
   ------------------------------------------------------------------------
   newReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                InBound a -> IO (Reader a)
@@ -843,7 +843,7 @@ where
   --
   --   The Stomp headers are useful for brokers
   --   that provide selectors on /subscribe/,
-  --   see 'newQueue' for details.
+  --   see 'newReader' for details.
   --
   --   A usage example for a /q/ of type 'Writer' 'String'
   --   may be:

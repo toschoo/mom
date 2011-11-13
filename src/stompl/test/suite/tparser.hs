@@ -1,17 +1,17 @@
 module Main 
 where
 
-  import Types
-
   import Network.Mom.Stompl.Parser
   import Network.Mom.Stompl.Frame
 
-  import qualified Data.ByteString      as B (readFile, ByteString) 
+  import Test.QuickCheck
+
+  import qualified Data.ByteString      as B 
   import qualified Data.ByteString.UTF8 as U 
 
   import Data.Char (toUpper)
 
-  import System.FilePath (FilePath, (</>))
+  import System.FilePath ((</>))
   import System.Exit (exitSuccess, exitFailure)
   import System.Environment (getArgs)
 
@@ -20,25 +20,203 @@ where
 
   import Codec.MIME.Type (showType)
 
+  main :: IO ()
+  main = do 
+    os <- getArgs
+    case os of
+      [typ, dir] -> do
+        let ts = if (map toUpper) typ == "ALL"
+                   then mkTestDir
+                   else select (read typ) mkTestDir
+        allTests dir ts
+      _          -> do
+        putStrLn "Give me: "
+        putStrLn " => The type of message to test (or ALL)"
+        putStrLn " => and the directory where I can find the test messages"
+        exitFailure
+
+  -------------------------------------------------------------------------
+  -- Random Tests
+  -------------------------------------------------------------------------
+  instance Arbitrary Frame where
+    arbitrary = do
+      t <- elements [Connect, Connected, Disconnect,
+                     Subscribe, Unsubscribe,
+                     Send, Message,
+                     Begin, Commit, Abort,
+                     Ack, Nack,
+                     Receipt,  Error,
+                     HeartBeat]
+      mst <- concat <$> (mapM (mkHdr Must) $ getHdrs t Must)
+      may <- concat <$> (mapM (mkHdr May ) $ getHdrs t May)
+      mk  <- getMk t
+      case mk (mst ++ may) of 
+        Left e  -> error e
+        Right f -> return f
+
+  -- get a "frame maker" -------------------------------------------------
+  getMk :: FrameType -> Gen ([Header] -> Either String Frame)
+  getMk t = 
+      case t of
+        Connect -> return mkConFrame
+        Connected -> return mkCondFrame
+        Disconnect -> return mkDisFrame
+        Subscribe -> return mkSubFrame 
+        Unsubscribe -> return mkUSubFrame
+        Begin -> return mkBgnFrame
+        Commit -> return mkCmtFrame
+        Abort -> return mkAbrtFrame
+        Ack -> return mkAckFrame
+        Nack -> return mkNackFrame
+        Receipt -> return mkRecFrame
+        HeartBeat -> return (\_ -> Right mkBeat)
+        Send -> do
+          s <- arbitrary
+          let b = U.fromString s
+          let l = let l' = B.length  b 
+                   in if l' == 0 then (-1) else l'
+          return (\hs -> mkSndFrame hs l b)
+        Message -> do
+          s <- arbitrary 
+          let b = U.fromString s
+          let l = let l' = B.length  b 
+                   in if l' == 0 then (-1) else l'
+          return (\hs -> mkMsgFrame hs l b)
+        Error -> do
+          s <- arbitrary 
+          let b = U.fromString s
+          let l = let l' = B.length  b 
+                   in if l' == 0 then (-1) else l'
+          return (\hs -> mkErrFrame hs l b)
+
+  -- random headers -------------------------------------------------
+  mkHdr :: Must -> String -> Gen [Header]
+  mkHdr m h = do
+    dice <- case m of 
+              Must -> return (1::Int) 
+              May  -> choose (1,3)
+    if dice == 1
+      then case h of
+             "heart-beat"     -> return [(h, "500,500")]
+             "server"         -> return [(h, "name/1.1")]
+             "version"        -> return [(h, "1.1")]
+             "accept-version" -> return [(h, "1.0,1.1")]
+             "ack"            -> 
+               elements [Auto, Client, ClientIndi] >>= (\a -> return [(h, show a)])
+             "content-type"   -> return [(h, "text/plain")]
+             _                -> 
+               hdrVal >>= (\x -> return [(h, x)])
+      else return []
+
+  -- header values -------------------------------------------------
+  hdrVal :: Gen String
+  hdrVal = do
+    dice <- choose (1,255) :: Gen Int
+    hdrVal' dice
+    where hdrVal' dice = 
+            if dice == 0 then return ""
+              else do
+                c <- hdrChar
+                s <- hdrVal' (dice - 1)
+                return (c:s)
+
+  -- random char for header values -------------------------------------
+  hdrChar :: Gen Char
+  hdrChar = elements (['A'..'Z'] ++ ['a'..'z'] ++ ['0'..'9'] ++ 
+                      "!\"$%&/()=?<>#§")
+
+  -- mandatory or optional --------------------------------------------
+  data Must = Must | May
+  must :: Must -> Bool
+  must Must = True
+  must May  = False
+
+  -- mandatory and optional headers -------------------------------------
+  getHdrs :: FrameType -> Must -> [String]
+  getHdrs t m =
+    case t of
+       Connect     -> 
+         if must m then ["host", "accept-version"]
+           else ["login", "passcode", "host",
+                 "heart-beat", "accept-version"] 
+       Connected   ->
+         if must m then ["version"]
+           else ["session", "server", "heart-beat"]
+       Disconnect  ->
+         if must m then [] else ["receipt"]
+       Subscribe   ->
+         if must m then ["id", "destination"]
+           else ["ack", "receipt"]
+       Unsubscribe ->
+         if must m then ["id"] else ["destination"]
+       Send        ->
+         if must m then ["destination"]
+           else ["content-type", 
+                 "transaction", "receipt"]
+       Message     ->
+         if must m then ["message-id", "subscription", "destination"]
+           else ["content-type"]
+       Begin       ->
+         if must m then ["transaction"] else ["receipt"]
+       Commit      ->
+         if must m then ["transaction"] else ["receipt"]
+       Abort       ->
+         if must m then ["transaction"] else ["receipt"]
+       Ack         ->
+         if must m then ["message-id", "subscription"]
+           else ["transaction", "receipt"]
+       Nack        ->
+         if must m then ["message-id", "subscription"]
+           else ["transaction", "receipt"]
+       Error       ->
+         if must m then [] 
+           else ["message", "receipt-id", 
+                 "content-type"]
+       Receipt     -> if must m then ["receipt-id"] else []
+       HeartBeat   -> []
+
+  -- put, parse and compare equal -------------------------------------------
+  prp_Parse :: Frame -> Property
+  prp_Parse f = collect (typeOf f) $
+    let b   = putFrame f
+    in case stompAtOnce b of
+         Left  _ -> False
+         Right x -> if x == f then True -- x == f
+                      else error $ "Not equal:\n" ++ show x ++ "\n" ++ show f
+
+  -- Check -------------------------------------------------------------------
+  deepCheck :: (Testable p) => p -> IO Result
+  deepCheck = quickCheckWithResult stdArgs{maxSuccess=10000,
+                                           maxDiscard=50000}
+
+  -------------------------------------------------------------------------
+  -- Controlled Tests
+  -------------------------------------------------------------------------
   type Test     = (TestDesc, FilePath)
   type Msg      = String
   data TestDesc = TDesc {
-                    dscDesc  :: String,
-                    dscType  :: FrameType,
-                    dscTrans :: Frame -> Maybe Frame,
-                    dscRes   :: TestResult,
-                    dscHdrs  :: [(String, String)]}
-    -- deriving (Eq, Show, Read)
+                    dscDesc  :: String,               -- verbal description
+                    dscType  :: FrameType,            -- expected frame type
+                    dscTrans :: Frame -> Maybe Frame, -- transformation
+                    dscRes   :: TestResult,           -- expected result
+                    dscHdrs  :: [(String, String)]}   -- expected headers
 
   data TestResult = Fail | Pass
     deriving (Eq, Show, Read)
 
+  myBeat :: Heart
+  myBeat = (500,500)
+
+  -- filter tests --------------------------------------------------------
   select :: FrameType -> [Test] -> [Test]
   select t = filter (hasType t)
 
   hasType :: FrameType -> Test -> Bool
   hasType t c = (t == (dscType . fst) c) 
 
+  ------------------------------------------------------------------------
+  -- The test battery
+  ------------------------------------------------------------------------
   mkTestDir :: [Test]
   mkTestDir = 
     [(TDesc "HeartBeat"
@@ -172,10 +350,16 @@ where
              ("content-length", "81"),
              ("content-type", "text/plain"),
              ("receipt", "msg-123")], "send-jap.txt"),
+     (TDesc "send to message" 
+            Message (sndToMsg "msg-1" "sub-1") Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "13"),
+             ("content-type", "text/plain"),
+             ("subscription", "sub-1")], "send1-1.1.txt"),
      (TDesc "Message 1.1" 
             Message (Just . id) Pass
             [("destination", "/queue/test"),
-             ("message-id", "msg-54321"),
+             ("message-id", "msg-§54321"),
              ("content-length", "13"),
              ("content-type", "text/plain")], "msg1-1.1.txt"),
      (TDesc "Message with special headers" 
@@ -210,9 +394,11 @@ where
              ("content-type", "text/plain")], "err1-1.1.txt")
     ]
 
+  -- compare frame type --------------------------------------------------
   frmOk :: FrameType -> TestDesc -> Bool
   frmOk f d = f == dscType d
 
+  -- compare header ------------------------------------------------------
   headerOk :: String -> Frame -> TestDesc -> Bool
   headerOk k f d = 
     if acc f == value then True else False
@@ -221,10 +407,12 @@ where
                     Nothing -> ""
                     Just v  -> v
 
+  -- get header value ------------------------------------------------------
   getValue :: String -> Frame -> String
   getValue s f = acc f
     where acc = getAccess s
 
+  -- get access to frame ------------------------------------------------------
   getAccess :: String -> (Frame -> String)
   getAccess k =  
     case k of
@@ -249,14 +437,16 @@ where
       "special1"       -> getSpecial "special1"
       "special2"       -> getSpecial "special2"
       _                -> (\_ -> "unknown")
-    where getSpecial k f = case lookup k $ getHeaders f of
-                             Nothing -> ""
-                             Just v  -> v
+    where getSpecial k' f = case lookup k' $ getHeaders f of
+                              Nothing -> ""
+                              Just v  -> v
 
+  -- Test writer ------------------------------------------------------
   type Tester a = Writer String a
 
+  -- test parse and transform ------------------------------------------------
   testParse :: String -> TestDesc -> B.ByteString -> Tester (Either Bool Frame)
-  testParse n d m = do
+  testParse _ d m = do
     let good = "Parse successfull."
     let bad  = "Parse failed"
     case stompAtOnce m of
@@ -283,6 +473,7 @@ where
 
     where trans = dscTrans d
 
+  -- test frame type verbosely ------------------------------------------------
   testFrame :: Frame -> TestDesc -> Tester Bool
   testFrame f d = do
     let t = typeOf f
@@ -294,6 +485,7 @@ where
         tell $ "Wrong Frame Type: " ++ (show t) ++ ".\n"
         return False
 
+  -- test header verbosely ------------------------------------------------
   testHeader :: Frame -> TestDesc -> String -> Tester Bool
   testHeader f d h = do
     if headerOk h f d 
@@ -304,11 +496,13 @@ where
         tell $ "Header '" ++ h ++ "' is not correct: '" ++ (getValue h f) ++ "'\n"
         return False
 
+  -- test headers verbosely ------------------------------------------------
   testHeaders :: Frame -> TestDesc -> Tester Bool
   testHeaders f d = do
     oks <- mapM (testHeader f d) $ map fst $ dscHdrs d
     return $ and oks
 
+  -- complete test ---------------------------------------------------------
   applyTests :: String -> TestDesc -> B.ByteString -> Tester Bool
   applyTests n d m = do
     let good = "Test '" ++ n ++ "' passed.\n"
@@ -326,6 +520,7 @@ where
         if ok then tell good else tell bad
         return ok
 
+  -- combine test steps ---------------------------------------------------------
   applyB :: Tester Bool -> Tester Bool -> Tester Bool
   applyB f g = f >>= \ok ->
     if ok then g else return False
@@ -334,47 +529,47 @@ where
   (?>) :: Tester Bool -> Tester Bool -> Tester Bool
   (?>) = applyB
 
+  -- read sample and execute test ------------------------------------------------
   execTest :: FilePath -> Test -> IO Bool
   execTest p t = do 
     let f = snd t
     let d = fst t
     putStrLn $ "Test: " ++ (dscDesc $ fst t)
     m <- B.readFile (p </> f) 
-    -- m <- U.fromString <$> readFile (p </> f) 
     let (r, txt) = runWriter (applyTests f d m)
     putStrLn txt
     putStrLn ""
     return r
-    -- testType  f d m
 
+  ----------------------------------------------------------------------------------
+  -- execute test battery
+  ----------------------------------------------------------------------------------
   foldTests :: (Test -> IO Bool) -> [Test] -> IO Bool
   foldTests _ [] = return True
   foldTests f (t:ts) = do
     b <- f t
     if b then foldTests f ts else return False
 
-  evalTests :: FilePath -> [Test] -> IO ()
+  evalTests :: FilePath -> [Test] -> IO Bool
   evalTests p ts = do
     verdict <- foldTests (execTest p) ts -- mapM (execTest p) ts
     if verdict
-      then do
+      then 
         putStrLn "OK. All Tests passed"
-        exitSuccess
       else do
         putStrLn "Bad. Not all tests passed"
-        exitFailure
+    return verdict
 
-  main :: IO ()
-  main = do 
-    os <- getArgs
-    case os of
-      [typ, dir] -> do
-        let ts = if (map toUpper) typ == "ALL"
-                   then mkTestDir
-                   else select (read typ) mkTestDir
-        evalTests dir ts
-      _          -> do
-        putStrLn "Give me: "
-        putStrLn " => The type of message to test (or ALL)"
-        putStrLn " => and the directory where I can find the test messages"
-        exitFailure
+  ----------------------------------------------------------------------------------
+  -- execute test battery and deepCheck
+  ----------------------------------------------------------------------------------
+  allTests :: FilePath -> [Test] -> IO ()
+  allTests p ts = do
+    v <- evalTests p ts
+    if not v then exitFailure
+      else do
+        r <- deepCheck prp_Parse
+        case r of
+          Success _ -> exitSuccess
+          _         -> do putStrLn "Bad. Some tests failed"
+                          exitFailure

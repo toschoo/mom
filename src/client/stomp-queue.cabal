@@ -1,4 +1,4 @@
-Name:            rqueue
+Name:            stomp-queue
 Version:         0.0.1
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011
@@ -18,11 +18,9 @@ Description:
   They see only the interfaces, /i.e./ the messages
   published and subscribed through the broker.
   
-  The Stompl Client library provides abstractions
+  The Stomp Queue library provides abstractions
   over the Stomp protocol, it implements in particular 
-  'Connection' and 'Transaction'.
-  The Stompl Client Queue library provides notions for
-  'Queue', 'Message' and 'Receipt'.
+  'Connection', 'Transaction', 'Queue', 'Message' and 'Receipt'.
 
 
 Library
@@ -38,6 +36,6 @@ Library
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
-  other-modules: Socket, Protocol, State, Factory
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, Network.Mom.Stompl.Client.Exception
+  other-modules: Socket, Protocol, State, Factory
 

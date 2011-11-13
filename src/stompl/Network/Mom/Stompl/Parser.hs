@@ -1,8 +1,18 @@
+-------------------------------------------------------------------------------
+-- |
+-- Module     : Network/Mom/Stompl/Frame.hs
+-- Copyright  : (c) Tobias Schoofs
+-- License    : GPL 3
+-- Stability  : experimental
+-- Portability: portable
+--
+-- Stomp Parser based on Attoparsec
+-------------------------------------------------------------------------------
 module Network.Mom.Stompl.Parser (
-                        startParsing,
-                        continueParsing,
                         stompParser,
-                        stompAtOnce
+                        stompAtOnce,
+                        startParsing,
+                        continueParsing
                       )
 where
 
@@ -15,19 +25,34 @@ where
   import           Control.Applicative ((<|>), (<$>))
   import           Network.Mom.Stompl.Frame
 
+  ------------------------------------------------------------------------
+  -- | Starts parsing with Attoparsec 'parse'
+  --   May fail, conclude or return a partial result
+  ------------------------------------------------------------------------
   startParsing :: B.ByteString -> Either String (Result Frame)
   startParsing m = case parse stompParser m  of
                         Fail _ _ e -> Left e
                         r          -> Right r
 
+  ------------------------------------------------------------------------
+  -- | Continues parsing with Attoparsec 'feed'
+  --   May fail, conclude or return a partial result
+  ------------------------------------------------------------------------
   continueParsing :: Result Frame -> B.ByteString -> Either String (Result Frame)
   continueParsing r m = case feed r m of
                           Fail _ _ e -> Left e
                           r'         -> Right r'
 
+  ------------------------------------------------------------------------
+  -- | Parses a ByteString at once with Attoparsec 'parseOnly'
+  --   May fail or conclude
+  ------------------------------------------------------------------------
   stompAtOnce :: B.ByteString -> Either String Frame
   stompAtOnce s = parseOnly stompParser s
 
+  ------------------------------------------------------------------------
+  -- | The Stomp Parser
+  ------------------------------------------------------------------------
   stompParser :: Parser Frame
   stompParser = do
     t <- msgType

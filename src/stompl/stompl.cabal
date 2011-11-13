@@ -1,0 +1,37 @@
+Name:            stompl
+Category:        Message-Oriented Middleware, Network, Stomp, Parser
+Version:         0.0.1
+Cabal-Version:   >= 1.8
+License:         BSD3
+Author:          Tobias Schoofs
+Maintainer:      Tobias Schoofs <tobias.schoofs@gmx.net>
+Synopsis:        Library with STOMP parser and utilities;
+Build-Type:      Simple
+Description:
+  The Stompl Protocol specifies message-oriented interoperability.
+  Applications connect to a message broker to send (publish)
+  or receive (subscribe) messages through queues. 
+  Interoperating applications do not know 
+  the location or internal structure of each other.
+  They see only the interfaces, /i.e./ the messages
+  published and subscribed through the broker.
+  
+  Broker and application use a protocol based on the
+  exchange of commands and other data packets, called /frames/.
+  The Stompl library provides a Representation and a Parser 
+  for Stomp Frames;
+  it does not implement a client or broker itself,
+  but provides abstractions to libraries and programs doing so.
+  It is used by the Stompl Queues library (stomp-queues).
+
+Library
+  Build-Depends:   base        >= 4.0 && < 5.0,
+                   bytestring  >= 0.9 && < 0.10,
+                   utf8-string >= 0.3.6,
+                   attoparsec  >= 0.9.1.1,
+                   split       >= 0.1.4.1,
+                   mime        >= 0.3.3
+                   -- 3.0.3.2,
+                   
+  Exposed-Modules: Network.Mom.Stompl.Frame, Network.Mom.Stompl.Parser
+

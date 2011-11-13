@@ -2,8 +2,7 @@ TDIR = test/suite
 SDIR = ../test/samples
 CFGDIR = ../test/cfg
 
-tests = $(TDIR)/tparser \
-        $(TDIR)/tframe 
+tests = $(TDIR)/tparser 
 
 SUTDIR = Network/Mom/Stompl
 
@@ -16,8 +15,7 @@ GHC = ghc
 FLGS = -DTEST -Wall --make
 INC  = -i./test/src -i./Network/Mom/Stompl -i../broker/Network/Mom/Stompl
 
-all:
-	$(TDIR)/tframe      $(SDIR)
+run:
 	$(TDIR)/tparser ALL $(SDIR)
 
 clean:
@@ -35,7 +33,7 @@ dist-clean:	clean
 		rm -f test/client/*.o
 		rm -f test/client/*.hi
 
-build: $(tests) $(SUBSRC)
+suite: $(tests) $(SUBSRC)
 
 
 $(TDIR)/tframe:		$(TDIR)/tframe.hs $(SUBSRC)
