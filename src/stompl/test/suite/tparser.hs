@@ -238,19 +238,43 @@ where
             [("version", "1.1"),
              ("heart-beat", "500,500")], "cond-1.1.txt"),
      (TDesc "Connect 1.1 to Connected 1.1" 
-            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,1)]) Pass 
             [("version", "1.1"),
              ("server", "test/0.1"),
              ("heart-beat", "500,1000"),
              ("session", "1")], "con-1.1.txt"),
      (TDesc "Connect 1.1 to Connected 1.1 with 0 Client Send" 
-            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,1)]) Pass 
             [("version", "1.1"),
              ("server", "test/0.1"),
              ("heart-beat", "0,1000"),
              ("session", "1")], "con2-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected Version 1.0" 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,0)]) Pass 
+            [("version", "1.0"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,1000"),
+             ("session", "1")], "con2-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected multiple Versions" 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,0), (1,1)]) Pass 
+            [("version", "1.1"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,1000"),
+             ("session", "1")], "con2-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected 2 times multiple Versions" 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,0), (1,1)]) Pass 
+            [("version", "1.0"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,1000"),
+             ("session", "1")], "con4-1.1.txt"),
+     (TDesc "Connect 1.1 to Connected no Version" 
+            Connected (conToCond "test/0.1" "1" myBeat []) Pass 
+            [("version", "1.0"),
+             ("server", "test/0.1"),
+             ("heart-beat", "0,1000"),
+             ("session", "1")], "con2-1.1.txt"),
      (TDesc "Connect 1.1 to Connected 1.1 without heart-beat" 
-            Connected (conToCond "test/0.1" "1" myBeat) Pass 
+            Connected (conToCond "test/0.1" "1" myBeat [(1,1)]) Pass 
             [("version", "1.1"),
              ("server", "test/0.1"),
              ("heart-beat", "0,0"),

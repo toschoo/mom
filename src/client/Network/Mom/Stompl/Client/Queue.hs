@@ -2,20 +2,20 @@
 -- |
 -- Module     : Network/Mom/Stompl/Client/Queue.hs
 -- Copyright  : (c) Tobias Schoofs
--- License    : GPL 3
+-- License    : LGPL 
 -- Stability  : experimental
 -- Portability: portable
 --
--- The Stompl Protocol specifies message-oriented interoperability.
+-- The Stomp Protocol specifies message-oriented interoperability.
 -- Applications connect to a message broker to send (publish)
 -- or receive (subscribe) messages through queues. 
 -- Interoperating applications do not know 
 -- the location or internal structure of each other.
--- They only see the interfaces, /i.e./ the messages
+-- They only see interfaces, /i.e./ the messages
 -- published and subscribed through the broker.
 -- 
--- The Stompl Client library provides abstractions
--- over the Stomp protocol, it implements in particular 
+-- The Stompl Client library implements
+-- a Stomp client using abstractions like
 -- 'Connection', 'Transaction' and
 -- queues in terms of 'Reader' and 'Writer'.
 -------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ where
      Queues are either one-to-one channels,
      this is, a message published in this queue
      is sent to exactly one subscriber
-     and the removed from the queue by the broker; 
+     and then removed from it; 
      or queues may be one-to-many,
      /i.e./, a message published in this queue
      is sent to all current subscribers of the queue.
@@ -147,13 +147,17 @@ where
      the content of messages in a queue
      has no format.
      The Protocol describes only those aspects of messages
-     that are related to their handling.
+     that are related to their handling;
+     this can be seen as a /syntactic/ level of interoperability.
      Introducing meaning to message contents
      is entirely left to applications.
      Message- or service-oriented frameworks,
      usually, define formats and encodings 
      to describe messages and higher-level
-     communication patterns built on top of them.
+     communication patterns built on top of them,
+     to add more /syntactic/ formalism or
+     to raise interoperability
+     to a /semantic/ or even /pragmatic/ level.
 
      The Stompl library stresses the importance
      of adding meaning to the message content
@@ -188,9 +192,13 @@ where
      messages sent to the broker.
      The broker uses receipts to acknowledge received messages.
      Receipts are, hence, useful to make a session more reliable.
-     When the broker has confirmed the receipt of a message sent to it,
+     When the broker has confirmed the receipt of a frame sent to it,
      the client application can be sure that it has arrived.
-     Most receipts are handled internally by the library.
+     What kind of additional guarantees are made,
+     /e.g./ that the frame is saved to disk or has already been sent
+     to the subscribers, depends on the broker.
+
+     Receipts are usually handled internally by the library.
      The application, however, decides where receipts should
      be requested, /i.e./ on subcribing to a queue,
      on sending a message, on sending /acks/ and on
@@ -233,30 +241,28 @@ where
 
      To enforce atomicity, 
      threads are not allowed to share transactions.
-     Any access of a thread to a transaction
-     that it has not started will result in an exception. 
   -}
 
   {- $stomp_acks
 
      Acknowledgements are used by the client to confirm the receipt
      of a message. The Stomp protocol foresees three different
-     acknowledgment modes, defined by subscriptions to queues.
+     acknowledgment modes, defined when the client subscribes to a queues.
      A subscription may use 
      /auto mode/, /i.e./ a message is considered acknowledged
      when it has been sent to the subscriber;
      /client mode/, /i.e./ a message is considered acknowledged
      only when an /ack/ message has been sent back from the client.
-     Note that client mode is accumulative, that means, 
+     Note that client mode is cumulative, that means, 
      the broker will consider all messages acknowledged 
      that have been sent
-     from the previous ack up to the acknowledged message
-     /client-individual mode/, /i.e./ non-accumulative
+     from the previous ack up to the acknowledged message;
+     or /client-individual mode/, /i.e./ non-cumulative
      client mode.
      
-     A message may also be not-acknowledged. 
+     A message may also be /negatively acknowledged/ (/nack/). 
      How the broker handles a /nack/, however,
-     is not specified.
+     is not further specified by the Stomp protocol.
   -}
 
   {- $stomp_sample
@@ -290,7 +296,7 @@ where
      >
      > ping :: String -> IO ()
      > ping qn = 
-     >   withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
+     >   withConnection_ "127.0.0.1" 61613 [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
      >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
@@ -321,10 +327,10 @@ where
   ------------------------------------------------------------------------
   -- | A variant of 'withConnection' that returns nothing
   ------------------------------------------------------------------------
-  withConnection_ :: String -> Int -> String -> String -> 
+  withConnection_ :: String -> Int -> 
                      [Copt] -> (Con -> IO ()) -> IO ()
-  withConnection_ host port usr pwd os act = 
-    withConnection host port usr pwd os act >>= (\_ -> return ())
+  withConnection_ host port os act = 
+    withConnection host port os act >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- | Initialises a connection and executes an 'IO' action.
@@ -336,39 +342,36 @@ where
   --   not to terminate the action before all other threads
   --   working on the connection have finished.
   --
-  --   From the paramter types, we get some theorems for free:
+  --   Paramter:
   --
-  --   * 'String': The broker's host
+  --   * 'String': The broker's hostname or IP-address
   --
   --   * 'Int': The broker's port
-  --
-  --   * 'String': The user to authenticate at the Stomp broker
-  --
-  --   * 'String': The password to authenticate at the Stomp broker
   --
   --   * 'Copt': Control options passed to the connection
   --
   --   * ('Con' -> 'IO' a): The action to execute.
   --                        The action receives the connection handle
-  --                        and returns a value of type 'a' 
+  --                        and returns a value of type /a/ 
   --                        in the 'IO' monad.
   --
   -- 'withConnection' returns the result of the action passed into it.
-  -- The client will always disconnect from the broker 
+  --
+  -- 'withConnection' will always disconnect from the broker 
   -- when the action has terminated, even if an exception is raised.
   --
-  -- An example:
+  -- Example:
   --
-  -- > withConnection "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
+  -- > withConnection "localhost" 61613 [] $ \c -> do
   --
   -- This would connect to a broker listening to the loopback interface,
-  -- port number 61613, user and password are \"guest\".
+  -- port number 61613.
   -- The action is defined after the /hanging do/.
   --
   -- Internally, connections use concurrent threads;
   -- errors are communicated by throwing exceptions
-  -- to the owner of the connection.
-  -- The owner is the thread that created the connection
+  -- to the owner of the connection, where
+  -- the owner is the thread that created the connection
   -- by calling 'withConnection'.
   -- It is therefore advisable to start different connections
   -- in different threads, so that each thread will receive
@@ -376,14 +379,15 @@ where
   -- 
   -- Example:
   --
-  -- > t <- forkIO $ withConnection "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
+  -- > t <- forkIO $ withConnection_ "127.0.0.1" 61613 [] $ \c -> do
   ------------------------------------------------------------------------
-  withConnection :: String -> Int -> String -> String -> [Copt] -> 
+  withConnection :: String -> Int -> [Copt] -> 
                     (Con -> IO a) -> IO a
-  withConnection host port usr pwd os act = do
-    let beat = oHeartBeat os
-    let mx   = oMaxRecv   os
-    bracket (P.connect host port mx usr pwd vers beat)
+  withConnection host port os act = do
+    let beat  = oHeartBeat os
+    let mx    = oMaxRecv   os
+    let (u,p) = oAuth      os
+    bracket (P.connect host port mx u p vers beat)
             P.disc -- important: At the end, we close the socket!
             (whenConnected os act)
 
@@ -472,7 +476,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Options that may be passed 
-  --   to 'newReader' and 'newWriter' and its variants.
+  --   to 'newReader' and 'newWriter' and their variants.
   ------------------------------------------------------------------------
   data Qopt = 
             -- | A queue created with 'OWithReceipt' will request a receipt
@@ -507,30 +511,18 @@ where
             --   It is good practice to use /timeout/ with all calls
             --   that may wait for receipts, 
             --   /ie/ 'newReader' and 'withReader' 
-            --   with 'OWithReceipt' or 'OWaitReceipt',
-            --   or 'writeQ' and 'writeQWith' with 'OWaitReceipt'
-            --   and 'ackWith'.
+            --   with options 'OWithReceipt' or 'OWaitReceipt',
+            --   or 'writeQ' and 'writeQWith' with options 'OWaitReceipt',
+            --   or 'ackWith' and 'nackWith'.
             | OWaitReceipt 
             -- | The option defines the 'F.AckMode' of the queue,
-            --   which is relevant for 'Reader's only.
-            --   'F.AckMode's are: 
+            --   which is relevant for 'Reader' only.
+            --   'F.AckMode' is one of: 
             --   'F.Auto', 'F.Client', 'F.ClientIndi'.
             --
-            --   'F.Auto' means that the broker will assume 
-            --   message acknowledged when successfully sent
-            --   to the client;
-            --
-            --   'F.Client' means that the client has to acknowledge
-            --   messages explicitly. When a message is acknowleged, 
-            --   the broker will assume this message and 
-            --   all message sent before this message acknowleged.
-            --
-            --   'F.ClientIndi' means that the client 
-            --   has to acknowledge messages explicitly.
-            --   An acknowledgement, in contrast to 'Client' mode
-            --   will count only for the actually acknowledged message.
-            --
             --   If 'OMode' is not given, 'F.Auto' is assumed as default.
+            --
+            --   For more details, see 'F.AckMode'.
             | OMode F.AckMode  
             -- | Expression often used by Ren&#x00e9; Artois.
             --   What he tries to say is: If 'OMode' is either
@@ -543,9 +535,7 @@ where
     deriving (Show, Read, Eq) 
 
   hasQopt :: Qopt -> [Qopt] -> Bool
-  hasQopt o os = case find (== o) os of
-                   Nothing -> False
-                   Just _  -> True
+  hasQopt o os = o `elem` os
 
   ackMode :: [Qopt] -> F.AckMode
   ackMode os = case find isMode os of
@@ -559,8 +549,8 @@ where
   -- | Converters are user-defined actions passed to 
   --   'newReader' ('InBound') and
   --   'newWriter' ('OutBound')
-  --   that convert a 'B.ByteString' to a value of type /a/ ('InBound').
-  --                a value of type /a/ to 'B.ByteString' ('OutBound') or
+  --   that convert a 'B.ByteString' to a value of type /a/ ('InBound') or
+  --                a value of type /a/ to 'B.ByteString' ('OutBound'). 
   --   Converters are, hence, similar to /put/ and /get/ in the /Binary/
   --   monad. 
   --
@@ -577,14 +567,16 @@ where
   --   the other as \"text/xml\".
   --   'InBound' conversions have to consider the /MIME/ type
   --   and, hence, need more input parameters than provided by /decode/.
+  --   /encode/ and /decode/, however,
+  --   can be used internally by user-defined converters.
   --
   --   The parameters expected by an 'InBound' converter are:
   --
   --     * the /MIME/ type of the content
   --
-  --     * the content size and
+  --     * the content size 
   --
-  --     * the 'F.Header's coming with the message
+  --     * the list of 'F.Header' coming with the message
   --
   --     * the contents encoded as 'B.ByteString'.
   --
@@ -613,7 +605,7 @@ where
   --   this may result in preempting the calling thread, 
   --   depending on the options ['Qopt'].
   --   
-  --   'newReader' receives 
+  --   Parameters:
   --
   --   * The connection handle 'Con'
   --
@@ -652,6 +644,9 @@ where
   --   the result /mbQ/ of type 'Maybe' is:
   --
   --   > mbQ <- timeout tmo $ newReader c "TestQ" "/queue/test" [OWaitReceipt] [] oconv
+  --   > case mbQ of
+  --   >   Nothing -> -- handle error
+  --   >   Just q  -> do -- ...
   ------------------------------------------------------------------------
   newReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                InBound a -> IO (Reader a)
@@ -687,7 +682,7 @@ where
   --   The queue will live only in the scope of the action
   --   that is passed as last parameter. 
   --   The function is useful for readers
-  --   that are used only temporarily, /e.g./ during initialisation.
+  --   that are used only temporarly, /e.g./ during initialisation.
   --   When the action terminates, the client unsubscribes from 
   --   the broker queue - even if an exception is raised.
   --
@@ -705,8 +700,7 @@ where
                 InBound a -> (Reader a -> IO b) -> IO b
   withReader cid qn dst os hs conv act = do
     q <- newReader cid qn dst os hs conv
-    finally (act   q)
-            (unsub q)
+    act q `finally` unsub q
 
   ------------------------------------------------------------------------
   -- | A variant of 'withReader' 
@@ -783,8 +777,13 @@ where
   ------------------------------------------------------------------------
   -- | Removes the oldest message from the queue
   --   and returns it as 'P.Message'.
+  --   The message cannot be read from the queue
+  --   by another call to 'readQ' within the same connection.
+  --   Wether other connections will receive the message as well
+  --   depends on the broker and the queue patterns it implements.
   --   If the queue is currently empty,
   --   the thread will preempt until a message arrives.
+  --
   --   If the queue was created with 
   --   'OMode' other than 'F.Auto' 
   --   and with 'OAck', then an /ack/ 
@@ -833,20 +832,23 @@ where
   -- isEmptyQ :: Reader a -> IO Bool
 
   ------------------------------------------------------------------------
-  -- | Writes the value /a/ as message at the end of the queue.
+  -- | Adds the value /a/ as message at the end of the queue.
   --   The Mime type as well as the headers 
   --   are added to the message.
+  --
   --   If the queue was created with the option
   --   'OWithReceipt',
-  --   'writeQ' will request a receipt from the broker
-  --   and preempt until the receipt is confirmed.
+  --   'writeQ' will request a receipt from the broker.
+  --   If the queue was additionally created with
+  --   'OWaitReceipt',
+  --   'writeQ' will preempt until the receipt is confirmed.
   --
   --   The Stomp headers are useful for brokers
   --   that provide selectors on /subscribe/,
   --   see 'newReader' for details.
   --
-  --   A usage example for a /q/ of type 'Writer' 'String'
-  --   may be:
+  --   A usage example for a 'Writer' /q/ of type 'String'
+  --   may be (/nullType/ is defined as /text/\//plain/ in Codec.MIME):
   --
   --   > writeQ q nullType [] "hello world!"
   --
@@ -855,6 +857,9 @@ where
   --   the function should be called with /timeout/:
   --
   --   > mbR <- timeout tmo $ writeQ q nullType [] "hello world!"
+  --   > case mbR of
+  --   >   Nothing -> -- error handling
+  --   >   Just r  -> do -- ...
   ------------------------------------------------------------------------
   writeQ :: Writer a -> Mime.Type -> [F.Header] -> a -> IO ()
   writeQ q mime hs x =
@@ -913,7 +918,7 @@ where
   ------------------------------------------------------------------------
   ack :: Con -> P.Message a -> IO ()
   ack cid msg = do
-    ack' cid True False msg
+    ack'  cid True False msg
     rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
@@ -925,14 +930,17 @@ where
   --   and a /timeout/ in microseconds /tmo/ like:
   --
   --   > mbR <- timeout tmo $ ackWith c x   
+  --   > case mbR of
+  --   >   Nothing -> -- error handling
+  --   >   Just _  -> do -- ...
   ------------------------------------------------------------------------
   ackWith :: Con -> P.Message a -> IO ()
   ackWith cid msg = do
-    ack' cid True True msg  
+    ack'  cid True True msg  
     rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
-  -- | Not-Acknowledges the arrival of 'P.Message' to the broker.
+  -- | Negatively acknowledges the arrival of 'P.Message' to the broker.
   --   For more details see 'ack'.
   ------------------------------------------------------------------------
   nack :: Con -> P.Message a -> IO ()
@@ -941,7 +949,7 @@ where
     rmAck cid $ P.msgId msg
 
   ------------------------------------------------------------------------
-  -- | Not-Acknowledges the arrival of 'P.Message' to the broker,
+  -- | Negatively acknowledges the arrival of 'P.Message' to the broker,
   --   requests a receipt and waits until it is confirmed.
   --   For more details see 'ackWith'.
   ------------------------------------------------------------------------
@@ -989,12 +997,12 @@ where
 
   ------------------------------------------------------------------------
   -- | Starts a transaction and executes the action
-  --   that is passed in as its last parameter within in the transaction.
+  --   in the last parameter.
   --   After the action has finished, 
   --   the transaction will be either committed or aborted
   --   even if an exception was raised.
   --   Note that, depending on the options,
-  --   the termination of a transaction may vary,
+  --   the way a transaction is terminated may vary,
   --   refer to 'Topt' for details.
   --
   --   Transactions cannot be shared among threads.
@@ -1004,7 +1012,7 @@ where
   --   It is /not/ advisable to use 'withTransaction' with /timeout/.
   --   It is preferred to use /timeout/ on the 
   --   the actions executed within this transaction.
-  --   Whether and how much time the transaction
+  --   Whether and how much time the transaction itself
   --   shall wait for the completion of on-going interactions with the broker,
   --   in particular pending receipts,
   --   shall be controlled
@@ -1021,6 +1029,9 @@ where
   --   'withTransaction' is called like:
   --
   --   > eiR <- try $ withTransaction c [OTimeout 100, OWithReceipts] \_ -> do
+  --   > case eiR of
+  --   >   Left e  -> -- error handling
+  --   >   Right x -> do -- ..
   --
   --   Note that 'try' is used to catch any 'StomplException'.
   ------------------------------------------------------------------------
@@ -1045,7 +1056,12 @@ where
   ------------------------------------------------------------------------
   -- | Waits for the 'Receipt' to be confirmed by the broker.
   --   Since the thread will preempt, the call should be protected
-  --   with /timeout/.
+  --   with /timeout/, /e.g./:
+  --
+  --   > mb_ <- waitReceipt c r
+  --   > case mb_ of
+  --   >  Nothing -> -- error handling
+  --   >  Just _  -> do -- ...
   ------------------------------------------------------------------------
   waitReceipt :: Con -> Receipt -> IO ()
   waitReceipt cid r =
@@ -1216,7 +1232,9 @@ where
   handleError :: Con -> F.Frame -> IO ()
   handleError cid f = do
     c <- getCon cid
-    let e = F.getMsg f ++ ": " ++ U.toString (F.getBody f)
+    let r = if null (F.getReceipt f) then ""
+              else " (" ++ F.getReceipt f ++ ")" 
+    let e = F.getMsg f ++ r ++ ": " ++ U.toString (F.getBody f)
     throwToOwner c (BrokerException e) 
 
   -----------------------------------------------------------------------

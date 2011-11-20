@@ -19,7 +19,7 @@ where
 
   conAndSend :: String -> String -> IO ()
   conAndSend qn m = do
-    withConnection_ "127.0.0.1" 61613 "guest" "guest" [] $ \c -> do
+    withConnection_ "127.0.0.1" 61613 [] $ \c -> do
       let conv = return . U.fromString
       q <- newWriter c "Test-Q" qn [] [] conv
       writeQ q nullType [] m

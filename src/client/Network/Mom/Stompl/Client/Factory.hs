@@ -41,8 +41,7 @@ where
     show (NoTx) = ""
 
   ------------------------------------------------------------------------
-  -- | A receipt is sent to the broker as part of an interaction.
-  --   The broker will confirm the interaction by means of the receipt. 
+  -- | This is a receipt.
   ------------------------------------------------------------------------
   data Rec = 
            -- | A valid receipt

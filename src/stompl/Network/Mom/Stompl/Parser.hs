@@ -2,7 +2,7 @@
 -- |
 -- Module     : Network/Mom/Stompl/Frame.hs
 -- Copyright  : (c) Tobias Schoofs
--- License    : GPL 3
+-- License    : LGPL 
 -- Stability  : experimental
 -- Portability: portable
 --
@@ -26,8 +26,8 @@ where
   import           Network.Mom.Stompl.Frame
 
   ------------------------------------------------------------------------
-  -- | Starts parsing with Attoparsec 'parse'
-  --   May fail, conclude or return a partial result
+  -- | Starts parsing with Attoparsec 'parse'.
+  --   May fail, conclude or return a partial result.
   ------------------------------------------------------------------------
   startParsing :: B.ByteString -> Either String (Result Frame)
   startParsing m = case parse stompParser m  of
@@ -35,8 +35,8 @@ where
                         r          -> Right r
 
   ------------------------------------------------------------------------
-  -- | Continues parsing with Attoparsec 'feed'
-  --   May fail, conclude or return a partial result
+  -- | Continues parsing with Attoparsec 'feed'.
+  --   May fail, conclude or return a partial result.
   ------------------------------------------------------------------------
   continueParsing :: Result Frame -> B.ByteString -> Either String (Result Frame)
   continueParsing r m = case feed r m of
@@ -44,8 +44,8 @@ where
                           r'         -> Right r'
 
   ------------------------------------------------------------------------
-  -- | Parses a ByteString at once with Attoparsec 'parseOnly'
-  --   May fail or conclude
+  -- | Parses a ByteString at once with Attoparsec 'parseOnly'.
+  --   May fail or conclude.
   ------------------------------------------------------------------------
   stompAtOnce :: B.ByteString -> Either String Frame
   stompAtOnce s = parseOnly stompParser s

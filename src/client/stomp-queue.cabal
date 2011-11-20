@@ -2,29 +2,32 @@ Name:            stomp-queue
 Version:         0.0.1
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011
-License:         BSD3
+License:         LGPL
+license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias.schoofs@gmx.net
 Homepage:        http://github.com/toschoo/stompl
-Category:        Network
+Category:        Network, Message-oriented Middleware, Stomp, Client
 Build-Type:      Simple
 Synopsis:        Stompl Client Library 
 Description:
-  The Stompl Protocol specifies message-oriented interoperability.
+  The Stomp Protocol specifies message-oriented interoperability.
   Applications connect to a message broker to send (publish)
   or receive (subscribe) messages through queues. 
   Interoperating applications do not know 
   the location or internal structure of each other.
-  They see only the interfaces, /i.e./ the messages
+  They see only each other's interfaces, /i.e./ the messages
   published and subscribed through the broker.
   
-  The Stomp Queue library provides abstractions
-  over the Stomp protocol, it implements in particular 
-  'Connection', 'Transaction', 'Queue', 'Message' and 'Receipt'.
+  The Stomp Queue library provides 
+  a Stomp client, using abstractions like
+  'Connection', 'Transaction', 'Queue' and 'Message'.
 
+  More information, examples and a test suite are available 
+  on <http://github.com/toschoo/stompl>.
 
 Library
-  Build-Depends:   base        >= 4.0,
+  Build-Depends:   base        >= 4.0 && <= 5.0,
                    bytestring  >= 0.9 && < 0.10,
                    utf8-string >= 0.3.6,
                    attoparsec  >= 0.9.1.1,

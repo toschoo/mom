@@ -18,7 +18,8 @@ where
   import           Control.Concurrent.MVar
   import           Control.Applicative ((<$>))
   import           Control.Monad (unless)
-  import           Control.Exception (throwIO, finally)
+  import           Control.Exception (throwIO, finally, SomeException)
+  import qualified Control.Exception as Ex (try)
 
   import qualified Data.Attoparsec as A (Result(..), feed, parse)
 
@@ -78,12 +79,34 @@ where
         
   connect :: String -> Int -> IO S.Socket
   connect host port = do
-    let p = fromIntegral port :: S.PortNumber
+    let p   = fromIntegral port :: S.PortNumber
     prot <- getProtocolNumber "tcp" 
-    sock <- S.socket S.AF_INET S.Stream prot
-    addr <- S.inet_addr host
-    S.connect sock (S.SockAddrInet p addr)
-    return sock
+    let hints = S.defaultHints {S.addrSocketType = S.Stream,
+                                S.addrProtocol   = prot}
+    adds <- S.getAddrInfo (Just hints) (Just host) Nothing
+    tryConnect p adds
+
+  tryConnect :: S.PortNumber -> [S.AddrInfo] -> IO S.Socket
+  tryConnect _ [] = throwIO $ SocketException $ 
+                              "Give up: no more address info!"
+  tryConnect p (i:is) = 
+    case i of
+      S.AddrInfo _ f t prot addr _ -> 
+        let mbA = case addr of
+                    S.SockAddrInet  _ a      -> Just $ S.SockAddrInet p a
+                    S.SockAddrInet6 _ fl a s -> Just $ S.SockAddrInet6 p fl a s
+                    _                        -> Nothing
+         in case mbA of
+              Nothing -> tryConnect p is
+              Just a  -> do
+                sock <- S.socket f t prot
+                eiS  <- Ex.try $ S.connect sock a
+                case eiS of
+                  Left  e -> do
+                    putStrLn $ "Network.Mom.Stompl.Socket - " ++
+                               "Warning: " ++ show (e::SomeException)
+                    tryConnect p is
+                  Right _ -> return sock
 
   disconnect :: S.Socket -> IO ()
   disconnect = S.sClose 

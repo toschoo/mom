@@ -4,6 +4,7 @@ module State (
          Connection(..),
          Copt(..),
          oHeartBeat, oMaxRecv,
+         oAuth,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -112,9 +113,12 @@ where
     OMaxRecv    Int |
 
     -- | This option defines the client\'s bid
-    --   for negotiating heart beats (see 'F.Heartbead'). 
+    --   for negotiating heart beats (see 'F.HeartBeat'). 
     --   By default, no heart beats are sent or accepted
-    OHeartBeat  (F.Heart)
+    OHeartBeat  (F.Heart) |
+
+    -- | Authentication: user and password
+    OAuth String String
     deriving (Eq, Show)
 
   ------------------------------------------------------------------------
@@ -124,6 +128,7 @@ where
   is (OWaitBroker _) (OWaitBroker _) = True
   is (OMaxRecv    _) (OMaxRecv    _) = True
   is (OHeartBeat  _) (OHeartBeat  _) = True
+  is (OAuth     _ _) (OAuth     _ _) = True
   is _               _               = False
 
   noWait :: Int
@@ -134,6 +139,9 @@ where
 
   noBeat :: F.Heart
   noBeat = (0,0)
+
+  noAuth :: (String, String)
+  noAuth = ("","")
 
   oWaitBroker :: [Copt] -> Int
   oWaitBroker os = case find (is $ OWaitBroker 0) os of
@@ -149,6 +157,11 @@ where
   oHeartBeat os = case find (is $ OHeartBeat (0,0)) os of
                     Just (OHeartBeat b) -> b
                     _ -> noBeat
+
+  oAuth :: [Copt] -> (String, String)
+  oAuth os = case find (is $ OAuth "" "") os of
+               Just (OAuth u p) -> (u, p)
+               _   -> noAuth
 
   findCon :: Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)
@@ -261,7 +274,9 @@ where
             --      with the broker will request receipts;
             --   2) before ending the transaction,
             --      the library will check for receipts
-            --      that have not yet been confirmed by the broker.
+            --      that have not yet been confirmed by the broker
+            --      (including receipts requested by user calls
+            --       such as /writeQ/ or /ackWith/).
             --
             --   If receipts are pending, when the transaction
             --   is ready to terminate and 'OTimeout' with
@@ -270,11 +285,12 @@ where
             --   the transaction will be aborted with 'TxException'.
             --   Note that it, usually, does not make sense to use
             --   this options without 'OTimeout',
-            --   since the risk to lose a receipt is very high.
+            --   since it is in all probability that a receipt 
+            --   has not yet been confirmed when the transaction terminates.
             | OWithReceipts 
-            -- | If a message was received from a 
+            -- | If a message has been received from a 
             --   queue with 'OMode' option other 
-            --   than 'F.Auto' and this message has not been
+            --   than 'F.Auto' and this message has not yet been
             --   acknowledged when the transaction is ready
             --   to terminate, the /ack/ is /missing/.
             --   With this option, the transaction 
@@ -284,9 +300,7 @@ where
     deriving (Eq, Show)
 
   hasTopt :: Topt -> [Topt] -> Bool
-  hasTopt o os = case find (== o) os of
-                   Nothing -> False
-                   Just _  -> True
+  hasTopt o os = o `elem` os 
 
   tmo :: [Topt] -> Int
   tmo os = case find isTimeout os of
@@ -315,9 +329,7 @@ where
   rmRecFromTx r t = t {txRecs = delete r $ txRecs t}
 
   checkReceiptTx :: Receipt -> Transaction -> Bool
-  checkReceiptTx r t = case find (== r) $ txRecs t of
-                         Nothing -> True
-                         Just _  -> False
+  checkReceiptTx r = not . (elem r) . txRecs 
 
   txPendingAck :: Transaction -> Bool
   txPendingAck t = txAbrtAck t && not (null $ txAcks t)

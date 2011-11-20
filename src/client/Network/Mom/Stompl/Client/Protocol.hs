@@ -1,3 +1,4 @@
+{-# Language CPP #-}
 module Protocol (Connection, mkConnection, 
                  conBeat, getVersion,
                  getSock, getWr, getRc,
@@ -26,6 +27,9 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catch, 
                                       SomeException, bracketOnError)
+#ifdef _DEBUG
+  import           Control.Monad (when)
+#endif
   import           Codec.MIME.Type as Mime (Type) 
 
   ---------------------------------------------------------------------
@@ -94,11 +98,10 @@ where
                      msgSub  :: Fac.Sub,
                      -- | The destination
                      msgDest :: String,
-                     -- | The Stompl headers
+                     -- | The Stomp headers
                      --   that came with the message
                      msgHdrs :: [F.Header],
-                     -- | The /MIME/ type of the 
-                     --   encoded content
+                     -- | The /MIME/ type of the content
                      msgType :: Mime.Type,
                      -- | The length of the 
                      --   encoded content
@@ -274,6 +277,10 @@ where
              Left  e -> throwIO $ ProtocolException $
                           "Cannot create Frame: " ++ e
              Right f -> 
+#ifdef _DEBUG
+               do when (not $ F.complies (1,1) f) $
+                    putStrLn $ "Frame does not comply with 1.1: " ++ show f 
+#endif
                S.send (getWr c) (getSock c) f
 
   ---------------------------------------------------------------------
@@ -294,7 +301,7 @@ where
   ---------------------------------------------------------------------
   connectBroker :: Int -> [F.Version] -> F.Heart -> Connection -> IO Connection
   connectBroker mx vers beat c = 
-    case mkConF (conUsr c) (conPwd c) vers beat of
+    case mkConF (conAddr c) (conUsr c) (conPwd c) vers beat of
       Left e  -> return c {conErrM = e}
       Right f -> do
         rc  <- S.initReceiver
@@ -343,16 +350,17 @@ where
   -- frame constructors
   -- this needs review...
   ---------------------------------------------------------------------
-  mkConF :: String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
-  mkConF usr pwd vers beat = 
-    -- Right $ F.mkConnect usr pwd "" beat vers
-    F.mkConFrame [F.mkLogHdr  usr,
-                   F.mkPassHdr pwd,
-                   F.mkAcVerHdr $ F.versToVal vers, 
-                   F.mkBeatHdr  $ F.beatToVal beat] 
-
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
+
+  mkConF :: String -> String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
+  mkConF host usr pwd vers beat = 
+    let uHdr = if null usr then [] else [F.mkLogHdr  usr]
+        pHdr = if null pwd then [] else [F.mkPassHdr pwd]
+     in F.mkConFrame $ [F.mkHostHdr host,
+                        F.mkAcVerHdr $ F.versToVal vers, 
+                        F.mkBeatHdr  $ F.beatToVal beat] ++
+                       uHdr ++ pHdr
 
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =

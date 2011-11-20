@@ -3,7 +3,7 @@
 -- |
 -- Module     : Network/Mom/Stompl/Client/Exception.hs
 -- Copyright  : (c) Tobias Schoofs
--- License    : GPL 3
+-- License    : LGPL 
 -- Stability  : experimental
 -- Portability: portable
 --
@@ -59,8 +59,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Catches any 'StomplException',
-  --   including asynchronous exceptions coming from the internal
-  --   socket listener.
+  --   including asynchronous exceptions coming from internal threads
   ------------------------------------------------------------------------
   try :: IO a -> IO (Either StomplException a)
   try act = (Right <$> act) `catch` (return . Left)

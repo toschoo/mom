@@ -2,15 +2,11 @@
 -- |
 -- Module     : Network/Mom/Stompl/Frame.hs
 -- Copyright  : (c) Tobias Schoofs
--- License    : GPL 3
+-- License    : LGPL
 -- Stability  : experimental
 -- Portability: portable
 --
--- This module provides a representation of Stomp Frames
--- that are used by applications and brokers to interact 
--- with each other.
--- This module does not implement a client or broker,
--- but provides abstractions to libraries and programs doing so.
+-- Stomp Frames and some useful operations on them
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Frame (
                        -- * Frames
@@ -29,8 +25,8 @@ module Network.Mom.Stompl.Frame (
                        mkMessage, 
                        mkBegin, mkCommit,  mkAbort,
                        mkAck, mkNack, 
-                       mkBeat,
                        mkDisconnect,  
+                       mkBeat,
                        mkErr, mkReceipt,
                        -- ** Header-based Frame Constructors
                        mkConFrame, mkCondFrame, 
@@ -57,7 +53,8 @@ module Network.Mom.Stompl.Frame (
                        -- * Working with Frames
                        typeOf, putFrame, toString, putCommand,
                        sndToMsg, conToCond,
-                       resetTrans,
+                       resetTrans, 
+                       complies,
                        -- * Get Access to Frames
                        getDest, getTrans, getReceipt,
                        getLogin, getPasscode, 
@@ -80,12 +77,15 @@ where
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
-  import           Data.List (find, foldl')
+  import           Data.List (find, sortBy, foldl')
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes)
   import           Codec.MIME.Type as Mime (showType, Type, nullType)
   import           Codec.MIME.Parse        (parseMIMEType)
 
+  ------------------------------------------------------------------------
+  -- | Tuple of (key, value)
+  ------------------------------------------------------------------------
   type Header = (String, String)
 
   ------------------------------------------------------------------------
@@ -102,31 +102,15 @@ where
   ------------------------------------------------------------------------
   type Version = (Int, Int)
   
-  maxVers :: [Version] -> Version
-  maxVers = foldr maxVer (1,0)
-
-  maxVer, minVer :: Version -> Version -> Version
-  maxVer = chooseVer (>)
-  minVer = chooseVer (<)
-
-  chooseVer :: (Int -> Int -> Bool) -> Version -> Version -> Version
-  chooseVer cmp v1 v2 | major1 `cmp` major2 = v1
-                      | major2 `cmp` major1 = v2
-                      | minor1 `cmp` minor2 = v1
-                      | otherwise           = v2
-    where major1 = fst v1
-          minor1 = snd v1
-          major2 = fst v2
-          minor2 = snd v2
-
   ------------------------------------------------------------------------
-  -- | The first 'Int' of the pair represents the frequency 
+  -- | Heart-beat configuration;
+  --   the first 'Int' of the pair represents the frequency 
   --   in which the sender wants to send heart-beats; 
   --   the second represents the highest frequency
-  --   the sender can accepts heart-beats.
+  --   in which the sender can accept heart-beats.
   --   The frequency is expressed as 
   --   the period in milliseconds between two heart-beats.
-  --   For details on negotating heart-beats, 
+  --   For details on negotiating heart-beats, 
   --   please refer to the Stomp specification.
   ------------------------------------------------------------------------
   type Heart   = (Int, Int)
@@ -386,6 +370,7 @@ where
                  }
                | ErrFrame {
                    frmMsg  :: String,
+                   frmRec  :: String,
                    frmLen  :: Int,
                    frmMime :: Mime.Type,
                    frmBody :: Body}
@@ -712,16 +697,20 @@ where
   --
   --   * Error Message Id: A short error description
   --
+  --   * Receipt Id: The receipt of frame sent by the application
+  --                 to which this error relates
+  --
   --   * 'Mime.Type': The format of the error message as MIME Type
   --
   --   * Length: The length of the error message
   --
   --   * 'Body': The error message
   ----------------------------------------------------------------------
-  mkErr :: String -> Mime.Type -> Int -> Body -> Frame
-  mkErr mid mime len bdy =
+  mkErr :: String -> String -> Mime.Type -> Int -> Body -> Frame
+  mkErr mid rc mime len bdy =
     ErrFrame {
       frmMsg  = mid,
+      frmRec  = rc,
       frmLen  = len,
       frmMime = mime,
       frmBody = bdy}
@@ -841,16 +830,17 @@ where
   --     Connected, Message, Error, HeartBeat
   ------------------------------------------------------------------------
   data FrameType = 
-    -- | Sent by the application to initiates a connection
+    -- | Sent by the application to initiate a connection
     Connect   
-    -- | Sent by the broker confirm the connection
+    -- | Sent by the broker to confirm the connection
     | Connected   
     -- | Sent by the application to end the connection
     | Disconnect 
     -- | Sent by the application to publish a message in a queue
     | Send       
-    -- | Sent by the broker to forward a published message
-    --   to an application that subscribed to the related queue
+    -- | Sent by the broker to forward a message
+    --   published in a queue to which
+    --   the application has subscribed
     | Message 
     -- | Sent by the application to subscribe to a queue
     | Subscribe 
@@ -862,20 +852,20 @@ where
     | Commit
     -- | Sent by the application to abort a transaction
     | Abort
-    -- | Sent by the application acknowledge a message
+    -- | Sent by the application to acknowledge a message
     | Ack
-    -- | Sent by the application negatively acknowledge a message
+    -- | Sent by the application to negatively acknowledge a message
     | Nack
     -- | Keep-alive message sent by both, application and broker
     | HeartBeat
     -- | Sent by the broker to report an error
     | Error   
-    -- | Sent by the broker confirm the receipt of a frame
+    -- | Sent by the broker to confirm the receipt of a frame
     | Receipt 
     deriving (Show, Read, Eq)
 
   ------------------------------------------------------------------------
-  -- | get the 'FrameType' of a 'Frame'
+  -- | gets the 'FrameType' of a 'Frame'
   ------------------------------------------------------------------------
   typeOf :: Frame -> FrameType
   typeOf f = case f of
@@ -892,7 +882,7 @@ where
               (NackFrame _ _ _ _       ) -> Nack
               (MsgFrame  _ _ _ _ _ _ _ ) -> Message
               (RecFrame  _             ) -> Receipt
-              (ErrFrame  _ _ _ _       ) -> Error
+              (ErrFrame  _ _ _ _ _     ) -> Error
               (BeatFrame               ) -> HeartBeat
 
   ------------------------------------------------------------------------
@@ -904,7 +894,7 @@ where
     -- | The client is expected to explicitly confirm the receipt
     --   of a message by sending an 'Ack' frame;
     --   all message older than the ack'd message
-    --   since the last 'Ack' (or the begin of the session)
+    --   since the last 'Ack' (or the beginning of the session)
     --   are implicitly ack\'d as well.
     --   This is called /cumulative/ ack.
     | Client 
@@ -943,16 +933,13 @@ where
   -- | check if 'String' represents a valid 'AckMode'
   ----------------------------------------------------------------
   isValidAck :: String -> Bool
-  isValidAck s = case find (== (upString s)) 
-                      ["AUTO", "CLIENT", "CLIENT-INDIVIDUAL"] of
-                   Nothing -> False
-                   Just _  -> True
+  isValidAck s = upString s `elem` ["AUTO", "CLIENT", "CLIENT-INDIVIDUAL"]
 
   upString :: String -> String
   upString = map toUpper
 
   numeric :: String -> Bool
-  numeric = and . map isDigit
+  numeric = all isDigit
 
   cleanWhite :: String -> String
   cleanWhite = 
@@ -1066,19 +1053,23 @@ where
   -- | convert 'String' to 'AckMode'
   ------------------------------------------------------------------------
   valToAck :: String -> Maybe AckMode
-  valToAck s = if isValidAck s
-                 then Just $ read s
-                 else Nothing
+  valToAck s = if isValidAck s then Just $ read s else Nothing
 
   ------------------------------------------------------------------------
-  -- | negotiate version
+  -- | negotiates version - 
+  --   if no common version is found,
+  --   the function results in version 1.0!
   ------------------------------------------------------------------------
-  negoVersion :: [Version] -> Version
-  negoVersion vs = maxVer defVersion v
-    where v = maxVers vs
+  negoVersion :: [Version] -> [Version] -> Version
+  negoVersion bs cs = nego bs' cs
+    where bs'  = sortBy desc bs
+          desc = flip compare 
+          nego []     _    = defVersion
+          nego _     []    = defVersion
+          nego (v:vs1) vs2 = if v `elem` vs2 then v else nego vs1 vs2
 
   ------------------------------------------------------------------------
-  -- | negotiate heart-beat
+  -- | negotiates heart-beat
   ------------------------------------------------------------------------
   negoBeat :: Heart -> Heart -> Heart
   negoBeat hc hs = 
@@ -1101,7 +1092,7 @@ where
   resetTrans f = f {frmTrans = ""}
 
   ------------------------------------------------------------------------
-  -- | convert a 'Frame' into a 'B.ByteString'
+  -- | converts a 'Frame' into a 'B.ByteString'
   ------------------------------------------------------------------------
   putFrame :: Frame -> B.ByteString
   putFrame BeatFrame = putCommand mkBeat
@@ -1110,13 +1101,13 @@ where
                        putBody    f
 
   ------------------------------------------------------------------------
-  -- | convert a 'Frame' into a 'String'
+  -- | converts a 'Frame' into a 'String'
   ------------------------------------------------------------------------
   toString :: Frame -> String
   toString = U.toString . putFrame
 
   ------------------------------------------------------------------------
-  -- | convert the 'TypeFrame' of a 'Frame' into a 'B.ByteString'
+  -- | converts the 'FrameType' into a 'B.ByteString'
   ------------------------------------------------------------------------
   putCommand :: Frame -> B.ByteString
   putCommand f = 
@@ -1230,10 +1221,11 @@ where
   -- Receipt Frame ----------------------------------------------------------
   toHeaders (RecFrame  r) = [mkRecIdHdr r]
   -- Error Frame ------------------------------------------------------------
-  toHeaders (ErrFrame m l t _) = 
+  toHeaders (ErrFrame m r l t _) = 
     let mh = if null m then [] else [mkMsgHdr m]
+        rh = if null r then [] else [mkRecIdHdr r]
         lh = if l <  0 then [] else [mkLenHdr (show l)]
-    in  mh ++ lh ++ [mkMimeHdr $ showType t]
+    in  mh ++ rh ++ lh ++ [mkMimeHdr $ showType t]
   -- Beat Frame --------------------------------------------------------------
   toHeaders BeatFrame = []
 
@@ -1244,7 +1236,7 @@ where
   putBody f =
     case f of 
       SndFrame _ _ _ _ _ _ b -> b |> '\x00'
-      ErrFrame _ _ _       b -> b |> '\x00'
+      ErrFrame _ _ _ _     b -> b |> '\x00'
       MsgFrame _ _ _ _ _ _ b -> b |> '\x00'
       _                    -> B.pack "\x00"
 
@@ -1473,7 +1465,8 @@ where
   mkErrFrame :: [Header] -> Int -> Body -> Either String Frame
   mkErrFrame hs l b =
     Right $ ErrFrame {
-              frmMsg  = findStrHdr hdrMsg "" hs,
+              frmMsg  = findStrHdr hdrMsg   "" hs,
+              frmRec  = findStrHdr hdrRecId "" hs,
               frmLen  = l,
               frmMime = case lookup hdrMime hs of
                                Nothing -> defMime
@@ -1484,12 +1477,12 @@ where
               frmBody = b}
 
   ------------------------------------------------------------------------
-  -- | converts a 'Send' frame into a 'Message' frame
-  --   parameters are:
+  -- | converts a 'Send' frame into a 'Message' frame;
+  --   parameters:
   --   
   --   * message id
   --
-  --   * Subscription
+  --   * subscription id
   --
   --   * The original 'Send' frame
   ------------------------------------------------------------------------
@@ -1509,16 +1502,83 @@ where
 
   ------------------------------------------------------------------------
   -- | converts a 'Connect' frame into a 'Connected' frame,
-  --   negotiating heart-beats and version
+  --   negotiating heart-beats and version;
+  --   parameters:
+  --
+  --   * server desc
+  --
+  --   * session id
+  --
+  --   * caller's bid for heart-beat 
+  --
+  --   * caller's supported versions
+  --
+  --   * the original 'Connect' frame
   ------------------------------------------------------------------------
-  conToCond :: String -> String -> Heart -> Frame -> Maybe Frame
-  conToCond s i b f = case typeOf f of
-                        Connect ->
-                          Just CondFrame {
-                                 frmSes  = i,
-                                 frmBeat = negoBeat (frmBeat f) b,
-                                 frmVer  = negoVersion $ frmAcVer f,
-                                 frmSrv  = strToSrv s
-                               }
-                        _ -> Nothing
+  conToCond :: String -> String -> Heart -> [Version] -> Frame -> Maybe Frame
+  conToCond s i b vs f = case typeOf f of
+                          Connect ->
+                            Just CondFrame {
+                                   frmSes  = i,
+                                   frmBeat = negoBeat (frmBeat f) b,
+                                   frmVer  = negoVersion vs $ frmAcVer f,
+                                   frmSrv  = strToSrv s
+                                 }
+                          _ -> Nothing
+
+  ------------------------------------------------------------------------
+  -- | Compliance with protocol version
+  ------------------------------------------------------------------------
+  complies :: Version -> Frame -> Bool
+  complies v f = all (`elm` has) must 
+    where must = getHdrs (typeOf f) v
+          has  = toHeaders f
+          elm  h hs = case lookup h hs of
+                        Nothing -> False
+                        Just _  -> True
+
+  ------------------------------------------------------------------------
+  -- Mandatory headers 
+  ------------------------------------------------------------------------
+  getHdrs :: FrameType -> Version -> [String]
+  getHdrs t v =
+    case t of
+       Connect     -> case v of
+                        (1,0) -> []
+                        (1,1) -> ["host", "accept-version"]
+                        _     -> []
+       Connected   -> case v of
+                        (1,0) -> ["session-id"]
+                        (1,1) -> ["version"]
+                        _     -> []
+       Disconnect  -> []
+       Subscribe   -> case v of
+                        (1,0) -> ["destination"]
+                        (1,1) -> ["id", "destination"]
+                        _     -> []
+       Unsubscribe -> case v of 
+                        (1,0) -> ["destination"] -- either dest or id
+                        (1,1) -> ["id"] 
+                        _     -> []
+       Send        -> case v of
+                        (1,0) -> ["destination"]
+                        (1,1) -> ["destination"]
+                        _     -> []
+       Message     -> case v of
+                        (1,0) -> ["message-id", "destination"]
+                        (1,1) -> ["message-id", "subscription", "destination"]
+                        _     -> []
+       Begin       -> ["transaction"] 
+       Commit      -> ["transaction"] 
+       Abort       -> ["transaction"] 
+       Ack         -> case v of
+                        (1,0) -> ["message-id"]
+                        (1,1) -> ["message-id", "subscription"]
+                        _     -> []
+       Nack        -> case v of 
+                        (1,1) -> ["message-id", "subscription"]
+                        _     -> []
+       Error       -> [] 
+       Receipt     -> ["receipt-id"] 
+       HeartBeat   -> []
 

@@ -24,8 +24,9 @@ where
   maxRcv :: Int
   maxRcv = 1024
 
-  host :: String
-  host = "127.0.0.1"
+  host, nHost :: String
+  host  = "127.0.0.1"
+  nHost = "localhost"
 
   beat :: Heart
   beat = (0,0)
@@ -83,7 +84,10 @@ where
 
   mkTests :: Int -> TestGroup IO
   mkTests p = 
-    let t10   = mkTest "Create Reader            " $ testWith p testMkInQueue 
+    let t1    = mkTest "Connect with IP          " $ testIPConnect p
+        t2    = mkTest "Connect with hostname    " $ testNConnect  p
+        t3    = mkTest "Connect with Auth        " $ testAuth      p
+        t10   = mkTest "Create Reader            " $ testWith p testMkInQueue 
         t20   = mkTest "Create Writer            " $ testWith p testMkOutQueue 
         t30   = mkTest "Create Reader wait Rc    " $ testWith p testMkInQueueWaitRc 
         t40   = mkTest "Create Reader with Rc    " $ testWith p testMkInQueueWithRc 
@@ -127,11 +131,52 @@ where
         t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t10,  t20,  t30,  t40,  t50,  t60,  t70,        t80,  t90, t100,
+        [ t1,   t2,   t3,
+          t10,  t20,  t30,  t40,  t50,  t60,  t70,        t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170,                   t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
 
+  ------------------------------------------------------------------------
+  -- Connect with IP Address
+  ------------------------------------------------------------------------
+  -- Shall connect
+  -- Shall not throw an exception
+  ------------------------------------------------------------------------
+  testIPConnect :: Int -> IO TestResult
+  testIPConnect p = do
+    eiC <- try $ withConnection "127.0.0.1" p [] (\_ -> return ())
+    case eiC of
+      Left  e -> return $ Fail $ show e
+      Right _ -> return Pass
+
+  ------------------------------------------------------------------------
+  -- Connect with Host Name
+  ------------------------------------------------------------------------
+  -- Shall connect
+  -- Shall not throw an exception
+  ------------------------------------------------------------------------
+  testNConnect :: Int -> IO TestResult
+  testNConnect p = do
+    eiC <- try $ withConnection "localhost" p [] (\_ -> return ())
+    case eiC of
+      Left  e -> return $ Fail $ show e
+      Right _ -> return Pass
+
+  ------------------------------------------------------------------------
+  -- Connect with Authentication
+  ------------------------------------------------------------------------
+  -- Shall connect
+  -- Shall not throw an exception
+  ------------------------------------------------------------------------
+  testAuth :: Int -> IO TestResult
+  testAuth p = do
+    eiC <- try $ withConnection "localhost" p 
+                [OAuth "guest" "guest"] (\_ -> return ())
+    case eiC of
+      Left  e -> return $ Fail $ show e
+      Right _ -> return Pass
+  
   ------------------------------------------------------------------------
   -- Create a Reader without options
   ------------------------------------------------------------------------
@@ -1218,7 +1263,7 @@ where
   ------------------------------------------------------------------------
   testWaitBroker :: Int -> IO TestResult
   testWaitBroker p = do
-    eiR <- try $ withConnection host p "guest" "guest" 
+    eiR <- try $ withConnection host p 
                                [OWaitBroker 100] $ \_ -> return Pass
     case eiR of
        Left (ProtocolException e) -> 
@@ -1239,7 +1284,7 @@ where
   testBeat :: Int -> IO TestResult
   testBeat p = do
     let b = (500,500)
-    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \c -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] $ \c -> do
       oQ  <- newWriter c "OUT" tQ1 [] [] oconv
       iQ  <- newReader c "IN"  tQ1 [] [] iconv
       threadDelay $ 1000 * 1000
@@ -1267,7 +1312,7 @@ where
   testBeatR :: Int -> IO TestResult
   testBeatR p = do
     let b = (100,100)
-    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \_ -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1285,7 +1330,7 @@ where
   testBeatRfail :: Int -> IO TestResult
   testBeatRfail p = do
     let b = (50,50) -- this beat signals responder to ignore heartbeats
-    eiR <- try $ withConnection host p "guest" "guest" [OHeartBeat b] $ \_ -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1375,7 +1420,7 @@ where
   -- shall connect with passed parameters
   ------------------------------------------------------------------------
   stdCon :: Int -> (Con -> IO TestResult) -> IO TestResult
-  stdCon port = withConnection host port "guest" "guest" []
+  stdCon port = withConnection host port []
 
   testWith :: Int -> (Con -> IO TestResult) -> IO TestResult
   testWith port act = do
