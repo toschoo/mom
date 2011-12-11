@@ -5,7 +5,7 @@ Copyright:       Copyright (c) Tobias Schoofs, 2011
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
-Maintainer:      tobias.schoofs@gmx.net
+Maintainer:      Tobias Schoofs <tobias dot schoofs at gmx dot net>
 Homepage:        http://github.com/toschoo/stompl
 Category:        Network, Message-oriented Middleware, Stomp, Client
 Build-Type:      Simple
@@ -25,6 +25,8 @@ Description:
 
   More information, examples and a test suite are available 
   on <http://github.com/toschoo/stompl>.
+  The Stomp specification can be found at
+  <http://stomp.github.com>.
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,

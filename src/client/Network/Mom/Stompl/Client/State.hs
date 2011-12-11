@@ -95,9 +95,9 @@ where
     --   sent with 'F.Disconnect' at the end of the session.
     --   The /Stomp/ protocol advises to request a receipt 
     --   and to wait for it before actually closing the 
-    --   the socket. Many brokers, however, do not 
-    --   implement this feature (or implement it incorrectly,
-    --   closing the connection immediately after sending 
+    --   socket. Many brokers, however, do not 
+    --   implement this feature (or implement it inappropriately,
+    --   closing the connection immediately after having sent
     --   the receipt).
     --   'withConnection', for this reason, ignores 
     --   the receipt by default and simply closes the socket

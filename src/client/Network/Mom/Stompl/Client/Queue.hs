@@ -296,7 +296,7 @@ where
      >
      > ping :: String -> IO ()
      > ping qn = 
-     >   withConnection_ "127.0.0.1" 61613 [] $ \c -> do
+     >   withConnection_ "localhost" 61613 [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
      >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
@@ -309,7 +309,7 @@ where
      >   eiM <- try $ readQ iQ 
      >   case eiM of
      >     Left  e -> do
-     >       putStrLn $ "Error: " ++ (show (e::StomplException))
+     >       putStrLn $ "Error: " ++ show e
      >       -- error handling ...
      >     Right m -> do
      >       let p = case msgContent m of
