@@ -53,7 +53,7 @@ where
   initSession :: Sock.Socket -> IO ()
   initSession s = 
     catch (do cid <- newConId
-              reportSilent INFO $ "Starting Session " ++ show cid
+              report (mkLog cid) INFO "Starting Session" 
               finally (initSession' cid)
                       (cleanSession cid s))
           (\e -> do let _ = id (e::SomeException)
@@ -64,7 +64,7 @@ where
             eiF <- S.receive rc s 1024 -- from config
             case eiF of
               Left  e -> 
-                reportError True NOTICE 
+                reportError (mkLog cid) NOTICE 
                             ProtocolException $ 
                             "Cannot parse frame: " ++ show e
               Right f -> do
@@ -77,7 +77,8 @@ where
                           conCon  = newCon s wr}
                 c' <- handleConFrame c f
                 if not (conUp c') 
-                  then reportError True NOTICE ConnectException (conErr c')
+                  then reportError (mkLog cid) 
+                                   NOTICE ConnectException (conErr c')
                   else evalStateT handleConnection c' -- start heartbeat
 
   handleConFrame :: Connection -> F.Frame -> IO Connection
@@ -92,7 +93,7 @@ where
                                   F.toString f} -- log error
                      Just f' -> do
                        catch (S.send (getWriter c) (getSock c) f')
-                             (\e -> reportError True NOTICE 
+                             (\e -> reportError (mkLog $ conId c) NOTICE 
                                                 SocketException $
                                                 show (e::SomeException)) 
                        return c {conUp = True} -- heartbeat, version
@@ -100,15 +101,15 @@ where
 
   cleanSession :: ConId -> Sock.Socket -> IO ()
   cleanSession cid s = do S.disconnect s -- decrement no of active sessions
-                          reportSilent INFO $ "Connection " ++ show cid ++ 
-                                              " terminated"
+                          report (mkLog cid) INFO "Connection terminated"
 
   handleConnection :: Session ()
   handleConnection = forever $ do
     c   <- get
     eiF <- liftIO $ S.receive (getReader c) (getSock c) 1024
     case eiF of
-      Left  e -> liftIO $ reportError True NOTICE ConnectException $
+      Left  e -> liftIO $ reportError (mkLog $ conId c) 
+                                      NOTICE ConnectException $
                                       "Cannot receive: " ++ e
       Right f -> handleFrame f
 
@@ -125,8 +126,9 @@ where
       F.Begin       -> undefined -- startTx
       F.Commit      -> undefined -- endTx
       F.Abort       -> undefined -- endTx
-      _             -> 
-        liftIO $ reportError True NOTICE ProtocolException $
+      _             -> do
+        cid <- conId <$> get
+        liftIO $ reportError (mkLog cid) NOTICE ProtocolException $
                              "Unexpected Frame: " ++ F.toString f
 
   haveItMadeTx :: F.Frame -> Session ()
@@ -139,4 +141,7 @@ where
 
   handleTx :: F.Frame -> Session ()
   handleTx f = undefined
+
+  mkLog :: ConId -> String
+  mkLog cid = "Session-" ++ show cid
 

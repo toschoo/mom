@@ -77,44 +77,54 @@ where
                release = releaseSock l
              }
 
-  -- INET or INET6 according to config --------
-  bind :: String -> S.PortNumber -> IO S.Socket
-  bind h p = do
+  bind :: String -> Int -> IO S.Socket
+  bind host port = do
+    let p = fromIntegral port :: S.PortNumber
+    let h = if null host then Nothing else Just host
     proto <- getProtocolNumber "tcp"
-    sock  <- S.socket S.AF_INET S.Stream proto
-    addr  <- S.inet_addr h
-    S.bindSocket sock (S.SockAddrInet p addr)
-    return sock
+    let hints = S.defaultHints {S.addrFlags = [S.AI_PASSIVE],
+                                S.addrSocketType = S.Stream,
+                                S.addrProtocol   = proto}
+    adds <- S.getAddrInfo (Just hints) h (Just $ show port)
+    tryBind adds 
         
   connect :: String -> Int -> IO S.Socket
   connect host port = do
-    let p   = fromIntegral port :: S.PortNumber
+    let p = fromIntegral port :: S.PortNumber
+    let h = if null host then Nothing else Just host
     prot <- getProtocolNumber "tcp" 
     let hints = S.defaultHints {S.addrSocketType = S.Stream,
                                 S.addrProtocol   = prot}
-    adds <- S.getAddrInfo (Just hints) (Just host) Nothing
-    tryConnect p adds
+    adds <- S.getAddrInfo (Just hints) h (Just $ show port) -- Nothing
+    tryConnect adds
 
-  tryConnect :: S.PortNumber -> [S.AddrInfo] -> IO S.Socket
-  tryConnect _ [] = throwIO $ SocketException $ 
-                              "Give up: no more address info!"
-  tryConnect p (i:is) = 
+  tryBind :: [S.AddrInfo] -> IO S.Socket
+  tryBind    = tryOp S.bindSocket
+
+  tryConnect :: [S.AddrInfo] -> IO S.Socket
+  tryConnect = tryOp S.connect
+
+  tryOp :: (S.Socket -> S.SockAddr -> IO ()) -> 
+           [S.AddrInfo] -> IO S.Socket
+  tryOp _ []      = throwIO $ SocketException $
+                                "I give up: no more address info!"
+  tryOp op (i:is) =
     case i of
       S.AddrInfo _ f t prot addr _ -> 
         let mbA = case addr of
-                    S.SockAddrInet  _ a      -> Just $ S.SockAddrInet  p a
-                    S.SockAddrInet6 _ fl a s -> Just $ S.SockAddrInet6 p fl a s
+                    S.SockAddrInet  p a      -> Just $ S.SockAddrInet  p a
+                    S.SockAddrInet6 p fl a s -> Just $ S.SockAddrInet6 p fl a s
                     _                        -> Nothing
          in case mbA of
-              Nothing -> tryConnect p is
+              Nothing -> tryOp op is
               Just a  -> do
                 sock <- S.socket f t prot
-                eiS  <- Ex.try $ S.connect sock a
+                eiS  <- Ex.try $ op sock a
                 case eiS of
                   Left  e -> do
                     putStrLn $ "Network.Mom.Stompl.Socket - " ++
                                "Warning: " ++ show (e::SomeException)
-                    tryConnect p is
+                    tryOp op is
                   Right _ -> return sock
 
   disconnect :: S.Socket -> IO ()

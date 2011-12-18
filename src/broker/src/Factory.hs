@@ -1,5 +1,5 @@
 {-# OPTIONS -fglasgow-exts -fno-cse #-}
-module Factory (newConId, newMsgId)
+module Factory (newConId, newMsgId, newSndId)
 where
 
   import Types
@@ -22,11 +22,21 @@ where
   msgid :: MVar Int
   msgid = unsafePerformIO $ newMVar 1
 
+  ------------------------------------------------------------------------
+  -- Source for unique sender identifiers
+  ------------------------------------------------------------------------
+  {-# NOINLINE sndid #-}
+  sndid :: MVar Int
+  sndid = unsafePerformIO $ newMVar 1
+
   newConId :: IO ConId
   newConId = ConId <$> show <$> mkUniqueId conid inc
 
   newMsgId :: IO MsgId
   newMsgId = MsgId <$> ("msg-"++) <$> show <$> mkUniqueId msgid inc
+
+  newSndId :: IO SndId
+  newSndId = SndId <$> show <$> mkUniqueId sndid inc
 
   mkUniqueId :: MVar Int -> (Int -> Int) -> IO Int
   mkUniqueId v f = modifyMVar v $ \x -> 

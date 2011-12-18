@@ -5,6 +5,7 @@ module State (withQ, withQAdd, withAllQs,
 where
  
   import           Types
+  import           Exception
   import           Queue
   import           Fifo
 
@@ -72,15 +73,20 @@ where
 
   addQ :: Queue -> IO ()
   addQ q = withState addToQs
-    where addToQs st = IOM.insert (stQs st) updQ (qName q) q
+    where addToQs st = do
+            report (mkLog $ qName q) DEBUG "Adding Queue" 
+            IOM.insert (stQs st) updQ (qName q) q
 
   rmQ :: Queue -> IO ()
   rmQ q = withState rmFromQs
-    where rmFromQs st = IOM.delete (stQs st) (qName q) 
+    where rmFromQs st = do
+            report (mkLog $ qName q) DEBUG "Removing Queue" 
+            IOM.delete (stQs st) (qName q) 
 
   addSub :: QName -> Sub -> IO ()
   addSub qn s = withState addSubToQ 
     where addSubToQ st = do
+            report (mkLog qn) DEBUG $ "Adding Subscription " ++ show (subId s)
             f <- newFifo
             let q = newQueue qn One (Just s) f -- define pattern!
             modifyMVar_ (stSubs st) (return . M.insert (subId s) qn)
@@ -92,9 +98,14 @@ where
             mbQ <- withMVar (stSubs st) (return . M.lookup s) 
             case mbQ of
               Nothing -> return ()
-              Just q  -> do IOM.with_   (stQs   st) q (return . rmSubFromQ s)
-                            modifyMVar_ (stSubs st)   (return . M.delete   s)
+              Just q  -> do 
+                report (mkLog q) DEBUG $ "Removing Subscription " ++ show s
+                IOM.with_   (stQs   st) q (return . rmSubFromQ s)
+                modifyMVar_ (stSubs st)   (return . M.delete   s)
 
   -- remove a connection!
   -- or remove connection when it's not working?
+
+  mkLog :: QName -> String
+  mkLog q = "Queue " ++ show q
 

@@ -5,6 +5,7 @@ where
   import           Config
   import           Session
   import           Sender
+  import           Logger
   import qualified Socket as S
   import           Exception
 
@@ -22,15 +23,17 @@ where
   import           Data.Maybe (catMaybes)
   import qualified Data.ByteString           as B
 
+  logger :: String
+  logger = "Server"
+
   startServer :: FilePath -> IO ()
   startServer f = Sock.withSocketsDo $ do
-    reportSilent INFO "Starting..."
-    cfg <- Cfg <$> newChan
-    initCfg cfg
+    mkConfig f
+    startLogger
+    report logger INFO "Starting..."
     snds <- srvStartSenders -- start n senders !
-    let port = (fromIntegral (61618::Int))::Sock.PortNumber
-    let host = "127.0.0.1"
-    s <- S.bind host port
+    let host = "localhost" -- "127.0.0.1"
+    s <- S.bind host 61618
     Sock.listen s 256
     listen s
 
@@ -39,7 +42,9 @@ where
     (s', _) <- Sock.accept s
     eiT  <- Exc.try (startSession s')
     case eiT of
-      Left  e -> reportSilent ALERT $ "Cannot start session: " ++ show (e::SomeException)
+      Left  e -> report logger ALERT $ 
+                        "Cannot start session: " ++ 
+                        show (e::SomeException)
       Right _ -> return ()
                 
 

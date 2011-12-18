@@ -2,6 +2,7 @@ module Sender (startSender)
 where
 
   import           Types
+  import           Factory
   import           Config
   import qualified Socket as S
   import           State  
@@ -27,10 +28,11 @@ where
   startSender = forkIO (forever $ runSender)
 
   runSender :: IO ()
-  runSender = 
-    catch (waitRequest >>= \r -> handleRequest r)
-          (\e -> reportSilent EMERGENCY $
-                              "Sender down: " ++ show (e::SomeException))
+  runSender = do
+    snd <- newSndId
+    catch (waitSndRequest >>= \r -> handleRequest r)
+          (\e -> report ("Sender-" ++ show snd) EMERGENCY $
+                        "Sender down: " ++ show (e::SomeException))
 
   handleRequest :: SndRequest -> IO ()
   handleRequest r = 
@@ -46,12 +48,13 @@ where
       F.Send        -> handleSend        cid f 
       F.Ack         -> undefined
       F.Nack        -> undefined
-      _             -> reportSilent ERROR $ "Unknown internal request: " ++
-                                    F.toString f
+      _             -> report (mkLog cid) ERROR $ 
+                              "Unknown internal request: " ++
+                              F.toString f
 
   handleSubscribe :: ConId -> F.Frame -> Con -> IO ()
   handleSubscribe cid f c 
-    | null (F.getDest f) = reportSilent NOTICE $ 
+    | null (F.getDest f) = report (mkLog cid) NOTICE $ 
                              "No destination in SUBSCRIBE frame " ++
                              "from connection " ++ show cid ++ 
                              ": " ++ F.toString f
@@ -63,7 +66,7 @@ where
   handleUnsubscribe :: ConId -> F.Frame -> IO ()
   handleUnsubscribe cid f 
     | null (F.getDest f) &&
-      null (F.getId   f)  = reportSilent NOTICE $
+      null (F.getId   f)  = report (mkLog cid) NOTICE $
                               "No destination in SEND frame " ++
                               "from connection " ++ show cid ++  
                               ": " ++ F.toString f
@@ -75,7 +78,7 @@ where
 
   handleSend :: ConId -> F.Frame -> IO ()
   handleSend cid f 
-    | null (F.getDest f) = reportSilent NOTICE $
+    | null (F.getDest f) = report (mkLog cid) NOTICE $
                              "No destination in SEND frame " ++
                              "from connection " ++ show cid ++  
                              ": " ++ F.toString f
@@ -85,3 +88,6 @@ where
   frameToSub sid f c = do
     fifo <- newFifo
     return (newSub sid f fifo c)
+
+  mkLog :: ConId -> String
+  mkLog cid = "On behalf of Session-" ++ show cid

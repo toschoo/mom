@@ -10,7 +10,7 @@
 -- Exceptions for the mq30 lq lmq lamq lambq lambdaQ ...
 -------------------------------------------------------------------------------
 module Exception (StompException(..), 
-                  try, reportError, reportSilent, Priority(..),
+                  try, reportError, report, Priority(..),
                   throwProtocol, throwQueue, throwTx, 
                   throwSocket, throwConnect, ouch)
 where
@@ -21,6 +21,7 @@ where
   import Control.Monad
   import Data.Typeable (Typeable)
   import System.Log (Priority(..))
+  import Logger
 
   import Data.Time     -- to Logger!
   import System.Locale -- to Logger!
@@ -69,30 +70,11 @@ where
   throwX :: Exception e => (String -> e) -> String -> IO a
   throwX e s = throwIO (e s)
 
-  reportError :: Exception e => Bool -> Priority -> (String -> e) -> String -> IO ()
-  reportError err p e s = do reportString p s -- log! 
-                             when err $ throwX e s  
+  reportError :: Exception e => String -> Priority -> (String -> e) -> String -> IO ()
+  reportError n p e s = reportString n p s >> throwX e s  
 
-  reportSilent :: Priority -> String -> IO ()
-  reportSilent p s = reportString p s
+  report :: String -> Priority -> String -> IO ()
+  report n p s = reportString n p s
 
-  -- to Logger! --
-  reportString :: Priority -> String -> IO ()
-  reportString p s = do
-    t  <- frmTime <$> getCurrentTime
-    let l     = 11 - length ps
-        f     = "%" ++ show l ++ "s"
-        colon = printf f ": "
-        ps    = show p 
-    putStrLn $ t ++ " - " ++ ps ++ colon ++ s
-
-  picoPerMilli :: Integer
-  picoPerMilli = 1000000000
-
-  frmTime :: UTCTime -> String
-  frmTime t = 
-    let ps  = (read (formatTime defaultTimeLocale "%q" t))::Integer 
-        ms  = ps `div` picoPerMilli
-        frm = "%Y-%m-%d-%H:%M:%S." ++ (printf "%03i" ms) ++ " %Z"
-     in formatTime defaultTimeLocale frm t
-    
+  reportString :: String -> Priority -> String -> IO ()
+  reportString n p s = logX n p s
