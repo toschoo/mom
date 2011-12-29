@@ -11,21 +11,21 @@ where
   main :: IO ()
   main = withContext 1 $ \ctx -> do
     c <- connectODBC "DSN=jose"
-    serve ctx 5
+    serve ctx "Player Service" 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           (return . B.unpack) (return . B.pack)
-          (\_ _ _ _ -> do putStrLn "Error"
-                          return Nothing)
+          (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
+                                       n ++ ": " ++ show e
+                            return Nothing)
           (openS c) (fetcher fetch) closeS 
 
-  openS :: IConnection c => c -> OpenSource String Statement
+  openS :: IConnection c => c -> OpenSourceIO String Statement
   openS c _ _ = do
     s  <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
     _  <- execute s []
     return s
 
-  closeS :: CloseSource String Statement
+  closeS :: CloseSourceIO String Statement
   closeS _ _ _ = return ()
 
   fetch :: FetchHelper Statement String

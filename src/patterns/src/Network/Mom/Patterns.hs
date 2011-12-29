@@ -1,45 +1,75 @@
 {-# LANGUAGE BangPatterns #-}
+-------------------------------------------------------------------------------
+-- |
+-- Module     : Network/Mom/Patterns.hs
+-- Copyright  : (c) Tobias Schoofs
+-- License    : LGPL 
+-- Stability  : experimental
+-- Portability: portable
+-- 
+-- There are common patterns often reused 
+-- in many message-oriented applications,
+-- such as Server\/Client (a.k.a Request\/Response),
+--         Publish\/Subscribe,
+--         Pipline (a.k.a. Push\/Pull) and
+--         Exclusive Pair (a.k.a. Peer-to-Peer).
+-- The Patterns package implements those patterns 
+-- using the /zeromq/ library without using centralised brokers.
+-- Please refer to <http://www.zeromq.org> for more information.
+--
+-- Patterns are here implemented by separation of concerns;
+-- all interfaces provide means for
+--
+--   * Type Conversion and Consistency 
+-- 
+--   * Error Handling
+--
+--   * Resource Handling
+--
+--   * Fetching and Dumping results
+-- 
+--   * Control
+-------------------------------------------------------------------------------
 module Network.Mom.Patterns (
+          -- * Service/Client
+          serve, withServer,
+          OpenSourceIO, CloseSourceIO, 
+          Client, withClient, request,
+          -- * Publish/Subscribe
+          publish, withPub,
+          OpenSource, CloseSource,
+          withSub, subscribe, unsubscribe, resubscribe,
+          -- * Pipeline
+          pull, withPuller,
+          Pipe, withPipe, push, 
           -- * Service Access Point
           AccessPoint(..),
-          -- * Generic Serivce
-          Service, srvName, srvContext, pause, resume,
           -- * Converters
           InBound, OutBound,
           idIn, idOut, inString, outString, inUTF8, outUTF8,
           -- * Error Handlers
-          OnErrorIO, OnError, 
-          tryIO,
-          -- * Service Povider
-          serve, withServer,
-          OpenSourceIO, CloseSourceIO, 
-          -- * Publisher
-          publish, withPub,
-          OpenSource, CloseSource,
-          -- * Pipeline
-          pull, withPuller,
-          Pipe, withPipe, push, 
-          -- * Fetchers
+          OnErrorIO, OnError, OnError_,
+          -- * Generic Serivce
+          Service, srvName, srvContext, pause, resume,
+          -- * Enumerators
           Fetch, FetchHelper,
           fetcher, listFetcher,
           once, fetchFor,
           handleFetcher, fileFetcher, dbFetcher, err,
-          noopen, noclose, dbExec, dbClose, fileOpen, fileClose,
-          -- * Service Request
-          Client, withClient, request,
-          -- * Subscription
-          withSub, subscribe, unsubscribe, resubscribe,
+          noopenIO, nocloseIO, noopen, noclose,
+          dbExec, dbClose, fileOpen, fileClose, -- IO versions
           -- * Iteratees
+          Dump,
           store, toList, toString, append, fold,
           -- * ZMQ Context
           Z.Context, Z.withContext,
           Z.SocketOption(..),
           -- * Helpers
           Millisecond)
-          
 where
 
   import           Service
+  import           Factory
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U -- standard converters
@@ -57,14 +87,398 @@ where
   import           Control.Monad.Trans
   import           Prelude hiding (catch)
   import           Control.Exception (bracket, catch, 
-                                      AssertionFailed(..), assert,
+                                      AssertionFailed(..), 
                                       throwIO, SomeException, try)
 
   import qualified System.ZMQ as Z
   import qualified System.IO  as IO
-  -- import           System.Posix.Signals
 
-    ------------------------------------------------------------------------
+  data AccessPoint = Address {
+                       acAdd :: String,
+                       acOs  :: [Z.SocketOption]}
+  
+  instance Show AccessPoint where
+    show (Address s _) = s
+
+  type Fetch s o = Z.Context -> s -> E.Enumerator o IO ()
+  type FetchHelper   s o = Z.Context -> s -> IO (Maybe o)
+
+  type Dump i = Z.Context -> E.Iteratee i IO ()
+
+  type OpenSourceIO  i s = Z.Context -> i -> IO s
+  type CloseSourceIO i s = Z.Context -> i -> s -> IO ()
+
+  type OpenSource      s = Z.Context      -> IO s
+  type CloseSource     s = Z.Context -> s -> IO ()
+
+  type OnErrorIO s i o = SomeException                 -> 
+                         String                        ->
+                         Maybe s -> Maybe i -> Maybe o -> 
+                         IO (Maybe B.ByteString) 
+
+  type OnError   s a  = SomeException ->
+                         String       ->
+                         Maybe s -> Maybe a -> IO (Maybe B.ByteString)
+
+  type OnError_  s a  = SomeException ->
+                         String       ->
+                         Maybe s -> Maybe a -> IO ()
+
+  ------------------------------------------------------------------------
+  -- | Server/Client Pattern (Req/Rep) 
+  ------------------------------------------------------------------------
+  withServer :: Z.Context   -> String         -> 
+                String      -> Int            ->
+                AccessPoint                   -> 
+                InBound i   -> OutBound o     ->
+                OnErrorIO s i o               ->
+                (String -> OpenSourceIO  i s) ->
+                (String -> Fetch s o)         -> 
+                (String -> CloseSourceIO i s) -> 
+                (Service -> IO ())            -> IO ()
+  withServer ctx name param n ac iconv oconv onerr openS fetch closeS action =
+    withService ctx name param service action
+    where service = serve_ True n ac iconv oconv onerr 
+                           openS fetch closeS
+
+  ------------------------------------------------------------------------
+  -- | Provide a Service
+  ------------------------------------------------------------------------
+  serve :: Z.Context         -> String -> Int ->
+           AccessPoint       -> 
+           InBound i         -> OutBound o    ->
+           OnErrorIO   s i o ->
+           OpenSourceIO  i s ->
+           Fetch s o         -> 
+           CloseSourceIO i s -> IO ()
+  serve ctx name n ac iconv oconv onErr openS fetch closeS =
+    serve_ False n ac iconv oconv onErr 
+           (\_ -> openS) (\_ -> fetch) (\_ -> closeS)
+           ctx name "" "" 
+
+  ------------------------------------------------------------------------
+  -- the server implementation
+  ------------------------------------------------------------------------
+  serve_ :: Bool -> Int                   ->
+            AccessPoint                   -> 
+            InBound i                     ->
+            OutBound o                    ->
+            OnErrorIO   s i o             ->
+            (String -> OpenSourceIO  i s) ->
+            (String -> Fetch s o)         -> 
+            (String -> CloseSourceIO i s) -> 
+            Z.Context -> String -> String -> String -> IO ()
+  serve_ controlled n ac iconv oconv onerr 
+         openS fetch closeS ctx name sockname param
+  ------------------------------------------------------------------------
+  -- prepare service for single client
+  ------------------------------------------------------------------------
+    | n <= 1 =
+      Z.withSocket ctx Z.Rep $ \client -> do
+        Z.bind client (acAdd ac)
+        if controlled
+          then Z.withSocket ctx Z.Sub $ \cmd -> do
+                 Z.connect cmd sockname
+                 poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
+          else forever $ go client param
+  ------------------------------------------------------------------------
+  -- prepare service for multiple clients 
+  ------------------------------------------------------------------------
+    | otherwise = 
+      Z.withSocket ctx Z.XRep $ \clients -> do
+        Z.bind clients (acAdd ac)
+        Z.withSocket ctx Z.XReq $ \workers -> do
+          add <- ("inproc://wrk_" ++) <$> show <$> mkUniqueId
+          Z.bind workers add 
+          replicateM_ n (forkIO $ startWork add)
+          Z.device Z.Queue clients workers
+  ------------------------------------------------------------------------
+  -- start worker for multiple clients 
+  ------------------------------------------------------------------------
+    where startWork add = Z.withSocket ctx Z.Rep $ \worker -> do
+            Z.connect worker add
+            if controlled
+              then Z.withSocket ctx Z.Sub $ \cmd -> do
+                     Z.connect cmd sockname
+                     poll False [Z.S cmd Z.In, Z.S worker Z.In] 
+                          (go worker) param
+              else forever $ go worker param -- catch and do something...
+  ------------------------------------------------------------------------
+  -- receive requests and do the job
+  ------------------------------------------------------------------------
+          go worker p = do
+              m   <- Z.receive worker []
+              ei  <- try $ iconv m
+              ifLeft ei
+                (\e -> handle worker e Nothing Nothing Nothing) $ \i -> 
+                bracket (openS p ctx i `catch` (\e -> do
+                                 handle worker e Nothing (Just i) Nothing
+                                 throwIO e))
+                        (\s -> closeS p ctx i s `catch` (\e -> do
+                                 handle worker e (Just s) (Just i) Nothing
+                                 throwIO e))
+                        (\s -> catch (do 
+                           eiR <- E.run (fetch p ctx s $$      -- does not catch errors thrown with
+                                         itFetch worker oconv) -- throwIO
+                           ifLeft eiR
+                              (\e -> handle worker e (Just s) (Just i) Nothing)
+                              (\_ -> return ()))
+                           (\e -> do handle worker e (Just s) (Just i) Nothing
+                                     throwIO e))
+  ------------------------------------------------------------------------
+  -- generic error handler
+  ------------------------------------------------------------------------
+          handle sock e mbs mbi mbo = 
+            onerr e name mbs mbi mbo >>= \mbX ->
+              case mbX of
+                Nothing -> 
+                  Z.send sock B.empty []
+                Just x  -> do 
+                  Z.send sock x [Z.SndMore]
+                  Z.send sock B.empty []
+
+  ------------------------------------------------------------------------
+  -- Client data type
+  ------------------------------------------------------------------------
+  data Client i o = Client {
+                       cliCtx  :: Z.Context,
+                       cliSock :: Z.Socket Z.Req,
+                       cliAdd  :: AccessPoint,
+                       cliOut  :: OutBound o,
+                       cliIn   :: InBound  i
+                 }
+
+  ------------------------------------------------------------------------
+  -- Create a Client
+  ------------------------------------------------------------------------
+  withClient :: Z.Context  -> AccessPoint -> 
+                 OutBound o -> InBound i   -> 
+                 (Client i o -> IO a)     -> IO a
+  withClient ctx ac oconv iconv act = Z.withSocket ctx Z.Req $ \s -> do 
+    Z.connect s (acAdd ac)
+    act Client {
+        cliCtx  = ctx,
+        cliSock = s,
+        cliAdd  = ac,
+        cliOut  = oconv,
+        cliIn   = iconv}
+
+  ------------------------------------------------------------------------
+  -- request 
+  ------------------------------------------------------------------------
+  request :: Client i o -> o -> E.Iteratee i IO a -> IO (Either SomeException a) 
+  request c o it = tryout ?> trysend ?> receive
+    where tryout    = try $ (cliOut c) o
+          trysend x = try $ Z.send (cliSock c) x [] 
+          receive _ = E.run (rcvEnum (cliSock c) (cliIn c) $$ it)
+
+  ------------------------------------------------------------------------
+  -- | Publish/Subscribe
+  ------------------------------------------------------------------------
+  withPub :: Z.Context                    -> 
+             String -> String             ->
+             Millisecond                  ->
+             AccessPoint                  -> 
+             OutBound o                   ->
+             OnError_       s o           ->
+             (String -> OpenSource     s) ->
+             (String -> Fetch  s o)       -> 
+             (String -> CloseSource    s) -> 
+             (Service -> IO ())           -> IO ()
+  withPub ctx name param period ac oconv onerr openS fetch closeS action =
+    withService ctx name param service action
+    where service = publish_ True period ac oconv onerr openS fetch closeS
+
+  publish_ :: Bool                           ->
+              Millisecond                    ->
+              AccessPoint                    -> 
+              OutBound o                     ->
+              OnError_       s o             ->
+              (String -> OpenSource     s  ) ->
+              (String -> Fetch  s o)         -> 
+              (String -> CloseSource    s  ) -> 
+              Z.Context -> String            -> 
+              String -> String               -> IO ()
+  publish_ controlled period ac oconv onerr openS fetch closeS ctx name sockname param =
+    Z.withSocket ctx Z.Pub $ \sock -> do
+      Z.bind sock (acAdd ac)
+      if controlled
+        then Z.withSocket ctx Z.Sub $ \cmd -> do
+               Z.connect cmd sockname
+               periodicSend False period cmd (go sock) param
+        else periodic period $ go sock param
+  ------------------------------------------------------------------------
+  -- do the job periodically
+  ------------------------------------------------------------------------
+    where go sock p = 
+            bracket (openS p ctx `catch` (\e -> do
+                       onerr e name Nothing Nothing
+                       throwIO e))
+                    (\s -> closeS p ctx s `catch` (\e -> do
+                       onerr e name (Just s) Nothing
+                       throwIO e))
+                    (\s -> catch (do
+                       eiR <- E.run (fetch p ctx s $$ 
+                                     itFetch sock oconv)
+                       ifLeft eiR
+                         (\e -> onerr e name (Just s) Nothing)
+                         (\_ -> return ()))
+                       (\e -> do onerr e name (Just s) Nothing
+                                 throwIO e))
+
+  ------------------------------------------------------------------------
+  -- | Publish
+  ------------------------------------------------------------------------
+  publish :: Z.Context          -> 
+             String             ->
+             Millisecond        ->
+             AccessPoint        -> 
+             OutBound o         ->
+             OnError_       s o ->
+             OpenSource     s   ->
+             Fetch  s o         -> 
+             CloseSource    s   -> IO ()
+  publish ctx name period ac oconv onErr openS fetch closeS = 
+    publish_ False period ac oconv onErr 
+             (\_ -> openS ) (\_ -> fetch ) (\_ -> closeS) 
+             ctx name "" ""
+
+  ------------------------------------------------------------------------
+  -- Subscription
+  --   --> openS/closeS does not make sense:
+  --       blocks the resource all the time
+  ------------------------------------------------------------------------
+  withSub :: Z.Context                   -> 
+             String -> String -> String  -> 
+             AccessPoint                 -> 
+             InBound i   -> OnError_ s i ->
+             (String  -> Dump i)         -> 
+             (Service -> IO ())          -> IO ()
+  withSub ctx name sub param ac iconv onErr dump action =
+    withService ctx name param service action
+    where service = subscribe_ True sub ac iconv onErr dump
+
+  subscribe_ :: Bool -> String -> 
+                AccessPoint    -> 
+                InBound i      -> 
+                OnError_ s i   -> 
+                (String        -> Dump i)  -> 
+                Z.Context      -> 
+                String -> String -> String -> IO ()
+  subscribe_ controlled sub ac iconv onErr dump 
+             ctx name sockname param = 
+    Z.withSocket ctx Z.Sub $ \sock -> do
+      Z.connect sock (acAdd ac)
+      Z.subscribe sock sub
+      if controlled
+        then Z.withSocket ctx Z.Sub $ \cmd -> do
+               Z.connect cmd sockname
+               poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
+        else forever $ go sock param
+    where go :: Z.Socket a -> String -> IO ()
+          go sock p = catch (do
+               eiR <- E.run (rcvEnum sock iconv $$ dump p ctx)
+               ifLeft eiR   (\e -> onErr e name Nothing Nothing)
+                            (\_ -> return ()))
+               (\e -> do onErr e name Nothing Nothing
+                         throwIO e)
+
+  subscribe :: Z.Context     -> 
+               String        -> 
+               String        -> 
+               AccessPoint   -> 
+               InBound i     -> 
+               OnError_ s i  -> 
+               Dump   i      -> IO ()
+  subscribe ctx name sub ac iconv onerr dump = 
+    subscribe_ False sub ac iconv onerr (\_ -> dump) ctx name "" ""
+
+  unsubscribe :: Service -> IO ()
+  unsubscribe = pause
+
+  resubscribe :: Service -> IO ()
+  resubscribe = resume
+
+  ------------------------------------------------------------------------
+  -- | Pipeline
+  --   --> openS/closeS does not make sense:
+  --       blocks the resource all the time
+  ------------------------------------------------------------------------
+  withPuller :: Z.Context                  ->
+                String    -> String        ->
+                AccessPoint                ->
+                InBound i                  ->  
+                OnError_  s i              ->
+                (String  -> Dump   i)      -> 
+                (Service -> IO ())         -> IO ()
+  withPuller ctx name param ac iconv onerr dump action =
+    withService ctx name param service action
+    where service = pull_ True ac iconv onerr dump 
+
+  pull :: Z.Context     ->
+          String        -> 
+          AccessPoint   ->
+          InBound i     ->
+          OnError_  s i ->
+          Dump   i      -> IO ()
+  pull ctx name ac iconv onerr dump =
+    pull_ False ac iconv onerr (\_ -> dump) ctx name "" ""
+
+  pull_ :: Bool         ->
+           AccessPoint  ->
+           InBound i    ->
+           OnError_ s i ->
+           (String -> Dump   i)      ->
+           Z.Context -> String       -> 
+           String    -> String       -> IO ()
+  pull_ controlled ac iconv onerr dump ctx name sockname param =
+    Z.withSocket ctx Z.Pull $ \sock -> do
+      Z.connect sock (acAdd ac)
+      if controlled
+        then Z.withSocket ctx Z.Sub $ \cmd -> do
+               Z.connect cmd sockname
+               poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
+        else forever $ go sock param
+  ------------------------------------------------------------------------
+  -- do the job 
+  ------------------------------------------------------------------------
+    where go sock p = catch (do 
+               eiR <- E.run (rcvEnum sock iconv $$ dump p ctx) 
+               ifLeft eiR   (\e -> onerr e name Nothing Nothing)
+                            (\_ -> return ()))
+               (\e -> do onerr e name Nothing Nothing
+                         throwIO e)
+ 
+  ------------------------------------------------------------------------
+  -- Pipeline
+  ------------------------------------------------------------------------
+  data Pipe o = Pipe {
+                  pipCtx  :: Z.Context,
+                  pipSock :: Z.Socket Z.Push,
+                  pipAdd  :: AccessPoint,
+                  pipOut  :: OutBound o
+                }
+
+  withPipe :: Z.Context  -> AccessPoint -> 
+              OutBound o -> 
+              (Pipe o -> IO ())     -> IO ()
+  withPipe ctx ac oconv act = Z.withSocket ctx Z.Push $ \s -> do 
+    Z.bind s (acAdd ac)
+    act Pipe {
+        pipCtx  = ctx,
+        pipSock = s,
+        pipAdd  = ac,
+        pipOut  = oconv}
+
+  push :: Pipe o -> E.Enumerator o IO () -> IO (Either SomeException ()) 
+  push p enum = E.run (enum $$ itFetch (pipSock p) (pipOut p))
+
+  ------------------------------------------------------------------------
+  -- queue
+  -- forwarder
+  ------------------------------------------------------------------------
+
+  ------------------------------------------------------------------------
   -- | Converters are user-defined actions passed to 
   --   'newReader' ('InBound') and
   --   'newWriter' ('OutBound')
@@ -139,306 +553,20 @@ where
   inString :: InBound String
   inString = return . B.unpack
 
-  data AccessPoint = Address {
-                       acAdd :: String,
-                       acOs  :: [Z.SocketOption]}
-  
-  instance Show AccessPoint where
-    show (Address s _) = s
-
-  type Fetch s o = Z.Context -> s -> E.Enumerator o IO ()
-  type FetchHelper   s o = Z.Context -> s -> IO (Maybe o)
-
-  type Work s i = Z.Context -> s -> E.Iteratee i IO ()
-  type WorkHelper s i = Z.Context -> s -> IO (Maybe i)
-
-  type OpenSourceIO  i s = Z.Context -> i -> IO s
-  type CloseSourceIO i s = Z.Context -> i -> s -> IO ()
-
-  type OpenSource      s = Z.Context      -> IO s
-  type CloseSource     s = Z.Context -> s -> IO ()
-
-  type OnErrorIO s i o = SomeException                 -> 
-                         String                        ->
-                         Maybe s -> Maybe i -> Maybe o -> 
-                         IO (Maybe B.ByteString) 
-
-  type OnError   s a  = SomeException ->
-                         String        ->
-                         Maybe s -> Maybe a -> IO (Maybe B.ByteString)
-
-  ------------------------------------------------------------------------
-  -- | Server 
-  ------------------------------------------------------------------------
-  withServer :: Z.Context -> String -> String -> Int ->
-                AccessPoint -> Maybe AccessPoint ->
-                InBound i -> OutBound o ->
-                OnErrorIO s i o ->
-                (String -> OpenSourceIO  i s) ->
-                (String -> Fetch s o) -> 
-                (String -> CloseSourceIO i s) -> 
-                (Service -> IO ()) -> IO ()
-  withServer ctx name param n ext int iconv oconv onerr openS fetch closeS action =
-    withService ctx name param service action
-    where service = serve_ True n ext int iconv oconv onerr 
-                           openS fetch closeS
-
-  ------------------------------------------------------------------------
-  -- | Provide a Service
-  ------------------------------------------------------------------------
-  serve :: Z.Context         -> String -> Int               ->
-           AccessPoint       -> Maybe AccessPoint ->
-           InBound i         -> OutBound o        ->
-           OnErrorIO   s i o ->
-           OpenSourceIO  i s ->
-           Fetch s o -> 
-           CloseSourceIO i s -> IO ()
-  serve ctx name n ext int iconv oconv onErr openS fetch closeS =
-    serve_ False n ext int iconv oconv onErr 
-           (\_ -> openS) (\_ -> fetch) (\_ -> closeS)
-           ctx name "" "" 
-
-  ------------------------------------------------------------------------
-  -- the server implementation
-  ------------------------------------------------------------------------
-  serve_ :: Bool -> Int       ->
-            AccessPoint       -> Maybe AccessPoint ->
-            InBound i         -> OutBound o        ->
-            OnErrorIO   s i o ->
-            (String -> OpenSourceIO  i s) ->
-            (String -> Fetch s o) -> 
-            (String -> CloseSourceIO i s) -> 
-            Z.Context -> String -> String -> String -> IO ()
-  serve_ controlled n ext int iconv oconv onerr 
-         openS fetch closeS ctx name sockname param
-  ------------------------------------------------------------------------
-  -- prepare service for single client
-  ------------------------------------------------------------------------
-    | n <= 1 =
-      Z.withSocket ctx Z.Rep $ \client -> do
-        Z.bind client (acAdd ext)
-        if controlled
-          then Z.withSocket ctx Z.Sub $ \cmd -> do
-                 Z.connect cmd sockname
-                 poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
-          else forever $ go client ""
-  ------------------------------------------------------------------------
-  -- prepare service for multiple clients 
-  ------------------------------------------------------------------------
-    | otherwise = 
-      Z.withSocket ctx Z.XRep $ \clients -> do
-        Z.bind clients (acAdd ext)
-        Z.withSocket ctx Z.XReq $ \workers -> do
-          Z.bind workers (acAdd $ fromJust int) 
-          replicateM_ n (forkIO $ startWork $ acAdd $ fromJust int)
-          Z.device Z.Queue clients workers
-  ------------------------------------------------------------------------
-  -- start worker for multiple clients 
-  ------------------------------------------------------------------------
-    where startWork add = Z.withSocket ctx Z.Rep $ \worker -> do
-            Z.connect worker add
-            if controlled
-              then Z.withSocket ctx Z.Sub $ \cmd -> do
-                     Z.connect cmd sockname
-                     poll False [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param
-              else forever $ go worker "" -- catch and do something...
-  ------------------------------------------------------------------------
-  -- receive requests and do the job
-  ------------------------------------------------------------------------
-          go worker param = do
-              m   <- Z.receive worker []
-              ei  <- try $ iconv m
-              ifLeft ei
-                (\e -> handle worker e Nothing Nothing Nothing) $ \i -> 
-                bracket (openS param ctx i `catch` (\e -> do
-                                 handle worker e Nothing (Just i) Nothing
-                                 throwIO e))
-                        (closeS param ctx i)
-                        (\s -> do 
-                           eiR <- E.run (fetch param ctx s $$ 
-                                         itFetch worker oconv)
-                           ifLeft eiR
-                             (\e -> handle worker e (Just s) (Just i) Nothing)
-                             (\_ -> return ())) 
-  ------------------------------------------------------------------------
-  -- generic error handler
-  ------------------------------------------------------------------------
-          handle sock e mbs mbi mbo = 
-            onerr e name mbs mbi mbo >>= \mbX ->
-              case mbX of
-                Nothing -> 
-                  Z.send sock B.empty []
-                Just x  -> do 
-                  Z.send sock x [Z.SndMore]
-                  Z.send sock B.empty []
-
-  ------------------------------------------------------------------------
-  -- | withPublisher
-  ------------------------------------------------------------------------
-  withPub :: Z.Context          -> 
-             String -> String   ->
-             Millisecond        ->
-             AccessPoint        -> 
-             OutBound o         ->
-             OnError        s o ->
-             (String -> OpenSource     s)   ->
-             (String -> Fetch  s o) -> 
-             (String -> CloseSource    s)   -> 
-             (Service -> IO ()) -> IO ()
-  withPub ctx name param period ac oconv onerr openS fetch closeS action =
-    withService ctx name param service action
-    where service = publish_ True period ac oconv onerr openS fetch closeS
-
-  publish_ :: Bool ->
-              Millisecond        ->
-              AccessPoint        -> 
-              OutBound o         ->
-              OnError        s o ->
-              (String -> OpenSource     s  )   ->
-              (String -> Fetch  s o) -> 
-              (String -> CloseSource    s  )   -> 
-              Z.Context -> String -> String -> String -> IO ()
-  publish_ controlled period ac oconv onerr openS fetch closeS ctx name sockname param =
-    Z.withSocket ctx Z.Pub $ \sock -> do
-      Z.bind sock (acAdd ac)
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
-               periodicSend False period cmd (go sock) param
-        else periodic period $ go sock param
-  ------------------------------------------------------------------------
-  -- do the job periodically
-  ------------------------------------------------------------------------
-    where go sock p = 
-            bracket (openS p ctx `catch` (\e -> do
-                                   handle sock e Nothing Nothing
-                                   throwIO e))
-                    (closeS p ctx)
-                    (\s -> do
-                       eiR <- E.run (fetch p ctx s $$ 
-                                     itFetch sock oconv)
-                       ifLeft eiR
-                         (\e -> handle sock e (Just s) Nothing)
-                         (\_ -> return ()))
-  ------------------------------------------------------------------------
-  -- generic error handler
-  ------------------------------------------------------------------------
-          handle sock e mbs mbo = 
-            onerr e name mbs mbo >>= \mbX ->
-              case mbX of
-                Nothing -> 
-                  Z.send sock B.empty []
-                Just x  -> do 
-                  Z.send sock x [Z.SndMore]
-                  Z.send sock B.empty []
-
-  ------------------------------------------------------------------------
-  -- | Publish
-  ------------------------------------------------------------------------
-  publish :: Z.Context          -> 
-             String             ->
-             Millisecond        ->
-             AccessPoint        -> 
-             OutBound o         ->
-             OnError        s o ->
-             OpenSource     s   ->
-             Fetch  s o -> 
-             CloseSource    s   -> IO ()
-  publish ctx name period ac oconv onErr openS fetch closeS = 
-    publish_ False period ac oconv onErr 
-             (\_ -> openS ) (\_ -> fetch ) (\_ -> closeS) 
-             ctx name "" ""
-
-  ------------------------------------------------------------------------
-  -- | Pipeline, Pull
-  ------------------------------------------------------------------------
-  withPuller :: Z.Context ->
-                String    -> String ->
-                AccessPoint ->
-                InBound i   ->
-                OnError   s i ->
-                (String -> OpenSource s)  ->
-                (String -> s -> E.Iteratee i IO ()) -> 
-                (String -> CloseSource s) -> 
-                (Service -> IO ()) -> IO ()
-  withPuller ctx name param ac iconv onerr openS work closeS action =
-    withService ctx name param service action
-    where service = pull_ True ac iconv onerr openS work closeS 
-
-  pull :: Z.Context ->
-          String    -> 
-          AccessPoint ->
-          InBound i   ->
-          OnError   s i ->
-          OpenSource s  ->
-          (s -> E.Iteratee i IO ()) -> 
-          CloseSource s -> IO ()
-  pull ctx name ac iconv onerr openS work closeS =
-    pull_ False ac iconv onerr 
-          (\_ -> openS) (\_ -> work) (\_ -> closeS) ctx name "" ""
-
-  pull_ :: Bool        ->
-           AccessPoint ->
-           InBound i   ->
-           OnError s i ->
-           (String -> OpenSource s) ->
-           (String -> s -> E.Iteratee i IO ()) ->
-           (String -> CloseSource s) -> 
-           Z.Context -> String -> String -> String -> IO ()
-  pull_ controlled ac iconv onerr openS work closeS ctx name sockname param =
-    Z.withSocket ctx Z.Pull $ \sock -> do
-      Z.bind sock (acAdd ac)
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
-               poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
-        else forever $ go sock param
-  ------------------------------------------------------------------------
-  -- do the job 
-  ------------------------------------------------------------------------
-    where go sock p = 
-            bracket (openS p ctx `catch` (\e -> do
-                                   handle sock e Nothing Nothing
-                                   throwIO e))
-                    (closeS p ctx)
-                    (\s -> do
-                       eiR <- E.run (rcvEnum sock iconv $$ work p s) 
-                       ifLeft eiR
-                         (\e -> handle sock e (Just s) Nothing)
-                         (\_ -> return ()))
-  ------------------------------------------------------------------------
-  -- generic error handler
-  ------------------------------------------------------------------------
-          handle sock e mbs mbi = -- equal for publisher, pull 
-            onerr e name mbs mbi >>= \mbX ->
-              case mbX of
-                Nothing -> 
-                  Z.send sock B.empty []
-                Just x  -> do 
-                  Z.send sock x [Z.SndMore]
-                  Z.send sock B.empty []
- 
-  ------------------------------------------------------------------------
-  -- sending iteratee 
-  ------------------------------------------------------------------------
-  itFetch :: Z.Socket a -> OutBound o -> E.Iteratee o IO ()
-  itFetch s oconv = do
-    mbO <- EL.head
-    case mbO of
-      Nothing -> liftIO $ Z.send s (B.pack "END") []
-      Just o  -> do
-        x <- liftIO $ oconv o
-        liftIO $ Z.send s x [Z.SndMore]
-        itFetch s oconv
-
   ------------------------------------------------------------------------
   -- standard OpenSource / CloseSource
   ------------------------------------------------------------------------
-  noopen :: OpenSourceIO i ()
-  noopen _ _ = return ()
+  noopenIO :: OpenSourceIO i ()
+  noopenIO _ _ = return ()
 
-  noclose :: CloseSourceIO i ()
-  noclose _ _ = return
+  nocloseIO :: CloseSourceIO i ()
+  nocloseIO _ _ = return
+
+  noopen :: OpenSource ()
+  noopen _ = return ()
+
+  noclose :: CloseSource ()
+  noclose _ = return
 
   dbExec :: SQL.Statement -> OpenSourceIO [SQL.SqlValue] SQL.Statement
   dbExec s _ keys = 
@@ -452,6 +580,22 @@ where
 
   fileClose :: CloseSourceIO FilePath IO.Handle
   fileClose _ _ h = IO.hClose h 
+
+  ------------------------------------------------------------------------
+  -- receive 
+  ------------------------------------------------------------------------
+  rcvEnum :: Z.Socket a -> InBound i -> E.Enumerator i IO b
+  rcvEnum s iconv step = 
+    case step of 
+      E.Continue k -> do
+        x    <- liftIO $ Z.receive s []
+        more <- liftIO $ Z.moreToReceive s
+        if more
+          then do
+            i <- liftIO $ iconv x
+            rcvEnum s iconv $$ k (E.Chunks [i])
+          else E.continue k
+      _ -> E.returnI step
 
   ------------------------------------------------------------------------
   -- standard enumerators
@@ -519,127 +663,17 @@ where
       Right _ -> E.returnI s
 
   ------------------------------------------------------------------------
-  -- Client data type
+  -- sending iteratee 
   ------------------------------------------------------------------------
-  data Client i o = Client {
-                       cliCtx  :: Z.Context,
-                       cliSock :: Z.Socket Z.Req,
-                       cliAdd  :: AccessPoint,
-                       cliOut  :: OutBound o,
-                       cliIn   :: InBound  i
-                 }
-
-  ------------------------------------------------------------------------
-  -- Create a Client
-  ------------------------------------------------------------------------
-  withClient :: Z.Context  -> AccessPoint -> 
-                 OutBound o -> InBound i   -> 
-                 (Client i o -> IO a)     -> IO a
-  withClient ctx ac oconv iconv act = Z.withSocket ctx Z.Req $ \s -> do 
-    Z.connect s (acAdd ac)
-    act Client {
-        cliCtx  = ctx,
-        cliSock = s,
-        cliAdd  = ac,
-        cliOut  = oconv,
-        cliIn   = iconv}
-
-  ------------------------------------------------------------------------
-  -- request 
-  ------------------------------------------------------------------------
-  request :: Client i o -> o -> E.Iteratee i IO a -> IO (Either SomeException a) 
-  request c o it = tryout ?> trysend ?> receive
-    where tryout    = try $ (cliOut c) o
-          trysend x = try $ Z.send (cliSock c) x [] 
-          receive _ = E.run (rcvEnum (cliSock c) (cliIn c) $$ it)
-
-  ------------------------------------------------------------------------
-  -- Subscription
-  ------------------------------------------------------------------------
-  type SubError = SomeException -> String -> String -> IO ()
-
-  withSub :: Z.Context -> 
-             String -> String -> String -> Millisecond -> AccessPoint -> 
-             InBound i   -> SubError ->
-             (String -> E.Iteratee i IO ()) -> (Service -> IO ()) -> IO ()
-  withSub ctx name sub param period ac iconv onErr it action = 
-    withService ctx name param service action
-    where service = subscribe_ True sub period ac iconv onErr it
-
-  subscribe_ :: Bool -> String -> 
-                Millisecond -> AccessPoint -> 
-                InBound i   -> 
-                SubError -> 
-                (String -> E.Iteratee i IO ()) -> 
-                Z.Context -> String -> String -> String -> IO ()
-  subscribe_ controlled sub period ac iconv onErr it ctx name sockname param = 
-    Z.withSocket ctx Z.Sub $ \sock -> do
-      Z.connect sock (acAdd ac)
-      -- throwIO (AssertionFailed "test")
-      Z.subscribe sock sub
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
-               poll False [Z.S cmd Z.In, Z.S sock Z.In] (rcv sock) param
-        else forever $ rcv sock "" 
-    where rcv :: Z.Socket a -> String -> IO ()
-          rcv s p = do E.run (rcvEnum s iconv $$ it p) >>= \ei ->
-                         ifLeft ei (\e -> onErr e name sub)
-                                   (\_ -> return ())
-
-  subscribe :: Z.Context -> String -> String -> 
-               Millisecond -> AccessPoint -> 
-               InBound i   -> 
-               SubError -> 
-               E.Iteratee i IO () -> IO ()
-  subscribe ctx name sub period ac iconv onerr it = 
-    subscribe_ False sub period ac iconv onerr (\_ -> it) ctx name "" ""
-
-  unsubscribe :: Service -> IO ()
-  unsubscribe = pause
-
-  resubscribe :: Service -> IO ()
-  resubscribe = resume
-
-  ------------------------------------------------------------------------
-  -- Pipeline
-  ------------------------------------------------------------------------
-  data Pipe o = Pipe {
-                  pipCtx  :: Z.Context,
-                  pipSock :: Z.Socket Z.Push,
-                  pipAdd  :: AccessPoint,
-                  pipOut  :: OutBound o
-                }
-
-  withPipe :: Z.Context  -> AccessPoint -> 
-              OutBound o -> 
-              (Pipe o -> IO ())     -> IO ()
-  withPipe ctx ac oconv act = Z.withSocket ctx Z.Push $ \s -> do 
-    Z.connect s (acAdd ac)
-    act Pipe {
-        pipCtx  = ctx,
-        pipSock = s,
-        pipAdd  = ac,
-        pipOut  = oconv}
-
-  push :: Pipe o -> E.Enumerator o IO () -> IO (Either SomeException ()) 
-  push p enum = E.run (enum $$ itFetch (pipSock p) (pipOut p))
-
-  ------------------------------------------------------------------------
-  -- receive 
-  ------------------------------------------------------------------------
-  rcvEnum :: Z.Socket a -> InBound i -> E.Enumerator i IO b
-  rcvEnum s iconv step = 
-    case step of 
-      E.Continue k -> do
-        x    <- liftIO $ Z.receive s []
-        more <- liftIO $ Z.moreToReceive s
-        if more
-          then do
-            i <- liftIO $ iconv x
-            rcvEnum s iconv $$ k (E.Chunks [i])
-          else E.continue k
-      _ -> E.returnI step
+  itFetch :: Z.Socket a -> OutBound o -> E.Iteratee o IO ()
+  itFetch s oconv = do
+    mbO <- EL.head
+    case mbO of
+      Nothing -> liftIO $ Z.send s (B.pack "END") []
+      Just o  -> do
+        x <- liftIO $ oconv o
+        liftIO $ Z.send s x [Z.SndMore]
+        itFetch s oconv
 
   ------------------------------------------------------------------------
   -- standard iteratees
@@ -689,16 +723,6 @@ where
       Just i  -> do
         is <- fold f acc
         return (f i is)
-
-  ------------------------------------------------------------------------
-  -- queue
-  -- forwarder
-  -- publish
-  -- subscribe
-  -- push
-  -- pull
-  -- peer
-  ------------------------------------------------------------------------
 
   ------------------------------------------------------------------------
   -- some helpers

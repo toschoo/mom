@@ -71,7 +71,7 @@ where
 
   poll :: Bool -> [Z.Poll] -> (String -> IO ()) -> String -> IO ()
   poll paused poller rcv param 
-    | paused = handleCmd paused poller rcv param
+    | paused    = handleCmd paused poller rcv param
     | otherwise = do  
         [c, s] <- Z.poll poller (-1)
         case c of 

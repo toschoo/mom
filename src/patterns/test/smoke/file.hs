@@ -7,11 +7,11 @@ where
 
   main :: IO ()
   main = withContext 1 $ \ctx -> do
-    serve ctx 5
+    serve ctx "Player Service" 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           (return . B.unpack) return 
-          (\_ _ _ _ -> do putStrLn "Error"
-                          return Nothing)
+          (\e n _ _ _ -> do putStrLn $ "Error in " ++
+                                       n ++ ": " ++ show e
+                            return Nothing)
           fileOpen fileFetcher fileClose
 

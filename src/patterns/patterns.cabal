@@ -1,0 +1,44 @@
+Name:            patterns
+Version:         0.0.1
+Cabal-Version:   >= 1.8
+Copyright:       Copyright (c) Tobias Schoofs, 2011
+License:         LGPL
+license-file:    license/lgpl-3.0.txt
+Author:          Tobias Schoofs
+Maintainer:      tobias dot schoofs at gmx dot net
+Homepage:        http://github.com/toschoo/stompl
+Category:        Network, Message-oriented Middleware, zeromq
+Build-Type:      Simple
+Synopsis:        Common patterns in message-oriented applications
+Description:
+
+  There are common patterns often reused 
+  - or, in fact, reimplemented,
+  in many message-oriented applications,
+  such as Server/Client (a.k.a Request/Response),
+         Publish/Subscribe,
+         Pipline (a.k.a. Push/Pull) and
+         Exclusive Pair (a.k.a. Peer-to-Peer).
+  The Patterns package implements those patterns 
+  using the /zeromq/ library without using centralised brokers.
+
+  More information, examples and a test suite are available 
+  on <http://github.com/toschoo/stompl>.
+  More information about zeromq can be found at
+  <http://www.zeromq.org>.
+
+Library
+  Build-Depends:   base        >= 4.0 && <= 5.0,
+                   bytestring  >= 0.9 && < 0.10,
+                   utf8-string >= 0.3.6,
+                   zeromq-haskell >= 0.8.2,
+                   enumerator >= 0.4.11,
+                   mtl >= 2.0.1.0,
+                   HDBC >= 2.2.6.1,
+                   time        >= 1.1.4
+
+  hs-source-dirs: src/Network/Mom, src
+                   
+  Exposed-Modules: Network.Mom.Patterns
+  other-modules: Factory, Service
+

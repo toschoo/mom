@@ -21,7 +21,7 @@ where
     
   doit :: FilePath -> IO ()
   doit f = Z.withContext 1 $ \ctx -> do
-    let ap = Address "tcp://localhost:5557" []
+    let ap = Address "tcp://*:5557" []
     withPipe ctx ap return $ \p -> do
       ei <- push p (EB.enumFile f)
       case ei of

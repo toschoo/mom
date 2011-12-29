@@ -11,9 +11,8 @@ where
            publish ctx "Weather Report " 100
                  (Address "tcp://*:5556" [HighWM 100]) 
                  (return . B.pack)
-                 (\e n _ _ -> do putStrLn $ "Error in Publisher " ++
-                                            n ++ ": " ++ show e
-                                 return Nothing)
+                 (\e n _ _ -> putStrLn $ "Error in Publisher " ++
+                                         n ++ ": " ++ show e)
                  (\_ -> return ()) (once fetch) (\_ _ -> return ())
 
   fetch :: FetchHelper () String

@@ -14,7 +14,6 @@ where
     s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
     serve ctx "Player" 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           iconv oconv
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e

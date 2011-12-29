@@ -17,9 +17,8 @@ where
            withPub ctx "Weather Report" noparam 100
                  (Address "tcp://*:5556" [HighWM 100]) 
                  (return . B.pack)
-                 (\e n _ _ -> do putStrLn $ "Error in Publisher " ++
-                                            n ++ ": " ++ show e
-                                 return Nothing)
+                 (\e n _ _ -> putStrLn $ "Error in Publisher " ++
+                                         n ++ ": " ++ show e)
                  (\_ _ -> return ()) (\_ -> once fetch) (\_ _ _ -> return ()) $ 
                  \pub -> forever $ do
                     putStrLn $ "Waiting on " ++ srvName pub ++ "..."

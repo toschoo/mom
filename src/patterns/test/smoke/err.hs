@@ -7,12 +7,12 @@ where
 
   main :: IO ()
   main = withContext 1 $ \ctx -> do
-    serve ctx 5
+    serve ctx "Error Server" 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           (return . B.unpack) (return . B.pack)
-          (\_ _ _ _ -> do putStrLn "An Error occured"
-                          return Nothing)
+          (\e n _ _ _ -> do putStrLn $ "Error in " ++
+                                       n ++ ": " ++ show e
+                            return Nothing)
                           -- return $ Just $ B.pack "ERROR!")
-          (\_ i -> return i) err2 (\_ _ _ -> return ())
+          (\_ i -> return i) err (\_ _ _ -> return ())
 

@@ -9,8 +9,8 @@ where
   main :: IO ()
   main = Z.withContext 1 $ \ctx -> do
     let ap = Address "tcp://localhost:5555" []
-    withService ctx ap (return . B.pack) (return . B.unpack) $ \s -> do
-      ei <- request s "test" (toString "\n")
+    withClient ctx ap (return . B.pack) (return . B.unpack) $ \c -> do
+      ei <- request c "test" (toString "\n")
       case ei of
         Left  e -> putStrLn $ "Error: " ++ show (e::SomeException)
         Right t -> putStrLn t

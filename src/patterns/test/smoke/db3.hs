@@ -10,6 +10,8 @@ where
 
   import           Control.Concurrent (threadDelay)
   import           Control.Monad      (forever)
+  import           Control.Exception
+  import           Prelude hiding (catch)
 
   noparam :: String
   noparam = ""
@@ -20,7 +22,6 @@ where
     s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
     withServer ctx "Player" noparam 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           iconv oconv
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e
@@ -29,7 +30,6 @@ where
           \srv -> forever $ do
             putStrLn $ "server " ++ srvName srv ++ " up and running..."
             threadDelay 1000000
-          
 
   oconv :: OutBound [SqlValue]
   oconv = return . B.pack . convRow

@@ -6,15 +6,15 @@ where
 
   main :: IO ()
   main = withContext 1 $ \ctx -> do
-    serve ctx 5
+    serve ctx "Frost" 5
           (Address "tcp://*:5555" []) 
-          (Just $ Address "inproc://workers" []) 
           (return . B.unpack) (return . B.pack)
-          (\_ _ _ _ -> do putStrLn "Error"
-                          return Nothing)
+          (\e n _ _ _ -> do putStrLn $ "Error in Serer " ++
+                                       n ++ ": " ++ show e
+                            return Nothing)
           mkList listFetcher (\_ _ _ -> return ())
 
-  mkList :: OpenSource String [String]
+  mkList :: OpenSourceIO String [String]
   mkList _ _ = return (lines frost)
 
   frost, t, s, b :: String
