@@ -12,13 +12,14 @@ where
   main = withContext 1 $ \ctx -> do
     c <- connectODBC "DSN=jose"
     s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
-    serveNoResource ctx 5
+    serve ctx "Player" 5
           (Address "tcp://*:5555" []) 
           (Just $ Address "inproc://workers" []) 
-          (return . B.unpack) oconv
-          (\_ _ _ _ -> do putStrLn "Error"
-                          return Nothing)
-          (dbFetcher s [])
+          iconv oconv
+          (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
+                                       n ++ ": " ++ show e
+                            return Nothing)
+          (dbExec s) dbFetcher dbClose
 
   oconv :: OutBound [SqlValue]
   oconv = return . B.pack . convRow
@@ -30,5 +31,11 @@ where
                            Nothing -> "NN"
                            Just r  -> r
           convRow _ = undefined
+
+  iconv :: InBound [SqlValue]
+  iconv = return . convRow . B.unpack 
+    where convRow :: String -> [SqlValue]
+          convRow _ = []
+
 
     

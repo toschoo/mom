@@ -4,6 +4,7 @@ where
 
   import           Network.Mom.Patterns
   import qualified System.ZMQ as Z
+  import           System.Environment
   import qualified Data.Enumerator       as E
   import qualified Data.Enumerator.List  as EL
   import qualified Data.ByteString.Char8 as B
@@ -11,10 +12,17 @@ where
   import           Control.Monad.Trans
 
   main :: IO ()
-  main = Z.withContext 1 $ \ctx -> do
+  main = do
+    os <- getArgs
+    case os of
+      [x] -> rcv x
+      _   -> rcv "test"
+    
+  rcv :: String -> IO ()
+  rcv req = Z.withContext 1 $ \ctx -> do
     let ap = Address "tcp://localhost:5555" []
-    withService ctx ap (return . B.pack) (return . B.unpack) $ \s -> do
-      ei <- request s "test" it
+    withClient ctx ap (return . B.pack) (return . B.unpack) $ \s -> do
+      ei <- request s req it
       case ei of
         Left e  -> putStrLn $ "Error: " ++ show (e::SomeException)
         Right _ -> return ()

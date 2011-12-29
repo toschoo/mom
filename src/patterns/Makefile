@@ -5,8 +5,11 @@ COMDIR = ../test/common
 OUTDIR = ./test/out
 
 SUTDIR = src/Network/Mom
+SRCDIR = src
 
-SUBSRC = $(SUTDIR)/Patterns.hs 
+SUBSRC = $(SUTDIR)/Patterns.hs \
+	 $(SRCDIR)/Factory.hs \
+	 $(SRCDIR)/Service.hs
 
 GHC = ghc
 FLGS = -DTEST -Wall --make -threaded
@@ -17,9 +20,18 @@ INC  =	-i./src \
 
 smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
+	$(SMOKEDIR)/db3 \
 	$(SMOKEDIR)/file \
 	$(SMOKEDIR)/frost \
+	$(SMOKEDIR)/hello \
+	$(SMOKEDIR)/err \
+	$(SMOKEDIR)/wuserver \
+	$(SMOKEDIR)/wuserver2 \
+	$(SMOKEDIR)/wuclient \
+	$(SMOKEDIR)/wuclient2 \
+	$(SMOKEDIR)/worker \
 	$(SMOKEDIR)/rcv \
+	$(SMOKEDIR)/push \
 	$(SMOKEDIR)/tolist \
 	$(SMOKEDIR)/tostr \
 	$(SMOKEDIR)/append \
@@ -31,13 +43,40 @@ $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 $(SMOKEDIR)/db2:	$(SMOKEDIR)/db2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/db3:	$(SMOKEDIR)/db3.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/file:	$(SMOKEDIR)/file.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/hello:	$(SMOKEDIR)/hello.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/err:	$(SMOKEDIR)/err.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/wuserver:	$(SMOKEDIR)/wuserver.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/wuserver2:	$(SMOKEDIR)/wuserver2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/wuclient:	$(SMOKEDIR)/wuclient.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/wuclient2:	$(SMOKEDIR)/wuclient2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/worker:	$(SMOKEDIR)/worker.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/rcv:	$(SMOKEDIR)/rcv.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/push:	$(SMOKEDIR)/push.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/tolist:	$(SMOKEDIR)/tolist.hs $(SUBSRC)
@@ -58,13 +97,23 @@ clean:
 	rm -f $(SUTDIR)/*.o
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
+	rm -f $(SRCDIR)/*.hi
+	rm -f $(SRCDIR)/*.o
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
 	rm -f $(SMOKEDIR)/db
 	rm -f $(SMOKEDIR)/db2
+	rm -f $(SMOKEDIR)/db3
 	rm -f $(SMOKEDIR)/file
 	rm -f $(SMOKEDIR)/frost
+	rm -f $(SMOKEDIR)/err
+	rm -f $(SMOKEDIR)/wuserver
+	rm -f $(SMOKEDIR)/wuserver2
+	rm -f $(SMOKEDIR)/wuclient
+	rm -f $(SMOKEDIR)/wuclient2
+	rm -f $(SMOKEDIR)/worker
 	rm -f $(SMOKEDIR)/rcv
+	rm -f $(SMOKEDIR)/push
 	rm -f $(SMOKEDIR)/tolist
 	rm -f $(SMOKEDIR)/tostr
 	rm -f $(SMOKEDIR)/append
