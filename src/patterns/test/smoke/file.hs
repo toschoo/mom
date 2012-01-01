@@ -13,5 +13,5 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in " ++
                                        n ++ ": " ++ show e
                             return Nothing)
-          fileOpen fileFetcher fileClose
+          (one []) fileOpen fileFetcher fileClose
 

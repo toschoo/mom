@@ -14,12 +14,12 @@ where
 
   main :: IO ()
   main = withContext 1 $ \ctx -> do
-           withPub ctx "Weather Report" noparam 100
+           withPeriodicPub ctx "Weather Report" noparam 100
                  (Address "tcp://*:5556" [HighWM 100]) 
                  (return . B.pack)
                  (\e n _ _ -> putStrLn $ "Error in Publisher " ++
                                          n ++ ": " ++ show e)
-                 (\_ _ -> return ()) (\_ -> once fetch) (\_ _ _ -> return ()) $ 
+                 (\_ _ -> return ()) (\_ -> fetch1 fetch) (\_ _ _ -> return ()) $ 
                  \pub -> forever $ do
                     putStrLn $ "Waiting on " ++ srvName pub ++ "..."
                     threadDelay 1000000

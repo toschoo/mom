@@ -13,7 +13,7 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in " ++
                                        n ++ ": " ++ show e
                             return Nothing)
-          (\_ i -> return i) (once hello) (\_ _ _ -> return ())
+          (one []) (\_ i -> return i) (fetch1 hello) (\_ _ _ -> return ())
 
   hello :: Context -> String -> IO (Maybe String)
   hello _ = return . Just . reverse

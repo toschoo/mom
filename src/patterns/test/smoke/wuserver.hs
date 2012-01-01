@@ -13,7 +13,7 @@ where
                  (return . B.pack)
                  (\e n _ _ -> putStrLn $ "Error in Publisher " ++
                                          n ++ ": " ++ show e)
-                 (\_ -> return ()) (once fetch) (\_ _ -> return ())
+                 (\_ -> return ()) (fetch1 fetch) (\_ _ -> return ())
 
   fetch :: FetchHelper () String
   fetch _ _ = do

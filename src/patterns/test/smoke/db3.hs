@@ -26,6 +26,7 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e
                             return Nothing)
+          (\_ -> one []) 
           (\_ -> dbExec s) (\_ -> dbFetcher) (\_ -> dbClose) $ 
           \srv -> forever $ do
             putStrLn $ "server " ++ srvName srv ++ " up and running..."

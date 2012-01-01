@@ -93,6 +93,23 @@ where
                      APP p  -> poll paused poller rcv p
   handleCmd _ _ _ _ = ouch "invalid poller in 'handleCmd'!"
 
+  {-
+  poll3 :: Bool -> [Z.Poll] -> (String -> IO ()) -> (String -> IO ()) -> String -> IO ()
+  poll3 paused poller rcv1 rcv2 param 
+    | paused    = handleCmd3 paused poller rcv param
+    | otherwise = do  
+        [c, s, t] <- Z.poll poller (-1)
+        case c of 
+          Z.S _ Z.In -> handleCmd3 paused poller rcv1 rcv2 param
+          _          -> 
+            case s of
+              Z.S _ Z.In -> rcv1 param >> poll3 paused poller rcv1 rcv2 param
+              _          -> 
+                case t of
+                  Z.S _ Z.In -> rcv2 param >> poll3 paused poller rcv1 rcv2 param
+                  _          ->               poll3 paused poller rcv1 rcv2 param
+  -}
+
   periodicSend :: Bool -> Millisecond -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   periodicSend paused period cmd send param = do
     release <- getCurrentTime

@@ -17,7 +17,7 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e
                             return Nothing)
-          (openS c) (fetcher fetch) closeS 
+          (one []) (openS c) (fetcher fetch) closeS 
 
   openS :: IConnection c => c -> OpenSourceIO String Statement
   openS c _ _ = do

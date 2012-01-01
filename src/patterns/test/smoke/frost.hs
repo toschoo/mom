@@ -12,7 +12,7 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in Serer " ++
                                        n ++ ": " ++ show e
                             return Nothing)
-          mkList listFetcher (\_ _ _ -> return ())
+          (one []) mkList listFetcher (\_ _ _ -> return ())
 
   mkList :: OpenSourceIO String [String]
   mkList _ _ = return (lines frost)

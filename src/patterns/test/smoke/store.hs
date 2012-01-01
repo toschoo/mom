@@ -10,10 +10,11 @@ where
   main = Z.withContext 1 $ \ctx -> do
     let ap = Address "tcp://localhost:5555" []
     withClient ctx ap (return . B.pack) (return . B.unpack) $ \c -> do
-      ei <- request c "test" (store $ save "test/out/test.txt")
+      ei <- request c (enum "test") (store $ save "test/out/test.txt")
       case ei of
         Left e  -> putStrLn $ "Error: " ++ show (e::SomeException)
         Right _ -> return ()
+    where enum = once (return . Just)
 
   save :: FilePath -> String -> IO ()
   save p s = appendFile p (s ++ "\n")

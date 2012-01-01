@@ -10,7 +10,8 @@ where
   main = Z.withContext 1 $ \ctx -> do
     let ap = Address "tcp://localhost:5555" []
     withClient ctx ap (return . B.pack) (return . B.unpack) $ \c -> do
-      ei <- request c "test" append
+      ei <- request c enum append
       case ei of
         Left  e -> putStrLn $ "Error: " ++ show (e::SomeException)
         Right m -> putStrLn $ m
+    where enum = once (return . Just) "test"

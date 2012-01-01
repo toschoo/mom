@@ -14,5 +14,5 @@ where
                                        n ++ ": " ++ show e
                             return Nothing)
                           -- return $ Just $ B.pack "ERROR!")
-          (\_ i -> return i) err (\_ _ _ -> return ())
+          (one []) (\_ i -> return i) err (\_ _ _ -> return ())
 

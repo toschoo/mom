@@ -22,20 +22,25 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
 	$(SMOKEDIR)/db3 \
 	$(SMOKEDIR)/file \
+	$(SMOKEDIR)/file2 \
 	$(SMOKEDIR)/frost \
 	$(SMOKEDIR)/hello \
 	$(SMOKEDIR)/err \
 	$(SMOKEDIR)/wuserver \
 	$(SMOKEDIR)/wuserver2 \
+	$(SMOKEDIR)/wuserver3 \
 	$(SMOKEDIR)/wuclient \
+	$(SMOKEDIR)/wufile \
 	$(SMOKEDIR)/wuclient2 \
 	$(SMOKEDIR)/worker \
 	$(SMOKEDIR)/rcv \
+	$(SMOKEDIR)/async \
 	$(SMOKEDIR)/push \
 	$(SMOKEDIR)/tolist \
 	$(SMOKEDIR)/tostr \
 	$(SMOKEDIR)/append \
-	$(SMOKEDIR)/store 
+	$(SMOKEDIR)/store \
+	$(SMOKEDIR)/ping
 
 $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -47,6 +52,9 @@ $(SMOKEDIR)/db3:	$(SMOKEDIR)/db3.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/file:	$(SMOKEDIR)/file.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/file2:	$(SMOKEDIR)/file2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
@@ -64,7 +72,13 @@ $(SMOKEDIR)/wuserver:	$(SMOKEDIR)/wuserver.hs $(SUBSRC)
 $(SMOKEDIR)/wuserver2:	$(SMOKEDIR)/wuserver2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/wuserver3:	$(SMOKEDIR)/wuserver3.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/wuclient:	$(SMOKEDIR)/wuclient.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/wufile:	$(SMOKEDIR)/wufile.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/wuclient2:	$(SMOKEDIR)/wuclient2.hs $(SUBSRC)
@@ -74,6 +88,9 @@ $(SMOKEDIR)/worker:	$(SMOKEDIR)/worker.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/rcv:	$(SMOKEDIR)/rcv.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/async:	$(SMOKEDIR)/async.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/push:	$(SMOKEDIR)/push.hs $(SUBSRC)
@@ -91,6 +108,9 @@ $(SMOKEDIR)/append:	$(SMOKEDIR)/append.hs $(SUBSRC)
 $(SMOKEDIR)/store:	$(SMOKEDIR)/store.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 
 clean:
 	rm -f $(SUTDIR)/*.hi
@@ -105,19 +125,25 @@ clean:
 	rm -f $(SMOKEDIR)/db2
 	rm -f $(SMOKEDIR)/db3
 	rm -f $(SMOKEDIR)/file
+	rm -f $(SMOKEDIR)/file2
 	rm -f $(SMOKEDIR)/frost
+	rm -f $(SMOKEDIR)/hello
 	rm -f $(SMOKEDIR)/err
 	rm -f $(SMOKEDIR)/wuserver
 	rm -f $(SMOKEDIR)/wuserver2
+	rm -f $(SMOKEDIR)/wuserver3
 	rm -f $(SMOKEDIR)/wuclient
+	rm -f $(SMOKEDIR)/wufile
 	rm -f $(SMOKEDIR)/wuclient2
 	rm -f $(SMOKEDIR)/worker
 	rm -f $(SMOKEDIR)/rcv
+	rm -f $(SMOKEDIR)/async
 	rm -f $(SMOKEDIR)/push
 	rm -f $(SMOKEDIR)/tolist
 	rm -f $(SMOKEDIR)/tostr
 	rm -f $(SMOKEDIR)/append
 	rm -f $(SMOKEDIR)/store
+	rm -f $(SMOKEDIR)/ping
 	rm -f $(OUTDIR)/*.txt
 
 dist-clean:	clean

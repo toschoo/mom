@@ -18,7 +18,7 @@ where
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e
                             return Nothing)
-          (dbExec s) dbFetcher dbClose
+          (one []) (dbExec s) dbFetcher dbClose
 
   oconv :: OutBound [SqlValue]
   oconv = return . B.pack . convRow

@@ -22,7 +22,7 @@ where
   rcv req = Z.withContext 1 $ \ctx -> do
     let ap = Address "tcp://localhost:5555" []
     withClient ctx ap (return . B.pack) (return . B.unpack) $ \s -> do
-      ei <- request s req it
+      ei <- request s (enum req) it
       case ei of
         Left e  -> putStrLn $ "Error: " ++ show (e::SomeException)
         Right _ -> return ()
@@ -32,4 +32,8 @@ where
     mbi <- EL.head
     case mbi of
       Nothing -> return ()
-      Just i  -> liftIO (putStrLn i) >> it 
+      Just i  -> liftIO (putStrLn i) >> it
+
+  enum :: String -> E.Enumerator String IO ()
+  enum = once (return . Just)
+ 
