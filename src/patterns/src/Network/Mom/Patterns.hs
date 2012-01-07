@@ -46,10 +46,8 @@ module Network.Mom.Patterns (
           Pipe, withPipe, push, 
           -- * Exclusive Pair
           Peer, peerContext, withPeer, send, receive,
-          -- * Devices
-          queue, forward, stream,
           -- * Service Access Point
-          AccessPoint(..),
+          AccessPoint(..), LinkType(..),
           -- * Converters
           InBound, OutBound,
           idIn, idOut, inString, outString, inUTF8, outUTF8,
@@ -137,6 +135,7 @@ where
   withServer :: Z.Context   -> String         -> 
                 String      -> Int            ->
                 AccessPoint                   -> 
+                LinkType                      ->
                 InBound c   -> OutBound o     -> 
                 OnErrorIO s i o               ->
                 (String  -> E.Iteratee c IO i) ->
@@ -144,9 +143,9 @@ where
                 (String  -> Fetch s o)         -> 
                 (String  -> CloseSourceIO i s) -> 
                 (Service -> IO ())            -> IO ()
-  withServer ctx name param n ac iconv oconv onerr build openS fetch closeS action =
+  withServer ctx name param n ac t iconv oconv onerr build openS fetch closeS action =
     withService ctx name param service action
-    where service = serve_ True n ac iconv oconv onerr 
+    where service = serve_ True n ac t iconv oconv onerr 
                            build openS fetch closeS
 
   ------------------------------------------------------------------------
@@ -154,14 +153,15 @@ where
   ------------------------------------------------------------------------
   serve :: Z.Context         -> String -> Int ->
            AccessPoint       -> 
+           LinkType          ->
            InBound c         -> OutBound o    ->
            OnErrorIO   s i o ->
            E.Iteratee c IO i ->
            OpenSourceIO  i s ->
            Fetch s o         -> 
            CloseSourceIO i s -> IO ()
-  serve ctx name n ac iconv oconv onErr build openS fetch closeS =
-    serve_ False n ac iconv oconv onErr 
+  serve ctx name n ac t iconv oconv onErr build openS fetch closeS =
+    serve_ False n ac t iconv oconv onErr 
            (\_ -> build) (\_ -> openS) (\_ -> fetch) (\_ -> closeS)
            ctx name "" "" 
 
@@ -169,7 +169,8 @@ where
   -- the server implementation
   ------------------------------------------------------------------------
   serve_ :: Bool -> Int                   ->
-            AccessPoint                   -> 
+            AccessPoint                   ->
+            LinkType                      -> 
             InBound c                     ->
             OutBound o                    ->
             OnErrorIO   s i o             ->
@@ -178,17 +179,18 @@ where
             (String -> Fetch s o)         -> 
             (String -> CloseSourceIO i s) -> 
             Z.Context -> String -> String -> String -> IO ()
-  serve_ controlled n ac iconv oconv onerr 
+  serve_ controlled n ac t iconv oconv onerr 
          build openS fetch closeS ctx name sockname param
   ------------------------------------------------------------------------
   -- prepare service for single client
   ------------------------------------------------------------------------
     | n <= 1 = (
       Z.withSocket ctx Z.Rep $ \client -> do
-        Z.bind client (acAdd ac)
+        link t ac client
         if controlled
           then Z.withSocket ctx Z.Sub $ \cmd -> do
-                 Z.connect cmd sockname
+                 Z.connect   cmd sockname
+                 Z.subscribe cmd ""
                  poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
           else forever $ go client param)
         `catch` (\e -> onerr e name Nothing Nothing Nothing >>= \_ -> 
@@ -198,7 +200,7 @@ where
   ------------------------------------------------------------------------
     | otherwise = (
         Z.withSocket ctx Z.XRep $ \clients -> do
-          Z.bind clients (acAdd ac)
+          link t ac clients 
           Z.withSocket ctx Z.XReq $ \workers -> do
             add <- ("inproc://wrk_" ++) <$> show <$> mkUniqueId
             Z.bind workers add 
@@ -213,7 +215,8 @@ where
             Z.connect worker add
             if controlled
               then Z.withSocket ctx Z.Sub $ \cmd -> do
-                     Z.connect cmd sockname
+                     Z.connect   cmd sockname
+                     Z.subscribe cmd ""
                      poll False 
                           [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param
               else forever $ go worker param
@@ -247,6 +250,17 @@ where
                 Just x  -> do 
                   Z.send sock x [Z.SndMore]
                   Z.send sock B.empty []
+
+  data LinkType = 
+         -- | Bind the address
+         Bind 
+         -- | Connect to the address
+         | Connect
+
+  link :: LinkType -> AccessPoint -> Z.Socket a -> IO ()
+  link t ac s = case t of
+                  Bind    -> Z.bind s (acAdd ac)
+                  Connect -> Z.connect s (acAdd ac)
 
   ------------------------------------------------------------------------
   -- Client data type
@@ -352,7 +366,8 @@ where
       Z.bind sock (acAdd ac)
       if controlled
         then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
+               Z.connect   cmd sockname
+               Z.subscribe cmd ""
                periodicSend False period cmd (go sock) param
         else periodic period $ go sock param)
     `catch` (\e -> onerr e name Nothing Nothing >> throwIO e)
@@ -415,7 +430,8 @@ where
       Z.subscribe sock sub
       if controlled
         then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
+               Z.connect   cmd sockname
+               Z.subscribe cmd ""
                poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
         else forever $ go sock param)
     `catch` (\e -> onerr e name Nothing Nothing >> throwIO e) 
@@ -474,7 +490,8 @@ where
       Z.connect sock (acAdd ac)
       if controlled
         then Z.withSocket ctx Z.Sub $ \cmd -> do
-               Z.connect cmd sockname
+               Z.connect   cmd sockname
+               Z.subscribe cmd ""
                poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
         else forever $ go sock param)
     `catch` (\e -> onerr e name Nothing Nothing)
@@ -540,36 +557,6 @@ where
 
   peerContext :: Peer a -> Z.Context
   peerContext = peeCtx
-
-  ------------------------------------------------------------------------
-  -- device - connects anything; 
-  -- enumerator: receive >>= iconv >>= transformer >>=
-  --             list    >>= oconv >>= iterator
-  -- cluster - control many services in one process
-  ------------------------------------------------------------------------
-  queue :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  queue ctx src trg = do
-    Z.withSocket ctx Z.XRep $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.XReq $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Queue from to
-
-  forward :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  forward ctx src trg = do
-    Z.withSocket ctx Z.Pub $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.Sub $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Forwarder from to
-
-  stream :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  stream ctx src trg = do
-    Z.withSocket ctx Z.Push $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.Pull $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Streamer from to
 
   ------------------------------------------------------------------------
   -- | Converters are user-defined actions passed to 

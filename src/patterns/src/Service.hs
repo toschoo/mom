@@ -1,14 +1,16 @@
 module Service (
           Service, srvContext, srvName, 
           stop, pause, resume, appCmd,
-          withService, poll,
-          periodic, periodicSend, Millisecond)
+          withService, poll, xpoll, XPoll(..),
+          periodic, periodicSend, 
+          Timeout, Millisecond, Identifier)
 where
 
   import           Factory
 
   import qualified Data.ByteString.Char8 as B
   import           Data.Time.Clock
+  import           Data.Map (Map)
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
@@ -93,22 +95,49 @@ where
                      APP p  -> poll paused poller rcv p
   handleCmd _ _ _ _ = ouch "invalid poller in 'handleCmd'!"
 
-  {-
-  poll3 :: Bool -> [Z.Poll] -> (String -> IO ()) -> (String -> IO ()) -> String -> IO ()
-  poll3 paused poller rcv1 rcv2 param 
-    | paused    = handleCmd3 paused poller rcv param
-    | otherwise = do  
-        [c, s, t] <- Z.poll poller (-1)
+  type Identifier = String
+  type Timeout    = Z.Timeout
+
+  data XPoll = XPoll {
+                 xpTmo   :: Timeout,
+                 xpMap   :: Map Identifier Z.Poll,
+                 xpIds   :: [Identifier],
+                 xpPoll  :: [Z.Poll]
+               }
+
+  xpoll :: Bool -> XPoll -> 
+           (String -> IO ()) ->
+           (XPoll -> Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
+  xpoll paused xp ontmo rcv param 
+    | paused    = handleCmdX paused xp ontmo rcv param
+    | otherwise = do
+        (c:ss) <- Z.poll (xpPoll xp) (xpTmo xp)
         case c of 
-          Z.S _ Z.In -> handleCmd3 paused poller rcv1 rcv2 param
-          _          -> 
+          Z.S _ Z.In -> handleCmdX paused xp ontmo rcv param
+          _          -> go (xpIds xp) ss
+    where go _      []     = xpoll paused xp ontmo rcv param
+          go (i:is) (s:ss) =
             case s of
-              Z.S _ Z.In -> rcv1 param >> poll3 paused poller rcv1 rcv2 param
-              _          -> 
-                case t of
-                  Z.S _ Z.In -> rcv2 param >> poll3 paused poller rcv1 rcv2 param
-                  _          ->               poll3 paused poller rcv1 rcv2 param
-  -}
+              Z.S _ Z.In -> rcv xp i s param >>
+                            xpoll paused xp ontmo rcv param
+              _          -> go is ss
+          go _      _     = error "Ouch!"
+
+  handleCmdX :: Bool -> XPoll -> 
+                (String -> IO ()) -> 
+                (XPoll -> Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
+  handleCmdX paused xp ontmo rcv param = 
+    case xpPoll xp of 
+      poller@[Z.S sock _, _] -> do
+        x <- Z.receive sock []
+        case readCmd $ B.unpack x of
+          Left _    -> xpoll paused xp ontmo rcv param
+          Right cmd -> case cmd of
+                         STOP   -> return ()
+                         PAUSE  -> xpoll True   xp ontmo rcv param
+                         RESUME -> xpoll False  xp ontmo rcv param
+                         APP p  -> xpoll paused xp ontmo rcv param
+      _ -> ouch "invalid poller in 'handleCmdX'!"
 
   periodicSend :: Bool -> Millisecond -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   periodicSend paused period cmd send param = do
@@ -167,4 +196,3 @@ where
   nominal2ms n = ceiling (n * (fromIntegral (1000::Int)))
 
   type Millisecond = Int
-

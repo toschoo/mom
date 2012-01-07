@@ -16,7 +16,7 @@ where
   main = 
     withContext 1 $ \ctx -> 
       withPuller ctx "Worker" noparam 
-            (Address "tcp://localhost:5557" [])
+            (Address "tcp://localhost:5558" [])
             (return . B.unpack)
             (\e nm _ _ -> do putStrLn $ "Error in Subscription " ++ nm ++ 
                                         ": " ++ show e)

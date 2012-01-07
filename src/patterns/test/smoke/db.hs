@@ -12,7 +12,7 @@ where
   main = withContext 1 $ \ctx -> do
     c <- connectODBC "DSN=jose"
     serve ctx "Player Service" 5
-          (Address "tcp://*:5555" []) 
+          (Address "tcp://localhost:5556" []) Connect
           (return . B.unpack) (return . B.pack)
           (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
                                        n ++ ": " ++ show e

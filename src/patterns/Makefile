@@ -8,6 +8,7 @@ SUTDIR = src/Network/Mom
 SRCDIR = src
 
 SUBSRC = $(SUTDIR)/Patterns.hs \
+	 $(SUTDIR)/Device.hs \
 	 $(SRCDIR)/Factory.hs \
 	 $(SRCDIR)/Service.hs
 
@@ -40,7 +41,12 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/tostr \
 	$(SMOKEDIR)/append \
 	$(SMOKEDIR)/store \
-	$(SMOKEDIR)/ping
+	$(SMOKEDIR)/ping \
+	$(SMOKEDIR)/device1 \
+	$(SMOKEDIR)/forward1 \
+	$(SMOKEDIR)/pipe1 \
+	$(SMOKEDIR)/queue1 \
+	$(SMOKEDIR)/queue2
 
 $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -111,6 +117,21 @@ $(SMOKEDIR)/store:	$(SMOKEDIR)/store.hs $(SUBSRC)
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/device1:	$(SMOKEDIR)/device1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/forward1:	$(SMOKEDIR)/forward1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/pipe1:	$(SMOKEDIR)/pipe1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/queue1:	$(SMOKEDIR)/queue1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/queue2:	$(SMOKEDIR)/queue2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 
 clean:
 	rm -f $(SUTDIR)/*.hi
@@ -144,6 +165,11 @@ clean:
 	rm -f $(SMOKEDIR)/append
 	rm -f $(SMOKEDIR)/store
 	rm -f $(SMOKEDIR)/ping
+	rm -f $(SMOKEDIR)/device1
+	rm -f $(SMOKEDIR)/forward1
+	rm -f $(SMOKEDIR)/pipe1
+	rm -f $(SMOKEDIR)/queue1
+	rm -f $(SMOKEDIR)/queue2
 	rm -f $(OUTDIR)/*.txt
 
 dist-clean:	clean

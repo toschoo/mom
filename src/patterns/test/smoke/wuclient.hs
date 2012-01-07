@@ -23,7 +23,7 @@ where
                   _   -> "10001" 
     withContext 1 $ \ctx -> 
       withSub ctx "Weather Report" noparam topic
-              (Address "tcp://localhost:5556" [])
+              (Address "tcp://localhost:5557" [])
               (return . B.unpack)
               (\e nm _ _ -> putStrLn $ "Error in Subscription " ++ nm ++ 
                                        ": " ++ show e)
