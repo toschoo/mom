@@ -1,21 +1,18 @@
 module Main
 where
 
+  import Helper
   import           Network.Mom.Patterns
   import qualified Data.ByteString.Char8 as B
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-    serve ctx "Frost" 5
-          (Address "tcp://*:5555" []) 
-          (return . B.unpack) (return . B.pack)
-          (\e n _ _ _ -> do putStrLn $ "Error in Serer " ++
-                                       n ++ ": " ++ show e
-                            return Nothing)
-          (one []) mkList listFetcher (\_ _ _ -> return ())
-
-  mkList :: OpenSourceIO String [String]
-  mkList _ _ = return (lines frost)
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> do
+      serve ctx "Frost" 5
+          (address l "tcp" "localhost" p []) l
+          (\_ -> return ()) (return . B.pack)
+          onErr (one ()) (listFetcher $ lines frost)
 
   frost, t, s, b :: String
   frost =  s ++ s ++ s ++ s ++ s ++ t ++ s ++ s ++ s ++ b

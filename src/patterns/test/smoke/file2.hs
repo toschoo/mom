@@ -1,6 +1,8 @@
 module Main
 where
 
+  import Helper
+
   import           Network.Mom.Patterns
 
   import qualified Data.ByteString.Char8 as B
@@ -10,19 +12,16 @@ where
   import           Control.Monad.Trans (liftIO)
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-    serve ctx "Player Service" 5
-          (Address "tcp://*:5555" []) 
-          (return . B.unpack) (return . B.pack)
-          (\e n _ _ _ -> do putStrLn $ "Error in " ++
-                                       n ++ ": " ++ show e
-                            return Nothing)
-          (one [])
-          (\_ _   -> return ()) 
-          (myFetcher "test/out/test.txt")
-          (\_ _ _ -> return ())
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> do
+      serve ctx "Player Service" 5
+            (address l "tcp" "localhost" p []) l
+            (\_ -> return ()) (return . B.pack)
+            onErr (one ())
+            (myFetcher "test/out/test.txt")
 
-  myFetcher :: FilePath -> Fetch () String
+  myFetcher :: FilePath -> Fetch_ String
   myFetcher p _ _ stp = go Nothing stp
     where go mbh step = 
             case step of

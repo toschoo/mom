@@ -1,6 +1,7 @@
 module Main
 where
 
+  import Helper
   import           Network.Mom.Patterns
 
   import qualified Data.ByteString.Char8 as B
@@ -10,13 +11,13 @@ where
   import           Control.Concurrent (threadDelay)
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> 
-           withPub ctx 
-             (Address "tcp://*:5556" [HighWM 100]) 
-             (return . B.pack) $ \p -> forever $ do
-               issue p (once weather "")
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> withPub ctx
+             (address l "tcp" "localhost" p [HighWM 100])
+             (return . B.pack) $ \pub -> forever $ do
+               issue pub (once weather "")
                threadDelay 100000
-             
 
   weather :: String -> IO (Maybe String)
   weather _ = do

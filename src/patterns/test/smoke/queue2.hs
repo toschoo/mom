@@ -1,23 +1,17 @@
 module Main 
 where
 
-  import           Network.Mom.Device -- Patterns.Device
-  import           Network.Mom.Patterns -- Patterns.Device
-  import           System.Environment
-  import qualified Data.Enumerator       as E
-  import qualified Data.Enumerator.List  as EL
-  import qualified Data.ByteString.Char8 as B
-  import           Control.Monad.Trans
-  import           Control.Concurrent
-  import           Control.Monad
-  import           Control.Exception
+  import Helper
+  import Network.Mom.Device -- Patterns.Device
+  import Network.Mom.Patterns -- Patterns.Device
 
   noparam :: String
   noparam = ""
 
   main :: IO ()
   main = do
-    let dealer = (Address "tcp://*:5555" [])
-    let router = (Address "tcp://*:5556" [])
+    (p1, p2, _) <- getPorts
+    let dealer = Address ("tcp://*:" ++ show p1) []
+    let router = Address ("tcp://*:" ++ show p2) []
     withContext 1 $ \ctx -> queue ctx dealer router 
   

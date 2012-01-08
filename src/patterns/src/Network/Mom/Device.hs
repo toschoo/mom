@@ -35,22 +35,11 @@ where
   import           Data.Enumerator (($$))
   import qualified Data.Enumerator.List   as EL (head)
   import           Data.Monoid 
-  import           Data.List
   import qualified Data.Map               as Map
   import           Data.Map (Map)
-  import qualified Data.Foldable          as F (toList)
   import qualified Data.Sequence          as S
-  import           Data.Sequence ((|>), (<|), ViewR(..))
-
-  import           Control.Concurrent 
-  import           Control.Applicative ((<$>))
-  import           Control.Monad
+  import           Data.Sequence ((|>), ViewR(..))
   import           Control.Monad.Trans
-  import           Prelude hiding (catch)
-  import           Control.Exception (bracket, catch, 
-                                      AssertionFailed(..), 
-                                      throwIO, SomeException, try)
-
   import qualified System.ZMQ as Z
 
   {- $devices
@@ -163,7 +152,7 @@ where
                 Timeout                        -> 
                 [PollEntry]                    -> 
                 InBound o -> OutBound o        -> 
-                OnError_ () o                  ->
+                OnError_                       ->
                 (String -> OnTimeout)          ->
                 (String -> Transformer o)      ->
                 (Service -> IO ())             -> IO ()
@@ -211,7 +200,7 @@ where
   withQueue :: Z.Context                  -> 
                String -> String           ->
                (AccessPoint, AccessPoint) ->
-               OnError_ () B.ByteString   -> 
+               OnError_                   -> 
                (Service -> IO ())         -> IO ()
   withQueue ctx name param (dealer, router) onerr act = 
     withDevice ctx name param (-1)
@@ -269,7 +258,7 @@ where
   withForwarder :: Z.Context                  -> 
                    String -> String -> String ->
                    (AccessPoint, AccessPoint) ->
-                   OnError_ () B.ByteString   -> 
+                   OnError_                   -> 
                    (Service -> IO ())         -> IO ()
   withForwarder ctx name param topics (sub, pub) onerr act = 
     withDevice ctx name param (-1)
@@ -292,7 +281,8 @@ where
   ------------------------------------------------------------------------
   -- | Starts pipeline;
   --   linking 'Pipe' and 'Puller';
-  --   implemented by means of 'withDevice' as:
+  --
+  --  Parameters:
   --
   --  * 'Z.Context': the /zmq/ Context
   --
@@ -312,7 +302,7 @@ where
   --
   --  * 'Service' -> IO (): the action to run
   --
-  --   'withQueue' is implemented by means of 'withDevice' as:
+  --   'withPipe' is implemented by means of 'withDevice' as:
   --   
   --   @  
   --      withPipeline ctx name param topics (puller, pusher) onerr act = 
@@ -325,7 +315,7 @@ where
   withPipeline :: Z.Context                   -> 
                    String -> String           ->
                    (AccessPoint, AccessPoint) ->
-                   OnError_ () B.ByteString   -> 
+                   OnError_                   -> 
                    (Service -> IO ())         -> IO ()
   withPipeline ctx name param (puller, pusher) onerr act = 
     withDevice ctx name param (-1)
@@ -650,7 +640,7 @@ where
   device_ :: Bool -> Timeout           ->
              [PollEntry]               -> 
              InBound o -> OutBound o   -> 
-             OnError_ () o             ->
+             OnError_                  ->
              (String -> OnTimeout)     ->
              (String -> Transformer o) ->
              Z.Context -> String       -> 
@@ -705,7 +695,7 @@ where
   runDevice :: Z.Context -> String       -> 
                Bool      -> Timeout      ->
                InBound o -> OutBound o   -> 
-               OnError_ () o             -> 
+               OnError_                  -> 
                (String -> OnTimeout)     ->
                (String -> Transformer o) -> 
                String -> String          ->
@@ -733,7 +723,7 @@ where
                 eiR <- E.run (rcvEnum s iconv $$ 
                               trans p strm S.empty) 
                 case eiR of
-                  Left e  -> onerr e name Nothing Nothing
+                  Left e  -> onerr e name
                   Right _ -> return ()
               _ -> error "Ouch!"
 

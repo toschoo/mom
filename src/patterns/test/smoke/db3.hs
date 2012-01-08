@@ -1,49 +1,47 @@
 module Main
 where
 
-  import           Network.Mom.Patterns
+  import           Helper
 
+  import           Network.Mom.Patterns
   import           Database.HDBC.ODBC
   import           Database.HDBC
-
   import qualified Data.ByteString.Char8 as B
-
-  import           Control.Concurrent (threadDelay)
-  import           Control.Monad      (forever)
-  import           Control.Exception
-  import           Prelude hiding (catch)
+  import           Control.Concurrent
+  import           Control.Monad      (when, forever)
+  import           System.Posix.Signals
 
   noparam :: String
   noparam = ""
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-    c <- connectODBC "DSN=jose"
-    s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
-    withServer ctx "Player" noparam 5
-          (Address "tcp://*:5555" []) 
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> do
+      c <- connectODBC "DSN=jose"
+      s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
+      withServer ctx "Player" noparam 5
+          (address l "tcp" "localhost" p []) l
           iconv oconv
-          (\e n _ _ _ -> do putStrLn $ "Error in Server " ++
-                                       n ++ ": " ++ show e
-                            return Nothing)
-          (\_  -> one []) 
-          (\_  -> dbExec s) (\_ -> dbFetcher) (\_ -> dbClose) $ 
-          \srv -> forever $ do
+          onErr (\_  -> one []) (\_ -> dbFetcher s) $ \srv -> do
+            stopper <- newMVar False
+            _ <- installHandler sigINT (Catch $ handler stopper) Nothing
+            go srv stopper
+      threadDelay 100000
+    where go srv m = do
             putStrLn $ "server " ++ srvName srv ++ " up and running..."
             threadDelay 1000000
+            stp <- readMVar m
+            when (not stp) $ go srv m
+              
 
-  oconv :: OutBound [SqlValue]
-  oconv = return . B.pack . convRow
-    where convRow :: [SqlValue] -> String
-          convRow [sqlId, sqlName] =
-            show idf ++ ": " ++ name
-            where idf  = (fromSql sqlId)::Int
-                  name = case fromSql sqlName of
-                           Nothing -> "NN"
-                           Just r  -> r
-          convRow _ = undefined
+  oconv :: OutBound String
+  oconv = return . B.pack 
 
   iconv :: InBound [SqlValue]
   iconv = return . convRow . B.unpack 
     where convRow :: String -> [SqlValue]
           convRow _ = []
+
+  handler :: MVar Bool -> IO ()
+  handler m = modifyMVar_ m (\_ -> return True)

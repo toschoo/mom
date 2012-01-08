@@ -32,7 +32,7 @@ where
   srvContext :: Service -> Z.Context
   srvContext = srvCtx
 
-  stop    :: Service -> IO ()
+  stop  :: Service -> IO ()
   stop = sendCmd STOP
 
   pause :: Service -> IO ()

@@ -8,8 +8,7 @@ where
   import           Control.Monad
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-      ping ctx True
+  main = withContext 1 $ \ctx -> ping ctx True
 
   data PingPong = Ping | Pong
     deriving (Show, Eq, Read)
@@ -19,13 +18,15 @@ where
   revert Pong = Ping
     
   ping :: Context -> Bool -> IO ()
-  ping ctx start = withPeer ctx start
-                     (Address "inproc://ping" [])
-                     (return . read . B.unpack)
-                     (return . B.pack . show) $ \p -> do
-      when start $ forkIO (ping ctx False) >>= \_ -> return ()
-      if start then go p  (Right Ping)
-               else receive p it >>= go p
+  ping ctx start = 
+    let l = if start then Bind else Connect
+     in withPeer ctx 
+          (Address "inproc://ping" []) l
+          (return . read . B.unpack)
+          (return . B.pack . show) $ \p -> do
+          when start $ forkIO (ping ctx False) >>= \_ -> return ()
+          if start then go p  (Right Ping)
+                   else receive p it >>= go p
     where go p eix = do
             threadDelay 100000
             case eix of

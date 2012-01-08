@@ -1,11 +1,10 @@
 module Main
 where
 
+  import Helper
   import           Network.Mom.Patterns
-
   import qualified Data.ByteString.Char8 as B
   import           System.Random (randomRIO)
-
   import           Control.Monad
   import           Control.Concurrent
 
@@ -13,16 +12,15 @@ where
   noparam = ""
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-           withPeriodicPub ctx "Weather Report" noparam 100
-                 (Address "tcp://*:5556" [HighWM 100]) 
-                 (return . B.pack)
-                 (\e n _ _ -> putStrLn $ "Error in Publisher " ++
-                                         n ++ ": " ++ show e)
-                 (\_ _ -> return ()) (\_ -> fetch1 fetch) (\_ _ _ -> return ()) $ 
-                 \pub -> forever $ do
-                    putStrLn $ "Waiting on " ++ srvName pub ++ "..."
-                    threadDelay 1000000
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> 
+      withPeriodicPub ctx "Weather Report" noparam 100
+           (address l "tcp" "localhost" p [])
+           (return . B.pack)
+           onErr_ (\_ -> fetch1 fetch) $ \pub -> forever $ do
+             putStrLn $ "Waiting on " ++ srvName pub ++ "..."
+             threadDelay 1000000
 
   fetch :: FetchHelper () String
   fetch _ _ = do

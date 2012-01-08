@@ -2,6 +2,7 @@ TDIR = test/suite
 SDIR = ../test/samples
 SMOKEDIR = ./test/smoke
 COMDIR = ../test/common
+HELPER = test/common
 OUTDIR = ./test/out
 
 SUTDIR = src/Network/Mom
@@ -10,13 +11,15 @@ SRCDIR = src
 SUBSRC = $(SUTDIR)/Patterns.hs \
 	 $(SUTDIR)/Device.hs \
 	 $(SRCDIR)/Factory.hs \
-	 $(SRCDIR)/Service.hs
+	 $(SRCDIR)/Service.hs \
+         $(HELPER)/Helper.hs
 
 GHC = ghc
 FLGS = -DTEST -Wall --make -threaded
 INC  =	-i./src \
 	-i./test/smoke \
 	-i./test/suite \
+	-i./test/common \
 	-i../test/common
 
 smoke:	$(SMOKEDIR)/db \
@@ -42,7 +45,6 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/append \
 	$(SMOKEDIR)/store \
 	$(SMOKEDIR)/ping \
-	$(SMOKEDIR)/device1 \
 	$(SMOKEDIR)/forward1 \
 	$(SMOKEDIR)/pipe1 \
 	$(SMOKEDIR)/queue1 \
@@ -117,9 +119,6 @@ $(SMOKEDIR)/store:	$(SMOKEDIR)/store.hs $(SUBSRC)
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(SMOKEDIR)/device1:	$(SMOKEDIR)/device1.hs $(SUBSRC)
-			$(GHC) $(FLGS) $(INC) $@
-
 $(SMOKEDIR)/forward1:	$(SMOKEDIR)/forward1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
@@ -142,6 +141,8 @@ clean:
 	rm -f $(SRCDIR)/*.o
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
+	rm -f $(HELPER)/*.hi
+	rm -f $(HELPER)/*.o
 	rm -f $(SMOKEDIR)/db
 	rm -f $(SMOKEDIR)/db2
 	rm -f $(SMOKEDIR)/db3
@@ -165,7 +166,6 @@ clean:
 	rm -f $(SMOKEDIR)/append
 	rm -f $(SMOKEDIR)/store
 	rm -f $(SMOKEDIR)/ping
-	rm -f $(SMOKEDIR)/device1
 	rm -f $(SMOKEDIR)/forward1
 	rm -f $(SMOKEDIR)/pipe1
 	rm -f $(SMOKEDIR)/queue1

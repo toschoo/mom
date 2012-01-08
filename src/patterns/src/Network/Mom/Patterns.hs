@@ -33,13 +33,11 @@
 module Network.Mom.Patterns (
           -- * Service/Client
           serve, withServer,
-          OpenSourceIO, CloseSourceIO, 
           Client, withClient, 
           request, askFor, checkFor,
           -- * Publish/Subscribe
           Pub, pubContext, withPub, issue,
           publish, withPeriodicPub,
-          OpenSource, CloseSource,
           withSub, subscribe, unsubscribe, resubscribe,
           -- * Pipeline
           pull, withPuller,
@@ -52,18 +50,15 @@ module Network.Mom.Patterns (
           InBound, OutBound,
           idIn, idOut, inString, outString, inUTF8, outUTF8,
           -- * Error Handlers
-          OnErrorIO, OnError, OnError_,
+          OnError, OnError_,
           chainIO, chainIOe, tryIO, tryIOe,
           -- * Generic Serivce
           Service, srvName, srvContext, pause, resume,
           -- * Enumerators
-          Fetch, FetchHelper,
+          Fetch_, Fetch, FetchHelper,
           fetcher, listFetcher,
           once, -- getFor
           fetch1, fetchFor, err,
-          handleFetcher, fileFetcher, dbFetcher, -- remove all 
-          noopenIO, nocloseIO, noopen, noclose,
-          dbExec, dbClose, fileOpen, fileClose, -- IO versions
           -- * Iteratees
           Dump, sink, sinkI, sinkLess, store,
           one, mbOne, toList, toString, append, fold,
@@ -82,21 +77,17 @@ where
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
   import qualified Data.Enumerator.List   as EL (head)
-  import qualified Data.Enumerator.Binary as EB 
-  import qualified Data.Monoid as M
-  import qualified Database.HDBC as SQL
+  import qualified Data.Monoid            as M
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
   import           Control.Monad
   import           Control.Monad.Trans
   import           Prelude hiding (catch)
-  import           Control.Exception (bracket, catch, 
-                                      AssertionFailed(..), 
-                                      throwIO, SomeException, try)
+  import           Control.Exception (AssertionFailed(..), SomeException,
+                                      catch, throwIO, try)
 
   import qualified System.ZMQ as Z
-  import qualified System.IO  as IO
 
   data AccessPoint = Address {
                        acAdd :: String,
@@ -105,48 +96,43 @@ where
   instance Show AccessPoint where
     show (Address s _) = s
 
-  type Fetch s o = Z.Context -> s -> E.Enumerator o IO ()
-  type FetchHelper   s o = Z.Context -> s -> IO (Maybe o)
+  type Fetch       i o = Z.Context -> i -> E.Enumerator o IO ()
+  type Fetch_        o = Fetch () o
+  type FetchHelper i o = Z.Context -> i -> IO (Maybe o)
 
   type Dump i = Z.Context -> E.Iteratee i IO ()
 
-  type OpenSourceIO  i s = Z.Context -> i -> IO s
-  type CloseSourceIO i s = Z.Context -> i -> s -> IO ()
+  type OnError   = SomeException -> String -> IO (Maybe B.ByteString)
+  type OnError_  = SomeException -> String -> IO ()
 
-  type OpenSource      s = Z.Context      -> IO s
-  type CloseSource     s = Z.Context -> s -> IO ()
+  data LinkType = 
+         -- | Bind the address
+         Bind 
+         -- | Connect to the address
+         | Connect
+    deriving (Show, Read)
 
-  type OnErrorIO s i o = SomeException                 -> 
-                         String                        ->
-                         Maybe s -> Maybe i -> Maybe o -> 
-                         IO (Maybe B.ByteString) 
-
-  type OnError   s a  = SomeException ->
-                         String       ->
-                         Maybe s -> Maybe a -> IO (Maybe B.ByteString)
-
-  type OnError_  s a  = SomeException ->
-                         String       ->
-                         Maybe s -> Maybe a -> IO ()
+  link :: LinkType -> AccessPoint -> Z.Socket a -> IO ()
+  link t ac s = case t of
+                  Bind    -> Z.bind s (acAdd ac)
+                  Connect -> Z.connect s (acAdd ac)
 
   ------------------------------------------------------------------------
   -- | Server/Client Pattern (Req/Rep) 
   ------------------------------------------------------------------------
-  withServer :: Z.Context   -> String         -> 
-                String      -> Int            ->
-                AccessPoint                   -> 
-                LinkType                      ->
-                InBound c   -> OutBound o     -> 
-                OnErrorIO s i o               ->
+  withServer :: Z.Context   -> String          -> 
+                String      -> Int             ->
+                AccessPoint                    -> 
+                LinkType                       ->
+                InBound c   -> OutBound o      -> 
+                OnError                        ->
                 (String  -> E.Iteratee c IO i) ->
-                (String  -> OpenSourceIO  i s) ->
-                (String  -> Fetch s o)         -> 
-                (String  -> CloseSourceIO i s) -> 
-                (Service -> IO ())            -> IO ()
-  withServer ctx name param n ac t iconv oconv onerr build openS fetch closeS action =
+                (String  -> Fetch i o)         -> 
+                (Service -> IO ())             -> IO ()
+  withServer ctx name param n ac t iconv oconv onerr build fetch action =
     withService ctx name param service action
     where service = serve_ True n ac t iconv oconv onerr 
-                           build openS fetch closeS
+                           build fetch
 
   ------------------------------------------------------------------------
   -- | Provide a Service
@@ -155,32 +141,27 @@ where
            AccessPoint       -> 
            LinkType          ->
            InBound c         -> OutBound o    ->
-           OnErrorIO   s i o ->
+           OnError           ->
            E.Iteratee c IO i ->
-           OpenSourceIO  i s ->
-           Fetch s o         -> 
-           CloseSourceIO i s -> IO ()
-  serve ctx name n ac t iconv oconv onErr build openS fetch closeS =
+           Fetch i o         -> IO ()
+  serve ctx name n ac t iconv oconv onErr build fetch =
     serve_ False n ac t iconv oconv onErr 
-           (\_ -> build) (\_ -> openS) (\_ -> fetch) (\_ -> closeS)
-           ctx name "" "" 
+           (\_ -> build) (\_ -> fetch) ctx name "" "" 
 
   ------------------------------------------------------------------------
   -- the server implementation
   ------------------------------------------------------------------------
-  serve_ :: Bool -> Int                   ->
-            AccessPoint                   ->
-            LinkType                      -> 
-            InBound c                     ->
-            OutBound o                    ->
-            OnErrorIO   s i o             ->
+  serve_ :: Bool -> Int                    ->
+            AccessPoint                    ->
+            LinkType                       -> 
+            InBound c                      ->
+            OutBound o                     ->
+            OnError                        ->
             (String  -> E.Iteratee c IO i) ->
-            (String -> OpenSourceIO  i s) ->
-            (String -> Fetch s o)         -> 
-            (String -> CloseSourceIO i s) -> 
-            Z.Context -> String -> String -> String -> IO ()
+            (String -> Fetch i o)          -> 
+            Z.Context -> String -> String  -> String -> IO ()
   serve_ controlled n ac t iconv oconv onerr 
-         build openS fetch closeS ctx name sockname param
+         build fetch ctx name sockname param
   ------------------------------------------------------------------------
   -- prepare service for single client
   ------------------------------------------------------------------------
@@ -193,8 +174,7 @@ where
                  Z.subscribe cmd ""
                  poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
           else forever $ go client param)
-        `catch` (\e -> onerr e name Nothing Nothing Nothing >>= \_ -> 
-                       throwIO e)
+        `catch` (\e -> onerr e name >>= \_ -> return ()) -- throwIO e)
   ------------------------------------------------------------------------
   -- prepare service for multiple clients 
   ------------------------------------------------------------------------
@@ -206,12 +186,11 @@ where
             Z.bind workers add 
             replicateM_ n (forkIO $ startWork add)
             Z.device Z.Queue clients workers) 
-        `catch` (\e -> onerr e name Nothing Nothing Nothing >>= \_ -> 
-                       throwIO e)
+        `catch` (\e -> onerr e name >>= \_ -> return ()) -- throwIO e)
   ------------------------------------------------------------------------
   -- start worker for multiple clients 
   ------------------------------------------------------------------------
-    where startWork add = Z.withSocket ctx Z.Rep $ \worker -> do
+    where startWork add = Z.withSocket ctx Z.Rep $ \worker -> (do
             Z.connect worker add
             if controlled
               then Z.withSocket ctx Z.Sub $ \cmd -> do
@@ -219,48 +198,31 @@ where
                      Z.subscribe cmd ""
                      poll False 
                           [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param
-              else forever $ go worker param
+              else forever $ go worker param)
+            `catch` (\e -> onerr e name >>= \_ -> return ()) -- throwIO e)
   ------------------------------------------------------------------------
   -- receive requests and do the job
   ------------------------------------------------------------------------
           go worker p = do
-              ei <- E.run (rcvEnum worker iconv $$ build p)   -- m   <- Z.receive worker []
-              ifLeft ei (\e -> handle worker e
-                                      Nothing Nothing Nothing) $ \i -> 
+              ei <- E.run (rcvEnum worker iconv $$ build p)
+              ifLeft ei (\e -> handle worker e) $ \i ->
                         catch (body worker p i)
-                              (\e -> handle worker e
-                                            Nothing Nothing Nothing)
-          body worker p i = bracket
-            (openS  p ctx i)
-            (closeS p ctx i)
-            (\s -> do
-               eiR <- E.run (fetch p ctx s $$
-                             itSend worker oconv)
+                              (\e -> handle worker e)
+          body worker p i = do
+               eiR <- E.run (fetch p ctx i $$ itSend worker oconv)
                ifLeft eiR
-                 (\e -> handle worker e (Just s) (Just i) Nothing)
-                 (\_ -> return ()))
+                 (\e -> handle worker e)
+                 (\_ -> return ())
   ------------------------------------------------------------------------
   -- generic error handler
   ------------------------------------------------------------------------
-          handle sock e mbs mbi mbo = 
-            onerr e name mbs mbi mbo >>= \mbX ->
+          handle sock e = onerr e name >>= \mbX ->
               case mbX of
                 Nothing -> 
                   Z.send sock B.empty []
                 Just x  -> do 
                   Z.send sock x [Z.SndMore]
                   Z.send sock B.empty []
-
-  data LinkType = 
-         -- | Bind the address
-         Bind 
-         -- | Connect to the address
-         | Connect
-
-  link :: LinkType -> AccessPoint -> Z.Socket a -> IO ()
-  link t ac s = case t of
-                  Bind    -> Z.bind s (acAdd ac)
-                  Connect -> Z.connect s (acAdd ac)
 
   ------------------------------------------------------------------------
   -- Client data type
@@ -335,33 +297,28 @@ where
   issue :: Pub o -> E.Enumerator o IO () -> IO ()
   issue p enum = E.run_ (enum $$ itSend (pubSock p) (pubOut p))
              
-  withPeriodicPub :: Z.Context                    -> 
-                     String -> String             ->
-                     Millisecond                  ->
-                     AccessPoint                  -> 
-                     OutBound o                   ->
-                     OnError_       s o           ->
-                     (String -> OpenSource     s) ->
-                     (String -> Fetch  s o)       -> 
-                     (String -> CloseSource    s) -> 
-                     (Service -> IO ())           -> IO ()
-  withPeriodicPub ctx name param period ac oconv onerr 
-                  openS fetch closeS action =
+  withPeriodicPub :: Z.Context            -> 
+                     String -> String     ->
+                     Millisecond          ->
+                     AccessPoint          -> 
+                     OutBound o           ->
+                     OnError_             ->
+                     (String -> Fetch_ o) -> 
+                     (Service -> IO ())   -> IO ()
+  withPeriodicPub ctx name param period ac oconv onerr fetch action =
     withService ctx name param service action
-    where service = publish_ True period ac oconv onerr openS fetch closeS
+    where service = publish_ True period ac oconv onerr fetch
 
-  publish_ :: Bool                      ->
-              Millisecond               ->
-              AccessPoint               -> 
-              OutBound o                ->
-              OnError_       s o        ->
-              (String -> OpenSource  s) ->
-              (String -> Fetch  s o)    -> 
-              (String -> CloseSource s) -> 
-              Z.Context -> String       -> 
-              String -> String          -> IO ()
+  publish_ :: Bool                  ->
+              Millisecond           ->
+              AccessPoint           -> 
+              OutBound o            ->
+              OnError_              ->
+              (String -> Fetch_  o) -> 
+              Z.Context -> String   -> 
+              String -> String      -> IO ()
   publish_ controlled period ac oconv onerr 
-           openS fetch closeS ctx name sockname param = (
+           fetch ctx name sockname param = (
     Z.withSocket ctx Z.Pub $ \sock -> do
       Z.bind sock (acAdd ac)
       if controlled
@@ -370,38 +327,30 @@ where
                Z.subscribe cmd ""
                periodicSend False period cmd (go sock) param
         else periodic period $ go sock param)
-    `catch` (\e -> onerr e name Nothing Nothing >> throwIO e)
+    `catch` (\e -> onerr e name >> throwIO e)
   ------------------------------------------------------------------------
   -- do the job periodically
   ------------------------------------------------------------------------
     where go sock p   = catch (body sock p) 
-                              (\e -> onerr e name Nothing Nothing)
-          body sock p =
-            bracket (openS  p ctx) 
-                    (closeS p ctx) 
-                    (\s -> do
-                       eiR <- E.run (fetch p ctx s $$ 
-                                     itSend sock oconv)
-                       ifLeft eiR
-                         (\e -> onerr e name (Just s) Nothing)
-                         (\_ -> return ()))
+                              (\e -> onerr e name)
+          body sock p = do
+            eiR <- E.run (fetch p ctx () $$ itSend sock oconv)
+            ifLeft eiR
+              (\e -> onerr e name)
+              (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- | Publish
   ------------------------------------------------------------------------
-  publish :: Z.Context          -> 
-             String             ->
-             Millisecond        ->
-             AccessPoint        -> 
-             OutBound o         ->
-             OnError_       s o ->
-             OpenSource     s   ->
-             Fetch  s o         -> 
-             CloseSource    s   -> IO ()
-  publish ctx name period ac oconv onErr openS fetch closeS = 
-    publish_ False period ac oconv onErr 
-             (\_ -> openS ) (\_ -> fetch ) (\_ -> closeS) 
-             ctx name "" ""
+  publish :: Z.Context   -> 
+             String      ->
+             Millisecond ->
+             AccessPoint -> 
+             OutBound o  ->
+             OnError_    ->
+             Fetch_   o  -> IO ()
+  publish ctx name period ac oconv onErr fetch = 
+    publish_ False period ac oconv onErr (\_ -> fetch ) ctx name "" ""
 
   ------------------------------------------------------------------------
   -- Subscription
@@ -409,7 +358,7 @@ where
   withSub :: Z.Context                   -> 
              String -> String -> String  -> 
              AccessPoint                 -> 
-             InBound i   -> OnError_ s i ->
+             InBound i   -> OnError_     ->
              (String  -> Dump i)         -> 
              (Service -> IO ())          -> IO ()
   withSub ctx name sub param ac iconv onErr dump action =
@@ -419,7 +368,7 @@ where
   subscribe_ :: Bool -> String -> 
                 AccessPoint    -> 
                 InBound i      -> 
-                OnError_ s i   -> 
+                OnError_       -> 
                 (String        -> Dump i)  -> 
                 Z.Context      -> 
                 String -> String -> String -> IO ()
@@ -434,17 +383,17 @@ where
                Z.subscribe cmd ""
                poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
         else forever $ go sock param)
-    `catch` (\e -> onerr e name Nothing Nothing >> throwIO e) 
+    `catch` (\e -> onerr e name >> throwIO e) 
     where go :: Z.Socket a -> String -> IO ()
           go sock p = E.run_ (rcvEnum sock iconv $$ dump p ctx)
-                      `catch` (\e -> do onerr e name Nothing Nothing)
+                      `catch` (\e -> do onerr e name)
 
   subscribe :: Z.Context     -> 
                String        -> 
                String        -> 
                AccessPoint   -> 
                InBound i     -> 
-               OnError_ s i  -> 
+               OnError_      -> 
                Dump   i      -> IO ()
   subscribe ctx name sub ac iconv onerr dump = 
     subscribe_ False sub ac iconv onerr (\_ -> dump) ctx name "" ""
@@ -462,7 +411,7 @@ where
                 String    -> String        ->
                 AccessPoint                ->
                 InBound i                  ->  
-                OnError_  s i              ->
+                OnError_                   ->
                 (String  -> Dump   i)      -> 
                 (Service -> IO ())         -> IO ()
   withPuller ctx name param ac iconv onerr dump action =
@@ -473,7 +422,7 @@ where
           String        -> 
           AccessPoint   ->
           InBound i     ->
-          OnError_  s i ->
+          OnError_      ->
           Dump   i      -> IO ()
   pull ctx name ac iconv onerr dump =
     pull_ False ac iconv onerr (\_ -> dump) ctx name "" ""
@@ -481,7 +430,7 @@ where
   pull_ :: Bool                 ->
            AccessPoint          ->
            InBound i            ->
-           OnError_ s i         ->
+           OnError_             ->
            (String -> Dump   i) ->
            Z.Context -> String  -> 
            String    -> String  -> IO ()
@@ -494,12 +443,12 @@ where
                Z.subscribe cmd ""
                poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
         else forever $ go sock param)
-    `catch` (\e -> onerr e name Nothing Nothing)
+    `catch` (\e -> onerr e name)
   ------------------------------------------------------------------------
   -- do the job 
   ------------------------------------------------------------------------
     where go sock p = E.run_ (rcvEnum sock iconv $$ dump p ctx)
-                      `catch` (\e -> onerr e name Nothing Nothing)
+                      `catch` (\e -> onerr e name)
  
   ------------------------------------------------------------------------
   -- Pipeline
@@ -536,18 +485,16 @@ where
                   peeOut  :: OutBound a
                 }
 
-  withPeer :: Z.Context -> Bool -> AccessPoint -> 
+  withPeer :: Z.Context -> AccessPoint -> LinkType ->
               InBound a -> OutBound a  ->
               (Peer a -> IO ())        -> IO ()
-  withPeer ctx start ac iconv oconv act = Z.withSocket ctx Z.Pair $ \s -> do
-    if start then Z.bind s (acAdd ac) 
-             else Z.connect s (acAdd ac)
-    act Peer {
-          peeCtx  = ctx,
-          peeSock = s,
-          peeAdd  = ac,
-          peeIn   = iconv,
-          peeOut  = oconv}
+  withPeer ctx ac t iconv oconv act = Z.withSocket ctx Z.Pair $ \s -> 
+    link t ac s >> act Peer {
+                         peeCtx  = ctx,
+                         peeSock = s,
+                         peeAdd  = ac,
+                         peeIn   = iconv,
+                         peeOut  = oconv}
 
   send :: Peer o -> E.Enumerator o IO () -> IO ()
   send p enum = E.run_ (enum $$ itSend (peeSock p) (peeOut p))
@@ -634,34 +581,6 @@ where
   inString = return . B.unpack
 
   ------------------------------------------------------------------------
-  -- standard OpenSource / CloseSource
-  ------------------------------------------------------------------------
-  noopenIO :: OpenSourceIO i ()
-  noopenIO _ _ = return ()
-
-  nocloseIO :: CloseSourceIO i ()
-  nocloseIO _ _ = return
-
-  noopen :: OpenSource ()
-  noopen _ = return ()
-
-  noclose :: CloseSource ()
-  noclose _ = return
-
-  dbExec :: SQL.Statement -> OpenSourceIO [SQL.SqlValue] SQL.Statement
-  dbExec s _ keys = 
-    liftIO (SQL.execute s keys) >>= (\_ -> return s)
-
-  dbClose :: CloseSourceIO [SQL.SqlValue] SQL.Statement
-  dbClose _ _ _ = return ()
-
-  fileOpen :: OpenSourceIO FilePath IO.Handle
-  fileOpen _ f = IO.openFile f IO.ReadMode
-
-  fileClose :: CloseSourceIO FilePath IO.Handle
-  fileClose _ _ h = IO.hClose h 
-
-  ------------------------------------------------------------------------
   -- enumerator
   ------------------------------------------------------------------------
   rcvEnum :: Z.Socket a -> InBound i -> E.Enumerator i IO b
@@ -697,24 +616,24 @@ where
   ------------------------------------------------------------------------
   -- standard enumerators
   ------------------------------------------------------------------------
-  fetcher :: FetchHelper s o -> Fetch s o 
-  fetcher fetch ctx s step =
+  fetcher :: FetchHelper i o -> Fetch i o 
+  fetcher fetch ctx i step =
     case step of
-      (E.Continue k) -> chainIOe (fetch ctx s) $ \mbo ->
+      (E.Continue k) -> chainIOe (fetch ctx i) $ \mbo ->
         case mbo of 
           Nothing -> E.continue k
-          Just o  -> fetcher fetch ctx s $$ k (E.Chunks [o]) 
+          Just o  -> fetcher fetch ctx i $$ k (E.Chunks [o]) 
       _ -> E.returnI step
 
-  fetch1 :: FetchHelper s o -> Fetch s o
+  fetch1 :: FetchHelper i o -> Fetch i o
   fetch1 = go True 
-    where go first fetch ctx s step =
+    where go first fetch ctx i step =
             case step of
               (E.Continue k) -> 
-                if first then chainIOe (fetch ctx s) $ \mbX ->
+                if first then chainIOe (fetch ctx i) $ \mbX ->
                   case mbX of
                     Nothing -> E.continue k 
-                    Just x  -> go False fetch ctx s $$ k (E.Chunks [x])
+                    Just x  -> go False fetch ctx i $$ k (E.Chunks [x])
                 else E.continue k
               _ -> E.returnI step
 
@@ -730,43 +649,28 @@ where
                 else E.continue k
               _ -> E.returnI step
 
-  listFetcher :: Fetch [o] o 
-  listFetcher ctx l step =
+  listFetcher :: [o] -> Fetch_ o 
+  listFetcher l ctx _ step =
     case step of
       (E.Continue k) -> do
         if null l then E.continue k
-                  else listFetcher ctx (tail l) $$ k (E.Chunks [head l])
+                  else listFetcher (tail l) ctx () $$ k (E.Chunks [head l])
       _ -> E.returnI step
 
-  fetchFor :: (Z.Context -> Int -> IO o) -> Fetch (Int, Int) o
-  fetchFor fetch c (i,e) step =
+  fetchFor :: (Z.Context -> Int -> IO o) -> (Int, Int) -> Fetch () o
+  fetchFor fetch (i,e) c _ step =
     case step of
       (E.Continue k) -> do
-         if i == e then E.continue k
+         if i >= e then E.continue k
                    else chainIOe (fetch c i) $ \x -> 
-                     fetchFor fetch c (i+1, e) $$ k (E.Chunks [x])
+                     fetchFor fetch (i+1, e) c () $$ k (E.Chunks [x])
       _ -> E.returnI step
 
-  dbFetcher :: Fetch SQL.Statement [SQL.SqlValue]
-  dbFetcher c s step = do
-    case step of
-      (E.Continue k) -> chainIOe (SQL.fetchRow s) $ \mbr ->
-         case mbr of
-           Nothing -> E.continue k
-           Just r  -> dbFetcher c s $$ k (E.Chunks [r]) 
-      _ -> E.returnI step
-
-  fileFetcher :: Fetch IO.Handle B.ByteString 
-  fileFetcher = handleFetcher 4096
-
-  handleFetcher :: Integer -> Fetch IO.Handle B.ByteString
-  handleFetcher bufSize _ h = EB.enumHandle bufSize h
-
-  err :: Fetch s o
+  err :: Fetch_ o
   err _ _ s = do
-    ei <- liftIO $ catch (do _ <- throwIO $ AssertionFailed "Test"
-                             return $ Right ())
-                         (\e -> return $ Left e)
+    ei <- liftIO $ catch 
+            (throwIO (AssertionFailed "Test") >>= \_ -> return $ Right ())
+            (\e -> return $ Left e)
     case ei of
       Left e  -> E.returnI (E.Error e)
       Right _ -> E.returnI s

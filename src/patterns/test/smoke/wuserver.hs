@@ -1,19 +1,19 @@
 module Main
 where
 
+  import Helper
   import           Network.Mom.Patterns
-
   import qualified Data.ByteString.Char8 as B
   import           System.Random (randomRIO)
 
   main :: IO ()
-  main = withContext 1 $ \ctx -> do
-           publish ctx "Weather Report " 100
-                 (Address "tcp://*:5556" [HighWM 100]) 
-                 (return . B.pack)
-                 (\e n _ _ -> putStrLn $ "Error in Publisher " ++
-                                         n ++ ": " ++ show e)
-                 (\_ -> return ()) (fetch1 fetch) (\_ _ -> return ())
+  main = do
+    (l, p, _) <- getOs
+    withContext 1 $ \ctx -> do
+      publish ctx "Weather Report " 100
+         (address l "tcp" "localhost" p [HighWM 100])
+         (return . B.pack)
+         onErr_ (fetch1 fetch)
 
   fetch :: FetchHelper () String
   fetch _ _ = do
