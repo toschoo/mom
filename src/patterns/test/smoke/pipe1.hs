@@ -2,7 +2,6 @@ module Main
 where
 
   import           Helper
-  import           Network.Mom.Device -- Patterns.Device
   import           Network.Mom.Patterns -- Patterns.Device
   import           Control.Concurrent
   import           Control.Monad
@@ -16,7 +15,7 @@ where
     let puller = Address ("tcp://localhost:" ++ show p1) []
     let pusher = Address ("tcp://*:"         ++ show p2) []
     withContext 1 $ \ctx -> 
-      withPipeline ctx "Pipeline" noparam (puller,pusher) onErr_ wait
+      withPipeline ctx "Pipeline" (puller,pusher) onErr_ wait
   
   wait :: Service -> IO ()
   wait s = forever $ do putStrLn $ "Waiting for " ++ srvName s ++ "..."

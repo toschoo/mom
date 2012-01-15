@@ -1,16 +1,13 @@
 module Main
 where
 
-  import           Helper
-
+  import           Helper (getOs, address, onErr, 
+                           dbFetcher, untilInterrupt)
   import           Network.Mom.Patterns
   import           Database.HDBC.ODBC
   import           Database.HDBC
   import qualified Data.ByteString.Char8 as B
   import           Control.Concurrent
-
-  noparam :: String
-  noparam = ""
 
   main :: IO ()
   main = do
@@ -33,4 +30,4 @@ where
   iconv :: InBound [SqlValue]
   iconv = return . convRow . B.unpack 
     where convRow :: String -> [SqlValue]
-          convRow _ = []
+          convRow _ = [] -- no input parameter, in fact

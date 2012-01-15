@@ -2,7 +2,6 @@ module Main
 where
 
   import           Helper
-  import           Network.Mom.Device
   import           Network.Mom.Patterns
   import           Control.Concurrent
   import           Control.Monad
@@ -16,7 +15,7 @@ where
     let sub = Address ("tcp://localhost:" ++ show p1) []
     let pub = Address ("tcp://*:"         ++ show p2) []
     withContext 1 $ \ctx -> 
-      withForwarder ctx "Weather Forwarder" noparam "" (sub,pub) onErr_ wait
+      withForwarder ctx "Weather Forwarder" "" (sub,pub) onErr_ wait
   
   wait :: Service -> IO ()
   wait s = forever $ do putStrLn $ "Waiting for " ++ srvName s ++ "..."

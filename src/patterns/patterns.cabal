@@ -14,18 +14,18 @@ Description:
 
   There are common patterns often reused 
   - or, in fact, reimplemented,
-  in many message-oriented applications,
-  such as Server/Client (a.k.a Request/Response),
-         Publish/Subscribe,
-         Pipline (a.k.a. Push/Pull) and
+  in many distributed, message-oriented applications,
+  such as Server\/Client (a.k.a Request\/Response),
+         Publish\/Subscribe,
+         Pipline (a.k.a. Push\/Pull) and
          Exclusive Pair (a.k.a. Peer-to-Peer).
-  The Patterns package implements those patterns 
-  using the /zeromq/ library without using centralised brokers.
+  The Patterns package implements those patterns based on zeromq.
 
-  More information, examples and a test suite are available 
-  on <http://github.com/toschoo/stompl>.
-  More information about zeromq can be found at
+  More information on zeromq can be found at
   <http://www.zeromq.org>.
+
+  More examples and a test suite are available 
+  on <http://github.com/toschoo/stompl>.
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
@@ -34,12 +34,14 @@ Library
                    containers >= 0.3.0.0,
                    zeromq-haskell >= 0.8.2,
                    enumerator >= 0.4.11,
-                   mtl >= 2.0.1.0,
-                   HDBC >= 2.2.6.1,
+                   mtl         >= 2.0.1.0,
                    time        >= 1.1.4
 
   hs-source-dirs: src/Network/Mom, src
                    
-  Exposed-Modules: Network.Mom.Patterns, Network.Mom.Device
-  other-modules: Factory, Service
+  Exposed-Modules: Network.Mom.Patterns, 
+                   Network.Mom.Patterns.Basic,
+                   Network.Mom.Patterns.Device,
+                   Network.Mom.Patterns.Enumerator
+  other-modules: Factory, Types, Service
 

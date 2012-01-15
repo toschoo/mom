@@ -7,18 +7,25 @@ where
   import qualified Data.Enumerator.List   as EL
   import qualified Data.ByteString.Char8  as B
   import qualified Database.HDBC          as SQL
+  import           Control.Concurrent
   import           Control.Monad.Trans
+  import           Control.Monad
   import           Network.Mom.Patterns
   import qualified System.IO              as IO
   import           System.Environment
+  import           System.Posix.Signals
 
   getOs :: IO (LinkType, Int, [String])
   getOs = do
     os <- getArgs
     case os of
-      [t, p]  -> return (read t, read p, [])
-      (t:p:r) -> return (read t, read p, r)
-      _       -> usage 
+      [t, p]  -> case parseLink t of
+                   Just l  -> return (l, read p, [])
+                   Nothing -> usage1
+      (t:p:r) -> case parseLink t of
+                   Just l  -> return (l, read p, r)
+                   Nothing -> usage1
+      _       -> usage1 
 
   getPorts :: IO (Int, Int, [String])
   getPorts = do
@@ -26,10 +33,23 @@ where
     case os of
       [s, t]  -> return (read s, read t, [])
       (s:t:r) -> return (read s, read t, r)
-      _       -> usage 
+      _       -> usage2 
 
-  usage :: IO a
-  usage = error "<program> 'bind' | 'connect' <port>"
+  usage1 :: IO a
+  usage1 = error "<program> 'bind' | 'connect' <port>"
+
+  usage2 :: IO a
+  usage2 = error "<program> <port1> <port2>"
+
+  untilInterrupt :: IO () -> IO ()
+  untilInterrupt run = do
+     continue <- newMVar True
+     _ <- installHandler sigINT (Catch $ handler continue) Nothing
+     go continue 
+    where handler m = modifyMVar_ m (\_ -> return False)
+          go      m = do run
+                         continue <- readMVar m
+                         when continue $ go m
 
   address :: LinkType         -> 
              String -> String -> Int -> 
@@ -40,12 +60,12 @@ where
       Connect -> Address (prot ++ "://" ++ add ++ ":" ++ show port) os
 
   onErr :: OnError
-  onErr e n = do
-    putStrLn $ "Error in " ++ n ++ ": " ++ show e
+  onErr c e n = do
+    putStrLn $ show c ++ " in " ++ n ++ ": " ++ show e
     return Nothing 
 
   onErr_ :: OnError_
-  onErr_ e n = putStrLn $ "Error in " ++ n ++ ": " ++ show e
+  onErr_ c e n = putStrLn $ show c ++ " in " ++ n ++ ": " ++ show e
 
   dbExec :: SQL.Statement -> [SQL.SqlValue] -> IO ()
   dbExec s ps = SQL.execute s ps >>= \_ -> return ()

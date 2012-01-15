@@ -9,8 +9,11 @@ SUTDIR = src/Network/Mom
 SRCDIR = src
 
 SUBSRC = $(SUTDIR)/Patterns.hs \
-	 $(SUTDIR)/Device.hs \
+	 $(SUTDIR)/Patterns/Basic.hs \
+	 $(SUTDIR)/Patterns/Device.hs \
+	 $(SUTDIR)/Patterns/Enumerator.hs \
 	 $(SRCDIR)/Factory.hs \
+	 $(SRCDIR)/Types.hs \
 	 $(SRCDIR)/Service.hs \
          $(HELPER)/Helper.hs
 
@@ -135,6 +138,8 @@ $(SMOKEDIR)/queue2:	$(SMOKEDIR)/queue2.hs $(SUBSRC)
 clean:
 	rm -f $(SUTDIR)/*.hi
 	rm -f $(SUTDIR)/*.o
+	rm -f $(SUTDIR)/Patterns/*.hi
+	rm -f $(SUTDIR)/Patterns/*.o
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
 	rm -f $(SRCDIR)/*.hi

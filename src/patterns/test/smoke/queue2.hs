@@ -2,7 +2,6 @@ module Main
 where
 
   import Helper
-  import Network.Mom.Device -- Patterns.Device
   import Network.Mom.Patterns -- Patterns.Device
 
   noparam :: String

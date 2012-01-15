@@ -1,7 +1,4 @@
-module Network.Mom.Device (
-         -- * Devices
-         -- $devices
-
+module Network.Mom.Patterns.Device (
          -- * Device Services
          withDevice,
          withQueue, queue, 
@@ -9,7 +6,6 @@ module Network.Mom.Device (
          withPipeline, pipeline,
          -- * Polling
          PollEntry, pollEntry,
-         AccessType(..), LinkType(..),
          -- * Streamer 
          Streamer, getStreamSource, filterTargets,
          -- * Transformer
@@ -27,8 +23,8 @@ module Network.Mom.Device (
        
 where
 
+  import           Types
   import           Service
-  import           Network.Mom.Patterns
 
   import qualified Data.ByteString.Char8  as B
   import qualified Data.Enumerator        as E
@@ -39,72 +35,7 @@ where
   import           Data.Map (Map)
   import qualified Data.Sequence          as S
   import           Data.Sequence ((|>), ViewR(..))
-  import           Control.Monad.Trans
   import qualified System.ZMQ as Z
-
-  {- $devices
-
-     Devices relay messages between compatible services, /i.e./
-     Servers and Clients,
-     Publishers and Subscribers,
-     Pipes and Pullers and
-     Peers and Peers.
-
-     A device polls over a list of access points;
-     the list is passed in when the device is started, but
-     the application may, at any time,
-     add or remove access points.
-     When data is available,
-     the device activates a stream transformer
-     defined by the application
-     that transforms the incoming data stream
-     into an outgoing data stream.
-     The application decides also
-     where the outgoing stream is directed to.
-     This may be one or more access points
-     including the source itself.
-     Note, however, that the basic patterns
-     restrict the possible combinations 
-     and define protocols of message exchange:
-    
-     * a client must send a request to a server or a dealer
-       before it can receive messages (from a server or a dealer)
- 
-     * a server must receive a request from a client or a router
-       before it can send messages back to this client or router;
-
-     * a dealer can receive message only from a client or a router
-       and can send messages only to a server or a router;
-
-     * a router can receive messages only from a server or a router
-       and can send messages only to a server or a router;
-
-     * a publisher cannot recevie messages and
-       can send messages only to subscribers;
-
-     * a subscriber cannot send messages and
-       can receive messages only from a publisher;
-
-     * a pipe cannot receive messages and
-       can send message only to a puller;
-
-     * a puller cannot send messages and
-       can only receive messages from a pipe;
-
-     * peers can exchange messages only with other peers.
-     
-     Devices are more general than patterns
-     and could even be used to simulate basic patterns,
-     which may be usefull in some situations.
-     Since basic patterns implement the pattern rules above,
-     it is preferrable to use basic patterns instead of devices
-     where ever possible.
-     The main purpose of devices
-     is to link topologies for 
-     load-balancing, routing or scaling;
-     they can be seen as a kind of smart software switches
-     connecting basic patterns.
-  -}
 
   ------------------------------------------------------------------------
   -- | Starts a device;
@@ -173,8 +104,6 @@ where
   --
   --  * 'String': the queue name
   --
-  --  * 'String': the queue parameter
-  --
   --  * ('AccessPoint', 'AccessPoint'): 
   --                       the access points;
   --                       the first must be a /dealer/,
@@ -190,20 +119,20 @@ where
   --   'withQueue' is implemented by means of 'withDevice' as:
   --   
   --   @  
-  --      withQueue ctx name param (dealer, router) onerr act = 
-  --        withDevice ctx name param (-1)
+  --      withQueue ctx name (dealer, router) onerr act = 
+  --        withDevice ctx name noparam (-1)
   --              [pollEntry \"clients\" XDealer dealer Bind    \"\",
   --               pollEntry \"server\"  XRouter router Connect \"\"]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
   withQueue :: Z.Context                  -> 
-               String -> String           ->
+               String                     ->
                (AccessPoint, AccessPoint) ->
                OnError_                   -> 
                (Service -> IO ())         -> IO ()
-  withQueue ctx name param (dealer, router) onerr act = 
-    withDevice ctx name param (-1)
+  withQueue ctx name (dealer, router) onerr act = 
+    withDevice ctx name noparam (-1)
           [pollEntry "clients" XDealer dealer Bind "",
            pollEntry "servers" XRouter router Bind ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
@@ -231,8 +160,6 @@ where
   --
   --  * 'String': the forwarder name
   --
-  --  * 'String': the forwarder parameter
-  --
   --  * 'String': the subscription topic
   --
   --  * ('AccessPoint', 'AccessPoint'):
@@ -248,20 +175,20 @@ where
   --  * 'Service' -> IO (): the action to run
   --   
   --   @  
-  --      withForwarder ctx name param topics (sub, pub) onerr act = 
-  --        withDevice ctx name param (-1)
+  --      withForwarder ctx name topics (sub, pub) onerr act = 
+  --        withDevice ctx name noparam (-1)
   --              [pollEntry \"subscriber\" XSub router Connect topics,
   --               pollEntry \"publisher\"  XPub dealer Bind    \"\"]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
   withForwarder :: Z.Context                  -> 
-                   String -> String -> String ->
+                   String -> String           -> 
                    (AccessPoint, AccessPoint) ->
                    OnError_                   -> 
                    (Service -> IO ())         -> IO ()
-  withForwarder ctx name param topics (sub, pub) onerr act = 
-    withDevice ctx name param (-1)
+  withForwarder ctx name topics (sub, pub) onerr act = 
+    withDevice ctx name noparam (-1)
           [pollEntry "subscriber" XSub sub Connect topics, 
            pollEntry "publisher"  XPub pub Bind    ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
@@ -288,8 +215,6 @@ where
   --
   --  * 'String': the pipeline name
   --
-  --  * 'String': the pipeline parameter
-  --
   --  * ('AccessPoint', 'AccessPoint'): 
   --                       the access points;
   --                       the first must be a /puller/,
@@ -305,20 +230,20 @@ where
   --   'withPipe' is implemented by means of 'withDevice' as:
   --   
   --   @  
-  --      withPipeline ctx name param topics (puller, pusher) onerr act = 
-  --        withDevice ctx name param (-1)
+  --      withPipeline ctx name topics (puller, pusher) onerr act = 
+  --        withDevice ctx name noparam (-1)
   --              [pollEntry \"pull\"  XPull puller Connect topics,
   --               pollEntry \"push\"  XPush pusher Bind    \"\"]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
   withPipeline :: Z.Context                   -> 
-                   String -> String           ->
+                   String                     ->
                    (AccessPoint, AccessPoint) ->
                    OnError_                   -> 
                    (Service -> IO ())         -> IO ()
-  withPipeline ctx name param (puller, pusher) onerr act = 
-    withDevice ctx name param (-1)
+  withPipeline ctx name (puller, pusher) onerr act = 
+    withDevice ctx name noparam (-1)
           [pollEntry "pull"  XPull puller Connect "", 
            pollEntry "push"  XPipe pusher Bind    ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
@@ -682,7 +607,7 @@ where
                   Z.subscribe s (pollSub k) >> go s
     where go s = do case pollLink k of 
                       Bind    -> Z.bind    s (pollAdd k)
-                      Connect -> Z.connect s (pollAdd k)
+                      Connect -> trycon    s (pollAdd k) retries
                     let p   = Z.S s Z.In
                     let m'  = Map.insert (pollId k) p m
                     let is' = pollId k : is
@@ -707,7 +632,7 @@ where
             sockname param m is ps = 
     if controlled
       then Z.withSocket ctx Z.Sub $ \cmd -> do
-              Z.connect   cmd sockname
+              trycon      cmd sockname retries
               Z.subscribe cmd ""
               let p = Z.S cmd Z.In
               xpoll False (XPoll tmo m is (p:ps)) ontmo go param
@@ -723,23 +648,8 @@ where
                 eiR <- E.run (rcvEnum s iconv $$ 
                               trans p strm S.empty) 
                 case eiR of
-                  Left e  -> onerr e name
+                  Left e  -> onerr Error e name
                   Right _ -> return ()
               _ -> error "Ouch!"
 
-  ------------------------------------------------------------------------
-  -- only temporarly here!
-  ------------------------------------------------------------------------
-  rcvEnum :: Z.Socket a -> InBound i -> E.Enumerator i IO b
-  rcvEnum s iconv = go True
-    where go more step = 
-            case step of 
-              E.Continue k -> 
-                if more then do
-                    x <- liftIO $ Z.receive s []
-                    m <- liftIO $ Z.moreToReceive s
-                    i <- tryIO  $ iconv x
-                    go m $$ k (E.Chunks [i])
-                  else E.continue k
-              _ -> E.returnI step
 

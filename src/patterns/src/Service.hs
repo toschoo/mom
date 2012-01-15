@@ -1,5 +1,5 @@
 module Service (
-          Service, srvContext, srvName, 
+          Service, srvContext, srvName, srvId,
           stop, pause, resume, appCmd,
           withService, poll, xpoll, XPoll(..),
           periodic, periodicSend, 
@@ -16,31 +16,44 @@ where
   import           Control.Applicative ((<$>))
   import           Control.Monad
   import           Prelude hiding (catch)
-  import           Control.Exception (bracket)
-
+  import           Control.Exception (bracket, finally)
   import qualified System.ZMQ as Z
 
   ------------------------------------------------------------------------
-  -- Service
+  -- | Generic Service data type
   ------------------------------------------------------------------------
   data Service = Service {
                    srvCtx    :: Z.Context,
+                   -- | Obtains the service name
                    srvName   :: String,
                    srvCmd    :: Z.Socket Z.Pub,
                    srvId     :: ThreadId
                  }
+
+  ------------------------------------------------------------------------
+  -- | Obtains the 'Z.Context' from 'Service'
+  ------------------------------------------------------------------------
   srvContext :: Service -> Z.Context
   srvContext = srvCtx
 
   stop  :: Service -> IO ()
   stop = sendCmd STOP
 
+  ------------------------------------------------------------------------
+  -- | Pauses the 'Service'
+  ------------------------------------------------------------------------
   pause :: Service -> IO ()
   pause = sendCmd PAUSE
 
+  ------------------------------------------------------------------------
+  -- | Resumes the 'Service'
+  ------------------------------------------------------------------------
   resume :: Service -> IO ()
   resume = sendCmd RESUME
 
+  ------------------------------------------------------------------------
+  -- | Changes the 'Service' control parameter
+  ------------------------------------------------------------------------
   appCmd :: String -> Service -> IO ()
   appCmd s = sendCmd $ APP s
 
@@ -62,14 +75,16 @@ where
   withService :: Z.Context -> String -> String -> 
                 (Z.Context -> String -> String -> String -> IO ()) -> 
                 (Service -> IO ()) -> IO ()
-  withService ctx name param service action =
+  withService ctx name param service action = do
+    m <- newEmptyMVar
     Z.withSocket ctx Z.Pub $ \cmd -> do
-      x <- mkUniqueId
-      let sn = "inproc://srv_" ++ show x
+      sn <- ("inproc://srv_" ++) <$> show <$> mkUniqueId
       Z.bind cmd sn
-      bracket (start sn cmd) stop action
-    where start sn cmd = do tid <- forkIO $ service ctx name sn param
-                            return $ Service ctx name cmd tid
+      bracket (start sn cmd m) stop action
+    takeMVar m
+    where start sn cmd m = do
+            tid <- forkIO $ (service ctx name sn param) `finally` (putMVar m ())
+            return $ Service ctx name cmd tid
 
   poll :: Bool -> [Z.Poll] -> (String -> IO ()) -> String -> IO ()
   poll paused poller rcv param 
@@ -128,7 +143,7 @@ where
                 (XPoll -> Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
   handleCmdX paused xp ontmo rcv param = 
     case xpPoll xp of 
-      poller@[Z.S sock _, _] -> do
+      (Z.S sock _ : _) -> do
         x <- Z.receive sock []
         case readCmd $ B.unpack x of
           Left _    -> xpoll paused xp ontmo rcv param
@@ -136,7 +151,7 @@ where
                          STOP   -> return ()
                          PAUSE  -> xpoll True   xp ontmo rcv param
                          RESUME -> xpoll False  xp ontmo rcv param
-                         APP p  -> xpoll paused xp ontmo rcv param
+                         APP p  -> xpoll paused xp ontmo rcv p
       _ -> ouch "invalid poller in 'handleCmdX'!"
 
   periodicSend :: Bool -> Millisecond -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
