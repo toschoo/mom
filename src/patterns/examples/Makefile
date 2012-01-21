@@ -144,6 +144,10 @@ clean:
 	rm -f $(BASICDIR)/clients/store 
 	rm -f $(BASICDIR)/clients/tolist
 	rm -f $(BASICDIR)/clients/tostr 
+	rm -f $(BASICDIR)/pubsub/wuserver
+	rm -f $(BASICDIR)/pubsub/wufile
+	rm -f $(BASICDIR)/pubsub/wuclient
+	rm -f $(BASICDIR)/pubsub/wuissue
 	rm -f $(BASICDIR)/pipes/push
 	rm -f $(BASICDIR)/pipes/worker
 	rm -f $(BASICDIR)/pairs/ping
