@@ -1,14 +1,11 @@
 module Main
 where
 
-  import Helper
+  import           Helper(getOs, address, untilInterrupt, onErr_)
   import           Network.Mom.Patterns
   import qualified Data.ByteString.Char8 as B
   import           System.Random (randomRIO)
   import           Control.Concurrent
-
-  noparam :: String
-  noparam = ""
 
   main :: IO ()
   main = do
@@ -17,12 +14,12 @@ where
       withPeriodicPub ctx "Weather Report" noparam 100
            (address Bind "tcp" "localhost" p [])
            (return . B.pack)
-           onErr_ (\_ -> fetch1 fetch) $ \pub -> untilInterrupt $ do
-             threadDelay 100000
+           onErr_ (fetch1 fetch) $ \pub -> untilInterrupt $ do
+             threadDelay 1000000
              putStrLn $ "Waiting on " ++ srvName pub ++ "..."
 
   fetch :: FetchHelper () String
-  fetch _ _ = do
+  fetch _ _ _ = do
       -- zipcode <- randomRIO (10000, 99999) :: IO Int
       let zipcode = (10001::Int)
       temperature <- randomRIO (-10, 30) :: IO Int

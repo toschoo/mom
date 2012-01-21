@@ -27,19 +27,25 @@ where
                    Nothing -> usage1
       _       -> usage1 
 
-  getPorts :: IO (Int, Int, [String])
+  getPorts :: IO ((LinkType, Int), (LinkType, Int), [String])
   getPorts = do
     os <- getArgs
     case os of
-      [s, t]  -> return (read s, read t, [])
-      (s:t:r) -> return (read s, read t, r)
+      (t1:p1:t2:p2:r) -> 
+        case parseLink t1 of
+          Nothing -> usage2
+          Just l1 -> 
+            case parseLink t2 of
+              Nothing -> usage2
+              Just l2 -> return ((l1, read p1), (l2, read p2), r)
       _       -> usage2 
 
   usage1 :: IO a
   usage1 = error "<program> 'bind' | 'connect' <port>"
 
   usage2 :: IO a
-  usage2 = error "<program> <port1> <port2>"
+  usage2 = error $ "<program> 'bind' | 'connect' <port1> " ++ 
+                             "'bind' | 'connect' <port2>"
 
   untilInterrupt :: IO () -> IO ()
   untilInterrupt run = do
@@ -60,18 +66,19 @@ where
       Connect -> Address (prot ++ "://" ++ add ++ ":" ++ show port) os
 
   onErr :: OnError
-  onErr c e n = do
-    putStrLn $ show c ++ " in " ++ n ++ ": " ++ show e
+  onErr c e n p = do
+    putStrLn $ show c ++ " in " ++ n ++ "(" ++ p ++ "): " ++ show e
     return Nothing 
 
   onErr_ :: OnError_
-  onErr_ c e n = putStrLn $ show c ++ " in " ++ n ++ ": " ++ show e
+  onErr_ c e n p = 
+    putStrLn $ show c ++ " in " ++ n ++ "(" ++ p ++ "): " ++ show e
 
   dbExec :: SQL.Statement -> [SQL.SqlValue] -> IO ()
   dbExec s ps = SQL.execute s ps >>= \_ -> return ()
 
   dbFetcher :: SQL.Statement -> Fetch [SQL.SqlValue] String
-  dbFetcher s _ _ stp = tryIO (SQL.execute s []) >>= \_ -> go stp
+  dbFetcher s _ _ _ stp = tryIO (SQL.execute s []) >>= \_ -> go stp
     where go step = 
             case step of
               E.Continue k -> do
@@ -90,17 +97,17 @@ where
           convRow _ = undefined
 
   fileFetcher :: IO.Handle -> Fetch_ B.ByteString 
-  fileFetcher h c _ = handleFetcher 4096 h c ()
+  fileFetcher h c p _ = handleFetcher 4096 h c p ()
 
   handleFetcher :: Integer -> IO.Handle -> Fetch_ B.ByteString
-  handleFetcher bufSize h _ _ = EB.enumHandle bufSize h
+  handleFetcher bufSize h _ _ _ = EB.enumHandle bufSize h
 
   output :: Dump String
-  output c = do
+  output c _ = do
     mbi <- EL.head
     case mbi of
       Nothing -> return ()
-      Just i  -> liftIO (putStrLn i) >> output c
+      Just i  -> liftIO (putStrLn i) >> output c noparam
 
   outit :: E.Iteratee String IO ()
   outit = do

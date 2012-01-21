@@ -18,7 +18,7 @@ where
           (address l "tcp" "localhost" p []) l
           (\_ -> return ()) (return . B.pack)
           onErr (\_ -> one ()) 
-          (\_ -> listFetcher $ lines frost) $ \srv ->
+          (listFetcher $ lines frost) $ \srv ->
             untilInterrupt $ do
               putStrLn $ srvName srv ++ ": Stopping by Woods..."
               threadDelay 1000000

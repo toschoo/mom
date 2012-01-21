@@ -1,5 +1,6 @@
 COMDIR = common
 BASICDIR = basic
+DEVICEDIR = device
 OUTDIR = ./out
 
 SUTDIR = ../src/Network/Mom
@@ -54,6 +55,18 @@ $(BASICDIR)/clients/tostr:	$(BASICDIR)/clients/tostr.hs $(SUBSRC)
 $(BASICDIR)/clients/append:	$(BASICDIR)/clients/append.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
+$(BASICDIR)/pubsub/wuserver:	$(BASICDIR)/pubsub/wuserver.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(BASICDIR)/pubsub/wufile:	$(BASICDIR)/pubsub/wufile.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(BASICDIR)/pubsub/wuissue:	$(BASICDIR)/pubsub/wuissue.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(BASICDIR)/pubsub/wuclient:	$(BASICDIR)/pubsub/wuclient.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
 $(BASICDIR)/pipes/push:		$(BASICDIR)/pipes/push.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
@@ -61,6 +74,21 @@ $(BASICDIR)/pipes/worker:	$(BASICDIR)/pipes/worker.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
 $(BASICDIR)/pairs/ping:		$(BASICDIR)/pairs/ping.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(DEVICEDIR)/queue:		$(DEVICEDIR)/queue.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(DEVICEDIR)/forward:		$(DEVICEDIR)/forward.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(DEVICEDIR)/fork:		$(DEVICEDIR)/fork.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(DEVICEDIR)/ifc:		$(DEVICEDIR)/ifc.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
+$(DEVICEDIR)/pipe:		$(DEVICEDIR)/pipe.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
  
@@ -74,14 +102,25 @@ clients:	$(BASICDIR)/clients/append \
 		$(BASICDIR)/clients/rcv \
 		$(BASICDIR)/clients/store \
 		$(BASICDIR)/clients/tolist \
-		$(BASICDIR)/clients/tostr 
+		$(BASICDIR)/clients/tostr
+
+pubsub:		$(BASICDIR)/pubsub/wuserver \
+		$(BASICDIR)/pubsub/wufile \
+		$(BASICDIR)/pubsub/wuclient \
+		$(BASICDIR)/pubsub/wuissue 
+ 
 
 pipes:		$(BASICDIR)/pipes/push \
 		$(BASICDIR)/pipes/worker
 
 pairs:		$(BASICDIR)/pairs/ping
 
-examples:	servers clients pipes pairs
+devices:	$(DEVICEDIR)/queue \
+		$(DEVICEDIR)/fork \
+		$(DEVICEDIR)/ifc \
+		$(DEVICEDIR)/pipe 
+
+examples:	servers clients pubsub pipes pairs devices
 
 .SUFFIXES: .hs 
 
@@ -91,6 +130,8 @@ examples:	servers clients pipes pairs
 clean:
 	rm -f $(BASICDIR)/*/*.hi
 	rm -f $(BASICDIR)/*/*.o
+	rm -f $(DEVICEDIR)/*.hi
+	rm -f $(DEVICEDIR)/*.o
 	rm -f $(COMDIR)/*.hi
 	rm -f $(COMDIR)/*.o
 	rm -f $(BASICDIR)/servers/db 
@@ -106,6 +147,11 @@ clean:
 	rm -f $(BASICDIR)/pipes/push
 	rm -f $(BASICDIR)/pipes/worker
 	rm -f $(BASICDIR)/pairs/ping
+	rm -f $(DEVICEDIR)/queue
+	rm -f $(DEVICEDIR)/forward
+	rm -f $(DEVICEDIR)/fork
+	rm -f $(DEVICEDIR)/ifc
+	rm -f $(DEVICEDIR)/pipe
 	rm -f $(OUTDIR)/*
 
 

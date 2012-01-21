@@ -1,16 +1,20 @@
 module Service (
           Service, srvContext, srvName, srvId,
           stop, pause, resume, appCmd,
+          addDevice, remDevice, changeTimeout,
           withService, poll, xpoll, XPoll(..),
-          periodic, periodicSend, 
-          Timeout, Millisecond, Identifier)
+          periodic, periodicSend
+          , Command(..), DevCmd(..) -- if test
+          )
 where
 
   import           Factory
+  import           Types
 
   import qualified Data.ByteString.Char8 as B
   import           Data.Time.Clock
   import           Data.Map (Map)
+  import qualified Data.Map as Map
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
@@ -54,23 +58,57 @@ where
   ------------------------------------------------------------------------
   -- | Changes the 'Service' control parameter
   ------------------------------------------------------------------------
-  appCmd :: String -> Service -> IO ()
-  appCmd s = sendCmd $ APP s
+  appCmd :: Service -> String ->IO ()
+  appCmd s c = sendCmd (APP c) s
 
-  data Command = STOP | PAUSE | RESUME | APP String
+  ------------------------------------------------------------------------
+  -- | Add a 'PollEntry' to a device;
+  --   the 'Service' must be a device, of  course,
+  --   the command is otherwise ignored.
+  ------------------------------------------------------------------------
+  addDevice  :: Service -> PollEntry -> IO ()
+  addDevice s p = sendDevCmd (ADD p) s
+
+  ------------------------------------------------------------------------
+  -- | Remove a 'PollEntry' from a device;
+  --   the 'Service' must be a device, of  course,
+  --   the command is otherwise ignored.
+  ------------------------------------------------------------------------
+  remDevice :: Service -> Identifier -> IO ()
+  remDevice s i = sendDevCmd (REM i) s
+
+  ------------------------------------------------------------------------
+  -- | Change the timeout of a device;
+  --   the 'Service' must be a device, of  course,
+  --   the command is otherwise ignored.
+  ------------------------------------------------------------------------
+  changeTimeout :: Service -> Timeout -> IO ()
+  changeTimeout s t = sendDevCmd (TMO t) s
+
+  data Command = STOP | PAUSE | RESUME | DEVICE DevCmd | APP String
+    deriving (Eq, Show, Read)
+
+  data DevCmd = ADD PollEntry | REM Identifier | TMO Z.Timeout
     deriving (Eq, Show, Read)
 
   sendCmd :: Command -> Service -> IO ()
   sendCmd c s = Z.send (srvCmd s) (B.pack $ show c) []
+
+  sendDevCmd :: DevCmd -> Service -> IO ()
+  sendDevCmd d = sendCmd (DEVICE d)
 
   readCmd :: String -> Either String Command
   readCmd s = case s of
                "STOP"   -> Right STOP
                "PAUSE"  -> Right PAUSE
                "RESUME" -> Right RESUME
-               x        -> if take 4 x == "APP " 
-                             then Right $ APP (drop 4 x)
-                             else Left  $ "No Command: " ++ x
+               x        -> 
+                 if take 4 x == "APP " 
+                   then Right $ read x
+                   else 
+                     if take 6 x == "DEVICE"
+                       then Right $ read x
+                       else Left  $ "No Command: " ++ x
 
   withService :: Z.Context -> String -> String -> 
                 (Z.Context -> String -> String -> String -> IO ()) -> 
@@ -102,57 +140,96 @@ where
   handleCmd paused poller@[Z.S sock _, _] rcv param = do
     x <- Z.receive sock []
     case readCmd $ B.unpack x of
-      Left  _   -> poll paused poller rcv param 
+      Left  _   -> poll paused poller rcv param -- ignore
       Right cmd -> case cmd of
                      STOP   -> return ()
                      PAUSE  -> poll True   poller rcv param
                      RESUME -> poll False  poller rcv param
                      APP p  -> poll paused poller rcv p
+                     _      -> poll paused poller rcv param -- ignore
   handleCmd _ _ _ _ = ouch "invalid poller in 'handleCmd'!"
 
-  type Identifier = String
-  type Timeout    = Z.Timeout
-
   data XPoll = XPoll {
-                 xpTmo   :: Timeout,
+                 xpCtx   :: Z.Context,
+                 xpTmo   :: Z.Timeout,
                  xpMap   :: Map Identifier Z.Poll,
                  xpIds   :: [Identifier],
                  xpPoll  :: [Z.Poll]
                }
 
-  xpoll :: Bool -> XPoll -> 
+  xpDelete :: Identifier -> XPoll -> XPoll
+  xpDelete i xp = let (p:pp)     = xpPoll xp
+                      (is, ps)   = go (xpIds xp) pp
+                   in xp {xpMap  = Map.delete i $ xpMap xp,
+                          xpIds  = is,
+                          xpPoll = p:ps}
+    where  go _        []     = ([], [])
+           go []       _      = ([], [])
+           go (d:ds) (p:ps) = 
+             if i == d then              go ds ps
+               else let (  ds',   ps') = go ds ps
+                     in (d:ds', p:ps')
+
+  xpoll :: Bool -> MVar XPoll -> 
            (String -> IO ()) ->
-           (XPoll -> Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
-  xpoll paused xp ontmo rcv param 
-    | paused    = handleCmdX paused xp ontmo rcv param
+           (Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
+  xpoll paused mxp ontmo rcv param 
+    | paused    = handleCmdX paused mxp ontmo rcv param
     | otherwise = do
+        xp     <- readMVar mxp
         (c:ss) <- Z.poll (xpPoll xp) (xpTmo xp)
         case c of 
-          Z.S _ Z.In -> handleCmdX paused xp ontmo rcv param
+          Z.S _ Z.In -> handleCmdX paused mxp ontmo rcv param
           _          -> go (xpIds xp) ss
-    where go _      []     = xpoll paused xp ontmo rcv param
+    where go _      []     = ontmo param >>
+                             xpoll paused mxp ontmo rcv param
           go (i:is) (s:ss) =
             case s of
-              Z.S _ Z.In -> rcv xp i s param >>
-                            xpoll paused xp ontmo rcv param
+              Z.S _ Z.In -> rcv i s param >>
+                            xpoll paused mxp ontmo rcv param
               _          -> go is ss
           go _      _     = error "Ouch!"
 
-  handleCmdX :: Bool -> XPoll -> 
-                (String -> IO ()) -> 
-                (XPoll -> Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
-  handleCmdX paused xp ontmo rcv param = 
-    case xpPoll xp of 
+  handleCmdX :: Bool -> MVar XPoll    -> 
+                (String -> IO ())     -> 
+                (Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
+  handleCmdX paused mxp ontmo rcv param = do
+    xp <- readMVar mxp
+    case xpPoll xp of
       (Z.S sock _ : _) -> do
         x <- Z.receive sock []
         case readCmd $ B.unpack x of
-          Left _    -> xpoll paused xp ontmo rcv param
+          Left e    -> do putStrLn $ e ++ ": " ++ B.unpack x
+                          xpoll paused mxp ontmo rcv param
           Right cmd -> case cmd of
-                         STOP   -> return ()
-                         PAUSE  -> xpoll True   xp ontmo rcv param
-                         RESUME -> xpoll False  xp ontmo rcv param
-                         APP p  -> xpoll paused xp ontmo rcv p
+                         STOP     -> return ()
+                         PAUSE    -> xpoll True   mxp ontmo rcv param
+                         RESUME   -> xpoll False  mxp ontmo rcv param
+                         APP p    -> xpoll paused mxp ontmo rcv p
+                         DEVICE d -> do modifyMVar_ mxp 
+                                          (\_ -> handleDevCmd d xp)
+                                        xpoll False mxp ontmo rcv param
       _ -> ouch "invalid poller in 'handleCmdX'!"
+
+  handleDevCmd :: DevCmd -> XPoll -> IO XPoll
+  handleDevCmd d xp = 
+    case d of
+      TMO t -> return   xp {xpTmo = t}
+      REM i -> case Map.lookup i (xpMap xp) of
+                 Just (Z.S s _) -> safeClose s >> return (xpDelete i xp)
+                 _              -> return xp
+      ADD p -> do
+        s <- access (xpCtx   xp)
+                    (pollType p) 
+                    (pollLink p) 
+                    (pollAdd  p) 
+                    (pollSub  p)
+        case xpPoll xp of
+          (c:ss) -> do let i = pollId p
+                       return xp {xpPoll = c:s:ss,
+                                  xpIds  = i:xpIds xp,
+                                  xpMap  = Map.insert i s $ xpMap xp}
+          _      -> return xp
 
   periodicSend :: Bool -> Millisecond -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   periodicSend paused period cmd send param = do
@@ -179,6 +256,7 @@ where
               PAUSE  -> periodicSend_ True   period release' sock send param
               RESUME -> periodicSend_ False  period release' sock send param
               APP p  -> periodicSend_ paused period release' sock send p
+              _      -> periodicSend_ paused period release' sock send param
       _ -> do
         release' <- waitNext period release
         periodicSend_ paused period release' sock send param
@@ -209,5 +287,3 @@ where
 
   nominal2ms :: NominalDiffTime -> Int
   nominal2ms n = ceiling (n * (fromIntegral (1000::Int)))
-
-  type Millisecond = Int

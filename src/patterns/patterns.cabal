@@ -32,6 +32,7 @@ Library
                    bytestring  >= 0.9.1.9,
                    utf8-string >= 0.3.6,
                    containers >= 0.3.0.0,
+                   split      >= 0.1.4.1,
                    zeromq-haskell >= 0.8.2,
                    enumerator >= 0.4.11,
                    mtl         >= 2.0.1.0,

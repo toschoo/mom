@@ -11,15 +11,15 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Patterns.Basic (
           -- * Server/Client
-          serve, withServer,
+          withServer,
           Client, withClient, clientContext,
           request, askFor, checkFor,
           -- * Publish/Subscribe
           Pub, pubContext, withPub, issue,
-          publish, withPeriodicPub,
-          withSub, subscribe, unsubscribe, resubscribe,
+          withPeriodicPub,
+          withSub, unsubscribe, resubscribe,
           -- * Pipeline
-          pull, withPuller,
+          withPuller,
           Pipe, withPipe, push, pipeContext, 
           -- * Exclusive Pair
           Peer, peerContext, withPeer, send, receive,
@@ -162,64 +162,49 @@ where
                 InBound c   -> OutBound o      -> 
                 OnError                        ->
                 (String  -> E.Iteratee c IO i) ->
-                (String  -> Fetch i o)         -> 
+                Fetch i o                      -> 
                 (Service -> IO ())             -> IO ()
   withServer ctx name param n ac t iconv oconv onerr build fetch action =
     withService ctx name param service action
-    where service = serve_ True n ac t iconv oconv onerr 
-                           build fetch
-
-  ------------------------------------------------------------------------
-  -- Provide a Service
-  ------------------------------------------------------------------------
-  serve :: Z.Context         -> String -> Int ->
-           AccessPoint       -> 
-           LinkType          ->
-           InBound c         -> OutBound o    ->
-           OnError           ->
-           E.Iteratee c IO i ->
-           Fetch i o         -> IO ()
-  serve ctx name n ac t iconv oconv onErr build fetch =
-    serve_ False n ac t iconv oconv onErr 
-           (\_ -> build) (\_ -> fetch) ctx name "" "" 
+    where service = serve n ac t iconv oconv onerr 
+                          build fetch
 
   ------------------------------------------------------------------------
   -- the server implementation
   ------------------------------------------------------------------------
-  serve_ :: Bool -> Int                    ->
-            AccessPoint                    ->
-            LinkType                       -> 
-            InBound c                      ->
-            OutBound o                     ->
-            OnError                        ->
-            (String  -> E.Iteratee c IO i) ->
-            (String -> Fetch i o)          -> 
-            Z.Context -> String -> String  -> String -> IO ()
-  serve_ controlled n ac t iconv oconv onerr 
-         build fetch ctx name sockname param
+  serve :: Int                    ->
+           AccessPoint                    ->
+           LinkType                       -> 
+           InBound c                      ->
+           OutBound o                     ->
+           OnError                        ->
+           (String  -> E.Iteratee c IO i) ->
+           Fetch i o                      -> 
+           Z.Context -> String -> String  -> String -> IO ()
+  serve n ac t iconv oconv onerr 
+        build fetch ctx name sockname param
   ------------------------------------------------------------------------
   -- prepare service for single client
   ------------------------------------------------------------------------
     | n <= 1 = (
       Z.withSocket ctx Z.Rep $ \client -> do
         link t ac client
-        if controlled
-          then Z.withSocket ctx Z.Sub $ \cmd -> do
-                 trycon      cmd sockname retries
-                 Z.subscribe cmd ""
-                 poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
-          else forever $ go client param)
-        `catch` (\e -> onerr Fatal e name >>= \_ -> return ())
+        Z.withSocket ctx Z.Sub $ \cmd -> do
+          trycon      cmd sockname retries
+          Z.subscribe cmd ""
+          poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param)
+      `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
   -- prepare service for multiple clients 
   ------------------------------------------------------------------------
     | otherwise = (do
         add <- ("inproc://wrk_" ++) <$> show <$> mkUniqueId
         ms  <- replicateM n newEmptyMVar
-        withQueue ctx ("Queue " ++ name) (ac, Address add []) onQErr $ \_ -> do
+        withQueue ctx ("Queue " ++ name)
+                      (ac, t) (Address add [], Bind) onQErr $ \_ -> do
           _ <- mapM (\m -> start add m) ms
           mapM_ takeMVar ms)
-        `catch` (\e -> onerr Fatal e name >>= \_ -> return ())
+        `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
   -- start thread
   ------------------------------------------------------------------------
@@ -229,38 +214,35 @@ where
   ------------------------------------------------------------------------
           startWork add = Z.withSocket ctx Z.Rep $ \worker -> (do
             trycon worker add retries
-            if controlled
-              then Z.withSocket ctx Z.Sub $ \cmd -> do
-                     trycon cmd sockname retries
-                     Z.subscribe cmd ""
-                     poll False 
-                          [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param
-              else forever $ go worker param)
-            `catch` (\e -> onerr Critical e name >>= \_ -> return ())
+            Z.withSocket ctx Z.Sub $ \cmd -> do
+              trycon cmd sockname retries
+              Z.subscribe cmd noparam
+              poll False [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param)
+            `catch` (\e -> onerr Critical e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
   -- receive requests and do the job
   ------------------------------------------------------------------------
           go worker p = do
               ei <- E.run (rcvEnum worker iconv $$ build p)
-              ifLeft ei (\e -> handle worker e) $ \i ->
+              ifLeft ei (\e -> handle worker e p) $ \i ->
                         catch (body worker p i)
-                              (\e -> handle worker e)
+                              (\e -> handle worker e p)
           body worker p i = do
-               eiR <- E.run (fetch p ctx i $$ itSend worker oconv)
+               eiR <- E.run (fetch ctx p i $$ itSend worker oconv)
                ifLeft eiR
-                 (\e -> handle worker e)
+                 (\e -> handle worker e p)
                  (\_ -> return ())
   ------------------------------------------------------------------------
   -- generic error handler
   ------------------------------------------------------------------------
-          handle sock e = onerr Error e name >>= \mbX ->
+          handle sock e p = onerr Error e name p >>= \mbX ->
               case mbX of
                 Nothing -> 
                   Z.send sock B.empty []
                 Just x  -> do 
                   Z.send sock x [Z.SndMore]
                   Z.send sock B.empty []
-          onQErr c e nm = onerr c e nm >>= \_ -> return ()
+          onQErr c e nm _ = onerr c e nm noparam >>= \_ -> return ()
 
   ------------------------------------------------------------------------
   -- | Client data type
@@ -580,63 +562,47 @@ where
   --           putStrLn $ \"I am doing nothing \" ++ srvName pub
   --   @
   ------------------------------------------------------------------------
-  withPeriodicPub :: Z.Context            -> 
-                     String -> String     ->
-                     Millisecond          ->
-                     AccessPoint          -> 
-                     OutBound o           ->
-                     OnError_             ->
-                     (String -> Fetch_ o) -> 
-                     (Service -> IO ())   -> IO ()
+  withPeriodicPub :: Z.Context          -> 
+                     String -> String   ->
+                     Millisecond        ->
+                     AccessPoint        -> 
+                     OutBound o         ->
+                     OnError_           ->
+                     Fetch_ o           -> 
+                     (Service -> IO ()) -> IO ()
   withPeriodicPub ctx name param period ac oconv onerr fetch action =
     withService ctx name param service action
-    where service = publish_ True period ac oconv onerr fetch
+    where service = publish period ac oconv onerr fetch
 
   ------------------------------------------------------------------------
   -- PeriodicPub implementation
   ------------------------------------------------------------------------
-  publish_ :: Bool                  ->
-              Millisecond           ->
-              AccessPoint           -> 
-              OutBound o            ->
-              OnError_              ->
-              (String -> Fetch_  o) -> 
-              Z.Context -> String   -> 
-              String -> String      -> IO ()
-  publish_ controlled period ac oconv onerr 
-           fetch ctx name sockname param = (
+  publish :: Millisecond          ->
+             AccessPoint          -> 
+             OutBound o           ->
+             OnError_             ->
+             Fetch_  o            -> 
+             Z.Context -> String  -> 
+             String -> String     -> IO ()
+  publish period ac oconv onerr 
+          fetch ctx name sockname param = (
     Z.withSocket ctx Z.Pub $ \sock -> do
       Z.bind sock (acAdd ac)
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               trycon      cmd sockname retries
-               Z.subscribe cmd ""
-               periodicSend False period cmd (go sock) param
-        else periodic period $ go sock param)
-    `catch` (\e -> onerr Fatal e name) -- throwIO e)
+      Z.withSocket ctx Z.Sub $ \cmd -> do
+        trycon      cmd sockname retries
+        Z.subscribe cmd ""
+        periodicSend False period cmd (go sock) param)
+    `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
   -- do the job periodically
   ------------------------------------------------------------------------
     where go sock p   = catch (body sock p) 
-                              (\e -> onerr Error e name)
+                              (\e -> onerr Error e name p)
           body sock p = do
-            eiR <- E.run (fetch p ctx () $$ itSend sock oconv)
+            eiR <- E.run (fetch ctx p () $$ itSend sock oconv)
             ifLeft eiR
-              (\e -> onerr Error e name)
+              (\e -> onerr Error e name p)
               (\_ -> return ())
-
-  ------------------------------------------------------------------------
-  -- Publish
-  ------------------------------------------------------------------------
-  publish :: Z.Context   -> 
-             String      ->
-             Millisecond ->
-             AccessPoint -> 
-             OutBound o  ->
-             OnError_    ->
-             Fetch_   o  -> IO ()
-  publish ctx name period ac oconv onErr fetch = 
-    publish_ False period ac oconv onErr (\_ -> fetch ) ctx name "" ""
 
   ------------------------------------------------------------------------
   -- | A subscription is a background service
@@ -694,43 +660,32 @@ where
              String -> String -> String  -> 
              AccessPoint                 -> 
              InBound i   -> OnError_     ->
-             (String  -> Dump i)         -> 
+             Dump i                      -> 
              (Service -> IO ())          -> IO ()
   withSub ctx name sub param ac iconv onErr dump action =
     withService ctx name param service action
-    where service = subscribe_ True sub ac iconv onErr dump
+    where service = subscribe sub ac iconv onErr dump
 
-  subscribe_ :: Bool -> String -> 
-                AccessPoint    -> 
-                InBound i      -> 
-                OnError_       -> 
-                (String        -> Dump i)  -> 
-                Z.Context      -> 
-                String -> String -> String -> IO ()
-  subscribe_ controlled sub ac iconv onerr dump 
-             ctx name sockname param = (
+  subscribe :: String           -> 
+               AccessPoint      -> 
+               InBound i        -> 
+               OnError_         -> 
+               Dump i           -> 
+               Z.Context        -> 
+               String           -> 
+               String -> String -> IO ()
+  subscribe sub ac iconv onerr dump 
+            ctx name sockname param = (
     Z.withSocket ctx Z.Sub $ \sock -> do
       trycon      sock (acAdd ac) retries
       Z.subscribe sock sub
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               trycon cmd sockname retries
-               Z.subscribe cmd ""
-               poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
-        else forever $ go sock param)
-    `catch` (\e -> onerr Fatal e name)
-    where go sock p = E.run_ (rcvEnum sock iconv $$ dump p ctx)
-                      `catch` (\e -> do onerr Error e name)
-
-  subscribe :: Z.Context     -> 
-               String        -> 
-               String        -> 
-               AccessPoint   -> 
-               InBound i     -> 
-               OnError_      -> 
-               Dump   i      -> IO ()
-  subscribe ctx name sub ac iconv onerr dump = 
-    subscribe_ False sub ac iconv onerr (\_ -> dump) ctx name "" ""
+      Z.withSocket ctx Z.Sub $ \cmd -> do
+        trycon cmd sockname retries
+        Z.subscribe cmd ""
+        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
+    `catch` (\e -> onerr Fatal e name param)
+    where go sock p = E.run_ (rcvEnum sock iconv $$ dump ctx p)
+                      `catch` (\e -> do onerr Error e name p)
 
   ------------------------------------------------------------------------
   -- | Pauses the subscriber service
@@ -784,48 +739,36 @@ where
   --               threadDelay 100000
   --   @
   ------------------------------------------------------------------------
-  withPuller :: Z.Context                  ->
-                String    -> String        ->
-                AccessPoint                ->
-                InBound i                  ->  
-                OnError_                   ->
-                (String  -> Dump   i)      -> 
-                (Service -> IO ())         -> IO ()
+  withPuller :: Z.Context           ->
+                String    -> String ->
+                AccessPoint         ->
+                InBound i           ->  
+                OnError_            ->
+                Dump   i            -> 
+                (Service -> IO ())  -> IO ()
   withPuller ctx name param ac iconv onerr dump action =
     withService ctx name param service action
-    where service = pull_ True ac iconv onerr dump 
+    where service = pull ac iconv onerr dump 
 
-  pull :: Z.Context     ->
-          String        -> 
-          AccessPoint   ->
-          InBound i     ->
-          OnError_      ->
-          Dump   i      -> IO ()
-  pull ctx name ac iconv onerr dump =
-    pull_ False ac iconv onerr (\_ -> dump) ctx name "" ""
-
-  pull_ :: Bool                 ->
-           AccessPoint          ->
-           InBound i            ->
-           OnError_             ->
-           (String -> Dump   i) ->
-           Z.Context -> String  -> 
-           String    -> String  -> IO ()
-  pull_ controlled ac iconv onerr dump ctx name sockname param = (
+  pull :: AccessPoint          ->
+          InBound i            ->
+          OnError_             ->
+          Dump   i             ->
+          Z.Context -> String  -> 
+          String    -> String  -> IO ()
+  pull ac iconv onerr dump ctx name sockname param = (
     Z.withSocket ctx Z.Pull $ \sock -> do
       trycon sock (acAdd ac) retries
-      if controlled
-        then Z.withSocket ctx Z.Sub $ \cmd -> do
-               trycon      cmd sockname retries
-               Z.subscribe cmd ""
-               poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
-        else forever $ go sock param)
-    `catch` (\e -> onerr Fatal e name)
+      Z.withSocket ctx Z.Sub $ \cmd -> do
+        trycon      cmd sockname retries
+        Z.subscribe cmd ""
+        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
+    `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
   -- do the job 
   ------------------------------------------------------------------------
-    where go sock p = E.run_  (rcvEnum sock iconv $$ dump p ctx)
-                      `catch` (\e -> onerr Error e name)
+    where go sock p = E.run_  (rcvEnum sock iconv $$ dump ctx p)
+                      `catch` (\e -> onerr Error e name p)
  
   ------------------------------------------------------------------------
   -- | A pipeline consists of a \"pusher\" and a set of workers.

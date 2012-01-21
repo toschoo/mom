@@ -54,7 +54,7 @@ where
   it = one Ping
 
   enum :: PingPong -> Fetch () PingPong
-  enum p = fetch1 (\_ _ -> return $ Just p)
+  enum p = fetch1 (\_ _ _ -> return $ Just p)
 
   sendPing :: Peer PingPong -> PingPong -> IO ()
-  sendPing p png = send p (enum png (peerContext p) ())
+  sendPing p png = send p (enum png (peerContext p) noparam ())

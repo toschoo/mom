@@ -2,13 +2,10 @@
 module Main 
 where
 
-  import Helper
+  import           Helper (getOs, address, output, onErr_, untilInterrupt)
   import           Network.Mom.Patterns
   import qualified Data.ByteString.Char8 as B
   import           Control.Concurrent
-
-  noparam :: String
-  noparam = ""
 
   main :: IO ()
   main = do
@@ -20,10 +17,7 @@ where
       withSub ctx "Weather Report" noparam topic
               (address l "tcp" "localhost" p []) 
               (return . B.unpack)
-              onErr_ (\_ -> output) wait
-  
-  wait :: Service -> IO ()
-  wait s = untilInterrupt $ do 
-             putStrLn $ "Waiting for " ++ srvName s ++ "..."
-             threadDelay 1000000
+              onErr_ output $ \s -> untilInterrupt $ do
+                putStrLn $ srvName s ++ " up and running..." 
+                threadDelay 1000000
            

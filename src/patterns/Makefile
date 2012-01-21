@@ -2,7 +2,7 @@ TDIR = test/suite
 SDIR = ../test/samples
 SMOKEDIR = ./test/smoke
 COMDIR = ../test/common
-HELPER = test/common
+HELPER = examples/common
 OUTDIR = ./test/out
 
 SUTDIR = src/Network/Mom
@@ -23,7 +23,8 @@ INC  =	-i./src \
 	-i./test/smoke \
 	-i./test/suite \
 	-i./test/common \
-	-i../test/common
+	-i../test/common \
+	-i./examples/common
 
 smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
@@ -51,7 +52,8 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/forward1 \
 	$(SMOKEDIR)/pipe1 \
 	$(SMOKEDIR)/queue1 \
-	$(SMOKEDIR)/queue2
+	$(SMOKEDIR)/queue2 \
+	$(SMOKEDIR)/cmd
 
 $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -134,6 +136,9 @@ $(SMOKEDIR)/queue1:	$(SMOKEDIR)/queue1.hs $(SUBSRC)
 $(SMOKEDIR)/queue2:	$(SMOKEDIR)/queue2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/cmd:	$(SMOKEDIR)/cmd.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 
 clean:
 	rm -f $(SUTDIR)/*.hi
@@ -175,6 +180,7 @@ clean:
 	rm -f $(SMOKEDIR)/pipe1
 	rm -f $(SMOKEDIR)/queue1
 	rm -f $(SMOKEDIR)/queue2
+	rm -f $(SMOKEDIR)/cmd
 	rm -f $(OUTDIR)/*.txt
 
 dist-clean:	clean

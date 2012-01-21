@@ -18,10 +18,10 @@ where
           (address l "tcp" "localhost" p []) l
           (return . B.unpack) (return . B.pack)
           onErr (\_ -> one []) 
-          (\_ -> fetch1 hello) $ \s -> untilInterrupt $ do
+          (fetch1 hello) $ \s -> untilInterrupt $ do
             putStrLn $ srvName s ++ " makes semordnilap"
             threadDelay 1000000
 
   hello :: FetchHelper String String -- Context -> String -> IO (Maybe String)
-  hello _ = return . Just . reverse
+  hello _ _ = return . Just . reverse
 

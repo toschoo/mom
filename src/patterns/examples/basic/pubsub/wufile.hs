@@ -2,16 +2,12 @@
 module Main 
 where
 
-  import           Helper
+  import           Helper (getOs, address, untilInterrupt, onErr_)
   import           Network.Mom.Patterns
   import qualified Data.Enumerator.List  as EL
   import qualified Data.ByteString.Char8 as B
   import           Control.Monad.Trans
   import           Control.Concurrent
-  import           Control.Monad
-
-  noparam :: String
-  noparam = ""
 
   main :: IO ()
   main = do
@@ -23,13 +19,11 @@ where
       withSub ctx "Weather Report" noparam topic
               (address l "tcp" "localhost" p [])
               (return . B.unpack)
-              onErr_ toFile wait
-  
-  wait :: Service -> IO ()
-  wait s = forever $ do putStrLn $ "Waiting for " ++ srvName s ++ "..."
-                        threadDelay 1000000
+              onErr_ toFile $ \s -> untilInterrupt $ do
+                putStrLn $ srvName s ++ " up and running..."
+                threadDelay 1000000
            
-  toFile :: String -> Dump String
+  toFile :: Dump String
   toFile _ _ = go Nothing
     where go mbf = do
             mbi <- EL.head
@@ -42,5 +36,5 @@ where
                 liftIO (appendFile f $ i ++ "\n") >> go (Just f)
 
   selectFile :: String -> IO String
-  selectFile _ = return "test/out/sub.txt"
+  selectFile _ = return "out/sub.txt"
 

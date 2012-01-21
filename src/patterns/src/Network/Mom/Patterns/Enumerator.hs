@@ -13,7 +13,7 @@ module Network.Mom.Patterns.Enumerator (
           -- * Enumerators
           Fetch_, Fetch, FetchHelper,
           fetcher, listFetcher,
-          once, -- getFor
+          once, just, -- getFor
           fetch1, fetchFor, err,
           -- * Iteratees
           Dump, sink, sinkI, sinkLess, store,
@@ -39,23 +39,23 @@ where
   -- standard enumerators
   ------------------------------------------------------------------------
   fetcher :: FetchHelper i o -> Fetch i o 
-  fetcher fetch ctx i step =
+  fetcher fetch ctx p i step =
     case step of
-      (E.Continue k) -> chainIOe (fetch ctx i) $ \mbo ->
+      (E.Continue k) -> chainIOe (fetch ctx p i) $ \mbo ->
         case mbo of 
           Nothing -> E.continue k
-          Just o  -> fetcher fetch ctx i $$ k (E.Chunks [o]) 
+          Just o  -> fetcher fetch ctx p i $$ k (E.Chunks [o]) 
       _ -> E.returnI step
 
   fetch1 :: FetchHelper i o -> Fetch i o
   fetch1 = go True 
-    where go first fetch ctx i step =
+    where go first fetch ctx p i step =
             case step of
               (E.Continue k) -> 
-                if first then chainIOe (fetch ctx i) $ \mbX ->
+                if first then chainIOe (fetch ctx p i) $ \mbX ->
                   case mbX of
                     Nothing -> E.continue k 
-                    Just x  -> go False fetch ctx i $$ k (E.Chunks [x])
+                    Just x  -> go False fetch ctx p i $$ k (E.Chunks [x])
                 else E.continue k
               _ -> E.returnI step
 
@@ -71,25 +71,35 @@ where
                 else E.continue k
               _ -> E.returnI step
 
+  just :: o -> E.Enumerator o IO ()
+  just = go True
+    where go first i step = 
+            case step of
+              E.Continue k -> 
+                if first then go False i $$ k (E.Chunks [i])
+                  else E.continue k
+              _ -> E.returnI step
+              
+
   listFetcher :: [o] -> Fetch_ o 
-  listFetcher l ctx _ step =
+  listFetcher l ctx p _ step =
     case step of
       (E.Continue k) -> do
         if null l then E.continue k
-                  else listFetcher (tail l) ctx () $$ k (E.Chunks [head l])
+                  else listFetcher (tail l) ctx p () $$ k (E.Chunks [head l])
       _ -> E.returnI step
 
-  fetchFor :: (Z.Context -> Int -> IO o) -> (Int, Int) -> Fetch () o
-  fetchFor fetch (i,e) c _ step =
+  fetchFor :: (Z.Context -> String -> Int -> IO o) -> (Int, Int) -> Fetch () o
+  fetchFor fetch (i,e) c p _ step =
     case step of
       (E.Continue k) -> do
          if i >= e then E.continue k
-                   else chainIOe (fetch c i) $ \x -> 
-                     fetchFor fetch (i+1, e) c () $$ k (E.Chunks [x])
+                   else chainIOe (fetch c p i) $ \x -> 
+                     fetchFor fetch (i+1, e) c p () $$ k (E.Chunks [x])
       _ -> E.returnI step
 
   err :: Fetch_ o
-  err _ _ s = do
+  err _ _ _ s = do
     ei <- liftIO $ catch 
             (throwIO (AssertionFailed "Test") >>= \_ -> return $ Right ())
             (\e -> return $ Left e)
@@ -103,8 +113,8 @@ where
   ------------------------------------------------------------------------
   sink :: (Z.Context -> String ->           IO s ) -> 
           (Z.Context -> String -> s ->      IO ()) -> 
-          (Z.Context -> String -> s -> i -> IO ()) -> String -> Dump i
-  sink op cl save p ctx = go Nothing
+          (Z.Context -> String -> s -> i -> IO ()) -> Dump i
+  sink op cl save ctx p = go Nothing
     where go mbs = E.catchError (body mbs) (onerr mbs)
           body mbs = do
             s <- case mbs of
@@ -120,8 +130,8 @@ where
 
   sinkI :: (Z.Context -> String ->      i -> IO s ) -> 
            (Z.Context -> String -> s      -> IO ()) -> 
-           (Z.Context -> String -> s -> i -> IO ()) -> String -> Dump i
-  sinkI op cl save p ctx = go Nothing
+           (Z.Context -> String -> s -> i -> IO ()) -> Dump i
+  sinkI op cl save ctx p = go Nothing
     where go mbs = E.catchError (body mbs) (onerr mbs)
           body mbs = do
             mbi <- EL.head
@@ -136,8 +146,8 @@ where
                            Nothing -> E.throwError e
                            Just s  -> tryIO (cl ctx p s) >> E.throwError e
 
-  sinkLess :: (Z.Context -> String -> i -> IO ()) -> String -> Dump i
-  sinkLess save p ctx = store (save ctx p)
+  sinkLess :: (Z.Context -> String -> i -> IO ()) -> Dump i
+  sinkLess save ctx p = store (save ctx p)
 
   store :: (i -> IO ()) -> E.Iteratee i IO ()
   store save = do

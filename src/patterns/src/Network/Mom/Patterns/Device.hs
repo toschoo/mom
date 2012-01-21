@@ -1,11 +1,15 @@
 module Network.Mom.Patterns.Device (
+         -- * Access Types
+         AccessType(..),
          -- * Device Services
          withDevice,
-         withQueue, queue, 
-         withForwarder, forward, 
-         withPipeline, pipeline,
+         withQueue, 
+         withForwarder, 
+         withPipeline, 
          -- * Polling
          PollEntry, pollEntry,
+         -- * Device Service Commands
+         addDevice, remDevice, changeTimeout,
          -- * Streamer 
          Streamer, getStreamSource, filterTargets,
          -- * Transformer
@@ -17,10 +21,9 @@ module Network.Mom.Patterns.Device (
 
          emit, emit2, pass, pass2, end,
          absorb, merge, ignore, purge,
-         set, reset, 
-         -- * Some Helpers
-         OnTimeout)
-       
+         set, reset,
+         Identifier,
+         Timeout, OnTimeout)
 where
 
   import           Types
@@ -35,6 +38,10 @@ where
   import           Data.Map (Map)
   import qualified Data.Sequence          as S
   import           Data.Sequence ((|>), ViewR(..))
+  import           Prelude hiding (catch)
+  import           Control.Exception (catch, finally, throwIO,
+                                      bracketOnError)
+  import           Control.Concurrent
   import qualified System.ZMQ as Z
 
   ------------------------------------------------------------------------
@@ -89,7 +96,7 @@ where
                 (Service -> IO ())             -> IO ()
   withDevice ctx name param tmo acs iconv oconv onerr ontmo trans action =
     withService ctx name param service action
-    where service = device_ True tmo acs iconv oconv onerr ontmo trans
+    where service = device_ tmo acs iconv oconv onerr ontmo trans
 
   ------------------------------------------------------------------------
   -- | Starts a controlled queue;
@@ -128,26 +135,15 @@ where
   ------------------------------------------------------------------------
   withQueue :: Z.Context                  -> 
                String                     ->
-               (AccessPoint, AccessPoint) ->
+               (AccessPoint, LinkType)    ->
+               (AccessPoint, LinkType)    ->
                OnError_                   -> 
                (Service -> IO ())         -> IO ()
-  withQueue ctx name (dealer, router) onerr act = 
+  withQueue ctx name (dealer, l1) (router, l2) onerr act = 
     withDevice ctx name noparam (-1)
-          [pollEntry "clients" XDealer dealer Bind "",
-           pollEntry "servers" XRouter router Bind ""]
+          [pollEntry "clients" XDealer dealer l1 "",
+           pollEntry "servers" XRouter router l2 ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
-
-  ------------------------------------------------------------------------
-  -- | Starts an uncontrolled Queue;
-  --   implemented on top of 'Z.device'
-  ------------------------------------------------------------------------
-  queue :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  queue ctx src trg = do
-    Z.withSocket ctx Z.XRep $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.XReq $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Queue from to
 
   ------------------------------------------------------------------------
   -- | Starts a Forwarder;
@@ -184,26 +180,15 @@ where
   ------------------------------------------------------------------------
   withForwarder :: Z.Context                  -> 
                    String -> String           -> 
-                   (AccessPoint, AccessPoint) ->
+                   (AccessPoint, LinkType)    ->
+                   (AccessPoint, LinkType)    ->
                    OnError_                   -> 
                    (Service -> IO ())         -> IO ()
-  withForwarder ctx name topics (sub, pub) onerr act = 
+  withForwarder ctx name topics (sub, l1) (pub, l2) onerr act = 
     withDevice ctx name noparam (-1)
-          [pollEntry "subscriber" XSub sub Connect topics, 
-           pollEntry "publisher"  XPub pub Bind    ""]
+          [pollEntry "subscriber" XSub sub l1 topics, 
+           pollEntry "publisher"  XPub pub l2 ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
-
-  ------------------------------------------------------------------------
-  -- | Starts an uncontrolled forwarder;
-  --   implemented on top of 'Z.device'
-  ------------------------------------------------------------------------
-  forward :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  forward ctx src trg = do
-    Z.withSocket ctx Z.Pub $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.Sub $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Forwarder from to
 
   ------------------------------------------------------------------------
   -- | Starts pipeline;
@@ -239,116 +224,16 @@ where
   ------------------------------------------------------------------------
   withPipeline :: Z.Context                   -> 
                    String                     ->
-                   (AccessPoint, AccessPoint) ->
+                   (AccessPoint, LinkType)    ->
+                   (AccessPoint, LinkType)    ->
                    OnError_                   -> 
                    (Service -> IO ())         -> IO ()
-  withPipeline ctx name (puller, pusher) onerr act = 
+  withPipeline ctx name (puller, l1) (pusher, l2) onerr act = 
     withDevice ctx name noparam (-1)
-          [pollEntry "pull"  XPull puller Connect "", 
-           pollEntry "push"  XPipe pusher Bind    ""]
+          [pollEntry "pull"  XPull puller l1 "", 
+           pollEntry "push"  XPipe pusher l2 ""]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
 
-  ------------------------------------------------------------------------
-  -- | Starts an uncontrolled pipeline;
-  --   implemented on top of 'Z.device'
-  ------------------------------------------------------------------------
-  pipeline :: Z.Context -> AccessPoint -> AccessPoint -> IO ()
-  pipeline ctx src trg = do
-    Z.withSocket ctx Z.Push $ \from -> do
-      Z.bind from (acAdd src)
-      Z.withSocket ctx Z.Pull $ \to -> do
-        Z.bind to (acAdd trg)
-        Z.device Z.Streamer from to
-
-  -- addDevice  :: Service -> PollEntry  -> IO ()
-  -- remDevice  :: Service -> Identifier -> IO ()
-  -- newTimeout :: Service -> Timeout    -> IO ()
-
-  ------------------------------------------------------------------------
-  -- | Type of a 'PollEntry';
-  ------------------------------------------------------------------------
-  data AccessType = 
-         -- | Represents a Service and expects connections from Clients;
-         --   should be used with 'Bind';
-         --   corresponds to ZMQ Socket Type 'Z.Rep'
-         XServer    
-         -- | Represents a Client and connects to a Service;
-         --   should be used with 'Connect';
-         --   corresponds to ZMQ Socket Type 'Z.Req'
-         | XClient
-         -- | Represents a load balancer, 
-         --   expecting connections from clients;
-         --   should be used with 'Bind';
-         --   corresponds to ZMQ Socket Type 'Z.XRep'
-         | XDealer 
-         -- | Represents a router
-         --   expecting connections from servers;
-         --   should be used with 'Bind';
-         --   corresponds to ZMQ Socket Type 'Z.XReq'
-         | XRouter 
-         -- | Represents a publisher;
-         --   should be used with 'Bind';
-         --   corresponds to ZMQ Socket Type 'Z.Pub'
-         | XPub    
-         -- | Represents a subscriber;
-         --   should be used with 'Connect';
-         --   corresponds to ZMQ Socket Type 'Z.Sub'
-         | XSub    
-         -- | Represents a Pipe;
-         --   should be used with 'Bind';
-         --   corresponds to ZMQ Socket Type 'Z.Push'
-         | XPipe
-         -- | Represents a Puller;
-         --   should be used with 'Connect';
-         --   corresponds to ZMQ Socket Type 'Z.Pull'
-         | XPull
-         -- | Represents a Peer;
-         --   corresponding peers must use complementing 'LinkType';
-         --   corresponds to ZMQ Socket Type 'Z.Pair'
-         | XPeer   
-    deriving (Eq, Show, Read)
-
-  ------------------------------------------------------------------------
-  -- | A poll entry describes how to handle an AccessPoint
-  ------------------------------------------------------------------------
-  data PollEntry = Poll {
-                     pollId   :: Identifier,
-                     pollAdd  :: String,
-                     pollType :: AccessType,
-                     pollLink :: LinkType,
-                     pollSub  :: String,
-                     pollOs   :: [Z.SocketOption]
-                   }
-
-  ------------------------------------------------------------------------
-  -- | Creates a 'PollEntry';
-  --
-  --   Parameters:
-  --
-  --   * 'Identifier': identifies an 'AccessPoint' with a 'String';
-  --                    the string shall be unique for one device.
-  --
-  --   * 'AccessType': the 'AccessType' of this 'AccessPoint'
-  --
-  --   * 'AccessPoint': the 'AccessPoint' itself
-  --
-  --   * 'LinkType': how to link to this 'AccessPoint'
-  --
-  --   * 'String': A subscription topic - 
-  --                ignored for all 'AccessPoint', but those
-  --                with 'AccessType' 'Sub' 
-  ------------------------------------------------------------------------
-  pollEntry :: Identifier -> 
-               AccessType -> AccessPoint -> LinkType ->
-               String     -> PollEntry
-  pollEntry i at ac lt sub = Poll {
-                               pollId   = i,
-                               pollAdd  = acAdd ac,
-                               pollType = at,
-                               pollLink = lt,
-                               pollSub  = sub,
-                               pollOs   = acOs ac}
-  
   ------------------------------------------------------------------------
   -- | A transformer is an 'E.Iteratee'
   --   to transforms streams.
@@ -528,11 +413,6 @@ where
                 pass s trg x lst (go mbo')
 
   ------------------------------------------------------------------------
-  -- | What to do on timeout
-  ------------------------------------------------------------------------
-  type OnTimeout = IO ()
-
-  ------------------------------------------------------------------------
   -- Internal
   ------------------------------------------------------------------------
   sendStreamer :: Streamer o -> Identifier -> (Z.Poll -> IO ()) -> IO ()
@@ -560,9 +440,9 @@ where
   dosend  _ _ _ _ = error "Ouch!"
 
   ------------------------------------------------------------------------
-  -- enters startPoll passing runDevice as job
+  -- Creates poll list and enters runDevice 
   ------------------------------------------------------------------------
-  device_ :: Bool -> Timeout           ->
+  device_ :: Timeout                   ->
              [PollEntry]               -> 
              InBound o -> OutBound o   -> 
              OnError_                  ->
@@ -570,13 +450,19 @@ where
              (String -> Transformer o) ->
              Z.Context -> String       -> 
              String -> String          -> IO ()
-  device_ controlled tmo acs 
-          iconv oconv onerr ontmo trans 
-          ctx name sockname param = 
-    startPoll ctx acs Map.empty [] [] run
-    where run = runDevice ctx name controlled tmo
-                          iconv oconv onerr ontmo 
-                          trans sockname param
+  device_ tmo acs iconv oconv onerr ontmo trans
+          ctx name sockname param = do 
+    xp <- catch (mkPoll ctx tmo acs Map.empty [] [])
+                (\e -> onerr Fatal e name param >> throwIO e)
+    m  <- newMVar xp
+    finally (runDevice name m iconv oconv onerr ontmo trans sockname param)
+            (do _ <- withMVar m (\xp' -> mapM_ closeS (xpPoll xp'))
+                return ())
+
+  closeS :: Z.Poll -> IO ()
+  closeS p = case p of 
+               Z.S s _ -> safeClose s
+               _       -> return ()
 
   ------------------------------------------------------------------------
   -- creates and binds or connects all sockets recursively;
@@ -585,71 +471,60 @@ where
   --             and a list of Identifiers with the same order;
   -- finally executes "run"
   ------------------------------------------------------------------------
-  startPoll :: Z.Context -> [PollEntry]    -> 
-               Map Identifier Z.Poll       ->
-               [Identifier]                ->
-               [Z.Poll]                    -> 
-               (Map Identifier Z.Poll      ->
-                [Identifier]               -> 
-                [Z.Poll]     -> IO ())     -> IO ()
-  startPoll _   []     m is ps run = run m is ps
-  startPoll ctx (k:ks) m is ps run = 
-    case pollType k of
-      XServer -> Z.withSocket ctx Z.Rep  go
-      XClient -> Z.withSocket ctx Z.Req  go
-      XDealer -> Z.withSocket ctx Z.XRep go
-      XRouter -> Z.withSocket ctx Z.XReq go
-      XPub    -> Z.withSocket ctx Z.Pub  go
-      XPipe   -> Z.withSocket ctx Z.Push go
-      XPull   -> Z.withSocket ctx Z.Pull go
-      XPeer   -> Z.withSocket ctx Z.Pair go
-      XSub    -> Z.withSocket ctx Z.Sub  $ \s -> 
-                  Z.subscribe s (pollSub k) >> go s
-    where go s = do case pollLink k of 
-                      Bind    -> Z.bind    s (pollAdd k)
-                      Connect -> trycon    s (pollAdd k) retries
-                    let p   = Z.S s Z.In
-                    let m'  = Map.insert (pollId k) p m
-                    let is' = pollId k : is
-                    let ps' = p:ps
-                    startPoll ctx ks m' is' ps' run
+  mkPoll :: Z.Context -> Timeout     -> 
+            [PollEntry]              -> 
+            Map Identifier Z.Poll    ->
+            [Identifier]             ->
+            [Z.Poll]                 -> IO XPoll 
+  mkPoll ctx t []     m is ps = return XPoll{xpCtx  = ctx,
+                                             xpTmo  = t,
+                                             xpMap  = m,
+                                             xpIds  = is,
+                                             xpPoll = ps}
+  mkPoll ctx t (k:ks) m is ps = bracketOnError
+    (access ctx (pollType k)
+                (pollLink k) 
+                (pollAdd  k) 
+                (pollSub  k))
+    (\p -> closeS p >> return [])
+    (\p -> do let m'  = Map.insert (pollId k) p m
+              let is' = pollId k : is
+              let ps' = p:ps
+              mkPoll ctx t ks m' is' ps')
 
   ------------------------------------------------------------------------
-  -- finally starts the device entering Service.xpoll
+  -- finally start the device entering Service.xpoll
   ------------------------------------------------------------------------
-  runDevice :: Z.Context -> String       -> 
-               Bool      -> Timeout      ->
+  runDevice :: String -> MVar XPoll      -> 
                InBound o -> OutBound o   -> 
                OnError_                  -> 
                (String -> OnTimeout)     ->
                (String -> Transformer o) -> 
-               String -> String          ->
-               Map Identifier Z.Poll     ->
-               [Identifier]              ->
-               [Z.Poll]                  -> IO ()
-  runDevice ctx name controlled tmo
-            iconv oconv onerr ontmo trans 
-            sockname param m is ps = 
-    if controlled
-      then Z.withSocket ctx Z.Sub $ \cmd -> do
-              trycon      cmd sockname retries
-              Z.subscribe cmd ""
-              let p = Z.S cmd Z.In
-              xpoll False (XPoll tmo m is (p:ps)) ontmo go param
-      else    xpoll False (XPoll tmo m is ps    ) ontmo go param
-    where go (XPoll _  m' _ ps') i poller p =
+               String -> String          -> IO ()
+  runDevice name mxp iconv oconv onerr ontmo trans sockname param = (do
+      xp <- readMVar mxp
+      Z.withSocket (xpCtx xp) Z.Sub $ \cmd -> do
+        trycon      cmd sockname retries
+        Z.subscribe cmd ""
+        let p = Z.S cmd Z.In
+        modifyMVar_ mxp $ \_ -> return xp {xpPoll = p : xpPoll xp}
+        finally (xpoll False mxp ontmo go param)
+                (modifyMVar_ mxp $ \xp' -> 
+                   return xp' {xpPoll = tail (xpPoll xp')})) 
+      `catch` (\e -> onerr Fatal e name param >> throwIO e)
+    where go i poller p =
             case poller of 
               Z.S s _ -> do
+                xp <- readMVar mxp
                 let strm = Streamer {
                              strmSrc  = (i, poller), 
-                             strmIdx  = m',
-                             strmPoll = ps',
+                             strmIdx  = xpMap  xp,
+                             strmPoll = xpPoll xp,
                              strmOut  = oconv}
                 eiR <- E.run (rcvEnum s iconv $$ 
                               trans p strm S.empty) 
                 case eiR of
-                  Left e  -> onerr Error e name
+                  Left e  -> onerr Error e name p
                   Right _ -> return ()
               _ -> error "Ouch!"
-
 

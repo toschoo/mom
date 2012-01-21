@@ -15,7 +15,7 @@ where
       withPuller ctx "Worker" noparam 
             (address l "tcp" "localhost" p [])
             (return . B.unpack)
-            onErr_ (\_ -> output) $ \s -> untilInterrupt $ do
+            onErr_ output $ \s -> untilInterrupt $ do
               putStrLn $ srvName s ++ " is working"
               threadDelay 1000000
            

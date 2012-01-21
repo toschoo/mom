@@ -1,6 +1,9 @@
 module Types (
           -- * Service Access Point
           AccessPoint(..), LinkType(..), parseLink, link,
+          AccessType(..), access, safeClose,
+          -- * PollEntry
+          PollEntry(..), pollEntry,
           -- * Enumerators
           Fetch, Fetch_, FetchHelper, Dump,
           rcvEnum, itSend,
@@ -15,12 +18,17 @@ module Types (
           Z.Context, Z.withContext,
           Z.SocketOption(..),
           -- * Helpers
-          retries, trycon, ifLeft, (?>), noparam)
+          retries, trycon, ifLeft, (?>), noparam,
+          Timeout, OnTimeout,
+          Millisecond, Identifier)
+
 where
 
   import qualified Data.ByteString.Char8  as B
   import qualified Data.ByteString.UTF8   as U -- standard converters
   import           Data.Char (toLower)
+  import           Data.List (intercalate)
+  import           Data.List.Split (splitOn)
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
   import qualified Data.Enumerator.List   as EL (head)
@@ -31,6 +39,74 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (SomeException, try, catch, throwIO)
   import           System.ZMQ as Z
+
+  ------------------------------------------------------------------------
+  -- | Type of a 'PollEntry';
+  ------------------------------------------------------------------------
+  data AccessType = 
+         -- | Represents a Service and expects connections from Clients;
+         --   should be used with 'Bind';
+         --   corresponds to ZMQ Socket Type 'Z.Rep'
+         XServer    
+         -- | Represents a Client and connects to a Service;
+         --   should be used with 'Connect';
+         --   corresponds to ZMQ Socket Type 'Z.Req'
+         | XClient
+         -- | Represents a load balancer, 
+         --   expecting connections from clients;
+         --   should be used with 'Bind';
+         --   corresponds to ZMQ Socket Type 'Z.XRep'
+         | XDealer 
+         -- | Represents a router
+         --   expecting connections from servers;
+         --   should be used with 'Bind';
+         --   corresponds to ZMQ Socket Type 'Z.XReq'
+         | XRouter 
+         -- | Represents a publisher;
+         --   should be used with 'Bind';
+         --   corresponds to ZMQ Socket Type 'Z.Pub'
+         | XPub    
+         -- | Represents a subscriber;
+         --   should be used with 'Connect';
+         --   corresponds to ZMQ Socket Type 'Z.Sub'
+         | XSub    
+         -- | Represents a Pipe;
+         --   should be used with 'Bind';
+         --   corresponds to ZMQ Socket Type 'Z.Push'
+         | XPipe
+         -- | Represents a Puller;
+         --   should be used with 'Connect';
+         --   corresponds to ZMQ Socket Type 'Z.Pull'
+         | XPull
+         -- | Represents a Peer;
+         --   corresponding peers must use complementing 'LinkType';
+         --   corresponds to ZMQ Socket Type 'Z.Pair'
+         | XPeer   
+    deriving (Eq, Show, Read)
+
+  access :: Z.Context -> AccessType -> LinkType -> 
+               String -> String     -> IO Z.Poll
+  access ctx a l u t = 
+    case a of 
+      XServer -> Z.socket ctx Z.Rep  >>= go
+      XClient -> Z.socket ctx Z.Req  >>= go
+      XDealer -> Z.socket ctx Z.XRep >>= go
+      XRouter -> Z.socket ctx Z.XReq >>= go
+      XPub    -> Z.socket ctx Z.Pub  >>= go
+      XPipe   -> Z.socket ctx Z.Push >>= go
+      XPull   -> Z.socket ctx Z.Pull >>= go
+      XPeer   -> Z.socket ctx Z.Pair >>= go
+      XSub    -> Z.socket ctx Z.Sub  >>= \s -> 
+                  Z.subscribe s t >> go s
+   where go s = do case l of
+                     Bind    -> Z.bind s u
+                     Connect -> trycon s u retries
+                   return $ Z.S s Z.In
+
+  safeClose :: Z.Socket a -> IO ()
+  safeClose s = catch (Z.close s)
+                      (\e -> let _ = (e::SomeException)
+                              in return ())
 
   ------------------------------------------------------------------------
   -- | Describes how to access a service;
@@ -69,12 +145,60 @@ where
     show (Address s _) = s
 
   ------------------------------------------------------------------------
+  -- | A poll entry describes how to handle an AccessPoint
+  ------------------------------------------------------------------------
+  data PollEntry = Poll {
+                     pollId   :: Identifier,
+                     pollAdd  :: String,
+                     pollType :: AccessType,
+                     pollLink :: LinkType,
+                     pollSub  :: String,
+                     pollOs   :: [Z.SocketOption]
+                   }
+    deriving (Show, Read)
+
+  instance Read Z.SocketOption where
+    readsPrec _ s = [(Z.Affinity 0,"")]
+
+  instance Eq PollEntry where
+    x == y = pollId x == pollId y
+
+  ------------------------------------------------------------------------
+  -- | Creates a 'PollEntry';
+  --
+  --   Parameters:
+  --
+  --   * 'Identifier': identifies an 'AccessPoint' with a 'String';
+  --                    the string shall be unique for one device.
+  --
+  --   * 'AccessType': the 'AccessType' of this 'AccessPoint'
+  --
+  --   * 'AccessPoint': the 'AccessPoint' itself
+  --
+  --   * 'LinkType': how to link to this 'AccessPoint'
+  --
+  --   * 'String': A subscription topic - 
+  --                ignored for all 'AccessPoint', but those
+  --                with 'AccessType' 'Sub' 
+  ------------------------------------------------------------------------
+  pollEntry :: Identifier -> 
+               AccessType -> AccessPoint -> LinkType ->
+               String     -> PollEntry
+  pollEntry i at ac lt sub = Poll {
+                               pollId   = i,
+                               pollAdd  = acAdd ac,
+                               pollType = at,
+                               pollLink = lt,
+                               pollSub  = sub,
+                               pollOs   = acOs ac}
+
+  ------------------------------------------------------------------------
   -- | 'E.Enumerator' to process data segments of type /o/;
   --   receives the 'Z.Context' and an input of type /i/;
   --   'Fetch' is used by 'Server's that receive requests of type /i/
   --   and produce an outgoing stream with segments of type /o/.
   ------------------------------------------------------------------------
-  type Fetch       i o = Z.Context -> i -> E.Enumerator o IO ()
+  type Fetch       i o = Z.Context -> String -> i -> E.Enumerator o IO ()
 
   ------------------------------------------------------------------------
   -- | A variant of 'Fetch' without input
@@ -91,31 +215,33 @@ where
   --   that already defines a given enumerator logic,
   --   /e.g./ 'fetch1' or 'fetchFor'.
   ------------------------------------------------------------------------
-  type FetchHelper i o = Z.Context -> i -> IO (Maybe o)
+  type FetchHelper i o = Z.Context -> String -> i -> IO (Maybe o)
 
   ------------------------------------------------------------------------
   -- | 'E.Iteratee' to process data segments of type /i/;
   --   receives the 'Z.Context'
   ------------------------------------------------------------------------
-  type Dump i = Z.Context -> E.Iteratee i IO ()
+  type Dump i = Z.Context -> String -> E.Iteratee i IO ()
 
   ------------------------------------------------------------------------
   -- | Error handler for 'Server';
   --   receives the 'Criticality' of the error event,
-  --   the exception and the server name.
+  --   the exception, the server name and the parameter.
   --   If the error handler returns 'Just' a 'B.ByteString'
   --   this value is sent to the client as error message.
   ------------------------------------------------------------------------
-  type OnError   = Criticality   -> 
-                   SomeException -> String -> IO (Maybe B.ByteString)
+  type OnError   = Criticality      -> 
+                   SomeException    -> 
+                   String -> String -> IO (Maybe B.ByteString)
 
   ------------------------------------------------------------------------
   -- | Error handler for all services but 'Server';
   --   receives the 'Criticality' of the error event,
   --   the exception and the service name.
   ------------------------------------------------------------------------
-  type OnError_  = Criticality   -> 
-                   SomeException -> String -> IO ()
+  type OnError_  = Criticality      -> 
+                   SomeException    -> 
+                   String -> String -> IO ()
 
   -------------------------------------------------------------------------
   -- | Indicates criticality of the error event
@@ -337,3 +463,6 @@ where
   (?>) :: IO (Either a b) -> (b -> IO (Either a c)) -> IO (Either a c)
   (?>) = eiCombine
 
+  type Millisecond = Int
+  type Identifier  = String
+  type OnTimeout   = IO ()

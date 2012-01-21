@@ -18,7 +18,7 @@ where
       withServer ctx "Player" noparam 5
           (address l "tcp" "localhost" p []) l
           iconv oconv
-          onErr (\_  -> one []) (\_ -> dbFetcher s) $ \srv -> 
+          onErr (\_  -> one []) (dbFetcher s) $ \srv -> 
             untilInterrupt $ do
               putStrLn $ "server " ++ srvName srv ++ " up and running..."
               threadDelay 1000000
