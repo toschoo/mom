@@ -5,7 +5,9 @@ module Types (
           -- * PollEntry
           PollEntry(..), pollEntry,
           -- * Enumerators
-          Fetch, Fetch_, FetchHelper, Dump,
+          Fetch, Fetch_, 
+          FetchHelper, FetchHelper', FetchHelper_, FetchHelper_',
+          Dump,
           rcvEnum, itSend,
           -- * Converters
           InBound, OutBound,
@@ -194,7 +196,8 @@ where
 
   ------------------------------------------------------------------------
   -- | 'E.Enumerator' to process data segments of type /o/;
-  --   receives the 'Z.Context' and an input of type /i/;
+  --   receives the 'Z.Context', a 'String' parameter 
+  --   and an input of type /i/;
   --   'Fetch' is used by 'Server's that receive requests of type /i/
   --   and produce an outgoing stream with segments of type /o/.
   ------------------------------------------------------------------------
@@ -206,20 +209,42 @@ where
   type Fetch_        o = Fetch () o
 
   ------------------------------------------------------------------------
-  -- | A function that may be used with some of the enumerators
-  --   defined in 'Enumerator'.
-  --   This helper returns 'Nothing' to signal 
+  -- | A function that may be used with some of the fetchers;
+  --   The helper returns 'Nothing' to signal 
   --   that no more data are available
   --   and 'Just' /o/ to continue the stream.
-  --   FetchHelpers are typically used with an enumerator
-  --   that already defines a given enumerator logic,
-  --   /e.g./ 'fetch1' or 'fetchFor'.
+  --   FetchHelpers are used with 'Server's 
+  --   that receive requests of type /i/.
+  --   The function 
+  --   receives the 'Z.Context', a 'String' parameter 
+  --   and an input of type /i/;
   ------------------------------------------------------------------------
   type FetchHelper i o = Z.Context -> String -> i -> IO (Maybe o)
 
   ------------------------------------------------------------------------
+  -- | A variant of 'FetchHelper' that returns type /o/ instead of
+  --   'Maybe' /o/.
+  --   Please note that /'/ does not mean /strict/, here;
+  --   it just means that the result is not a 'Maybe'.
+  ------------------------------------------------------------------------
+  type FetchHelper' i o = Z.Context -> String -> i -> IO o
+
+  ------------------------------------------------------------------------
+  -- | A variant of 'FetchHelper' without input
+  ------------------------------------------------------------------------
+  type FetchHelper_  o = FetchHelper () o
+
+  ------------------------------------------------------------------------
+  -- | A variant of 'FetchHelper_' that returns type /o/ instead of
+  --   'Maybe' /o/.
+  --   Please note that /'/ does not mean /strict/, here;
+  --   it just means that the result is not a 'Maybe'.
+  ------------------------------------------------------------------------
+  type FetchHelper_' o = FetchHelper' () o
+
+  ------------------------------------------------------------------------
   -- | 'E.Iteratee' to process data segments of type /i/;
-  --   receives the 'Z.Context'
+  --   receives the 'Z.Context' and a 'String' parameter
   ------------------------------------------------------------------------
   type Dump i = Z.Context -> String -> E.Iteratee i IO ()
 

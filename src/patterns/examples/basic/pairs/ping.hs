@@ -22,9 +22,9 @@ where
   data PingPong = Ping | Pong
     deriving (Show, Eq, Read)
 
-  revert :: PingPong -> PingPong
-  revert Ping = Pong
-  revert Pong = Ping
+  swap :: PingPong -> PingPong
+  swap Ping = Pong
+  swap Pong = Ping
     
   ping :: Context -> MVar Bool -> Bool -> IO ()
   ping ctx m start = 
@@ -43,18 +43,16 @@ where
             case eix of
               Left  e   -> putStrLn $ "Error: " ++ show e
               Right png -> do when start $ putStrLn (show png) 
-                              sendPing p $ if start then revert png else png
+                              sendPing p $ if start then swap png else png
                               continue <- readMVar m -- user interrupt?
                               when (continue) $ receive p it >>= go p
-          starter stopped = do
-            _ <- forkIO (ping ctx m False `finally` putMVar stopped ()) 
-            return ()
+          starter stopped = 
+            forkIO (ping ctx m False 
+                    `finally` putMVar stopped ()) >>= \_ -> return ()
                               
   it :: E.Iteratee PingPong IO PingPong
   it = one Ping
 
-  enum :: PingPong -> Fetch () PingPong
-  enum p = fetch1 (\_ _ _ -> return $ Just p)
-
   sendPing :: Peer PingPong -> PingPong -> IO ()
-  sendPing p png = send p (enum png (peerContext p) noparam ())
+  sendPing p png = send p (just png)
+

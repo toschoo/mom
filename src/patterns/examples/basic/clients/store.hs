@@ -8,15 +8,14 @@ where
 
   main :: IO ()
   main = do
-    (l, p, _) <- getOs
+    (l, p, [n]) <- getOs
     withContext 1 $ \ctx -> do
       let ap = address l "tcp" "localhost" p []
       withClient ctx ap (return . B.pack) (return . B.unpack) $ \c -> do
-        ei <- request c (enum "test") (store $ save "out/test.txt")
+        ei <- request c (just "") (store $ save n)
         case ei of
           Left e  -> putStrLn $ "Error: " ++ show (e::SomeException)
           Right _ -> return ()
-    where enum = once (return . Just)
 
   save :: FilePath -> String -> IO ()
   save p s = appendFile p (s ++ "\n")

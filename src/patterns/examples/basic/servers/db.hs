@@ -17,16 +17,11 @@ where
       s <- prepare c "select Id, substr(Name, 1, 30) Name from Player" 
       withServer ctx "Player" noparam 5
           (address l "tcp" "localhost" p []) l
-          iconv oconv
-          onErr (\_  -> one []) (dbFetcher s) $ \srv -> 
-            untilInterrupt $ do
+          iconv outString onErr (\_  -> one []) 
+          (dbFetcher s) $ \srv -> untilInterrupt $ do
               putStrLn $ "server " ++ srvName srv ++ " up and running..."
               threadDelay 1000000
               
-
-  oconv :: OutBound String
-  oconv = return . B.pack 
-
   iconv :: InBound [SqlValue]
   iconv = return . convRow . B.unpack 
     where convRow :: String -> [SqlValue]

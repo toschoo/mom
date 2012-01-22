@@ -13,15 +13,15 @@ where
     withContext 1 $ \ctx -> do
       withPeriodicPub ctx "Weather Report" noparam 100
            (address Bind "tcp" "localhost" p [])
-           (return . B.pack)
-           onErr_ (fetch1 fetch) $ \pub -> untilInterrupt $ do
+           (return . B.pack) onErr_
+           (fetch1 fetch) $ \pub -> untilInterrupt $ do
              threadDelay 1000000
              putStrLn $ "Waiting on " ++ srvName pub ++ "..."
 
-  fetch :: FetchHelper () String
+  fetch :: FetchHelper' () String
   fetch _ _ _ = do
-      -- zipcode <- randomRIO (10000, 99999) :: IO Int
-      let zipcode = (10001::Int)
+      -- zipcode <- randomRIO (10000, 99999) :: IO Int 
+      let zipcode = (10001::Int) -- just publish one topic
       temperature <- randomRIO (-10, 30) :: IO Int
       humidity    <- randomRIO (10, 60) :: IO Int
-      return $ Just (unwords [show zipcode, show temperature, show humidity])
+      return $ unwords [show zipcode, show temperature, show humidity]

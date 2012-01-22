@@ -14,17 +14,17 @@ where
                   [l,p] -> case getThird l p of
                              Nothing -> usage
                              Just lp -> return lp
-                  _   -> putStrLn (show r) >> usage
+                  _     -> putStrLn (show r) >> usage
     let sub = pollEntry "Subscriber" XSub
                         (address l1 "tcp" "localhost" p1 []) l1 noparam
     let pub = pollEntry "Publisher"  XPub
                         (address l2 "tcp" "localhost" p2 []) l2 noparam
-    -- don't stop process with sigINT
+    -- don't stop process on sigINT
     _ <- installHandler sigINT Ignore Nothing
     withContext 1 $ \ctx -> 
       withDevice ctx "Forker" noparam (-1)
                      [sub, pub] idIn idOut onErr_ 
-                     (\_ -> putStrLn "Timeout") 
+                     (\_ -> putStrLn "Timeout!") 
                      (\_ -> putThrough) $ \d -> do
           cc <- newChan
           rc <- newChan
@@ -67,8 +67,5 @@ where
                   "     'bind' | 'connect' <outgoing port>\n" ++
                   "     'bind' | 'connect' <command  port>\n" 
 
-  commander :: Chan Command -> Chan Result -> FetchHelper Command Result
-  commander cc rc _ _ cmd = do
-    writeChan cc cmd 
-    r <- readChan rc
-    return $ Just r
+  commander :: Chan Command -> Chan Result -> FetchHelper' Command Result
+  commander cc rc _ _ cmd = writeChan cc cmd >> readChan rc

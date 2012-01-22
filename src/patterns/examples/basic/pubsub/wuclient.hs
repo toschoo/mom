@@ -9,13 +9,13 @@ where
 
   main :: IO ()
   main = do
-    (l, p, ts) <- getOs
+    (_, p, ts) <- getOs
     let topic = case ts of
                   [x] -> x       
                   _   -> "10001" 
     withContext 1 $ \ctx -> 
       withSub ctx "Weather Report" noparam topic
-              (address l "tcp" "localhost" p []) 
+              (address Connect "tcp" "localhost" p [])
               (return . B.unpack)
               onErr_ output $ \s -> untilInterrupt $ do
                 putStrLn $ srvName s ++ " up and running..." 

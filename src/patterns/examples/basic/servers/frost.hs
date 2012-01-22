@@ -8,7 +8,6 @@ where
                            untilInterrupt)
   import           Network.Mom.Patterns
   import           Control.Concurrent (threadDelay)
-  import qualified Data.ByteString.Char8 as B
 
   main :: IO ()
   main = do
@@ -16,9 +15,8 @@ where
     withContext 1 $ \ctx -> do
       withServer ctx "Frost" noparam 5
           (address l "tcp" "localhost" p []) l
-          (\_ -> return ()) (return . B.pack)
-          onErr (\_ -> one ()) 
-          (listFetcher $ lines frost) $ \srv ->
+          (\_ -> return ()) outString onErr (\_ -> one ())
+          (listFetcher_ $ lines frost) $ \srv ->
             untilInterrupt $ do
               putStrLn $ srvName srv ++ ": Stopping by Woods..."
               threadDelay 1000000
