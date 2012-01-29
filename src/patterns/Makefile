@@ -26,6 +26,15 @@ INC  =	-i./src \
 	-i../test/common \
 	-i./examples/common
 
+suite:	$(TDIR)/enum \
+	$(TDIR)/device
+
+$(TDIR)/enum:	$(TDIR)/enum.hs $(SUBSRC)
+		$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/device:	$(TDIR)/device.hs $(SUBSRC)
+		$(GHC) $(FLGS) $(INC) $@
+
 smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
 	$(SMOKEDIR)/db3 \
@@ -153,6 +162,8 @@ clean:
 	rm -f $(SMOKEDIR)/*.o
 	rm -f $(HELPER)/*.hi
 	rm -f $(HELPER)/*.o
+	rm -f $(TDIR)/enum
+	rm -f $(TDIR)/device
 	rm -f $(SMOKEDIR)/db
 	rm -f $(SMOKEDIR)/db2
 	rm -f $(SMOKEDIR)/db3

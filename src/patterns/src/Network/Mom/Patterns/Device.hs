@@ -32,12 +32,12 @@ where
   import qualified Data.ByteString.Char8  as B
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
-  import qualified Data.Enumerator.List   as EL (head)
+  import qualified Data.Enumerator.List   as EL
   import           Data.Monoid 
   import qualified Data.Map               as Map
   import           Data.Map (Map)
   import qualified Data.Sequence          as S
-  import           Data.Sequence ((|>), ViewR(..))
+  import           Data.Sequence ((|>), ViewR(..), ViewL(..))
   import           Prelude hiding (catch)
   import           Control.Exception (catch, finally, throwIO,
                                       bracketOnError)
@@ -93,7 +93,7 @@ where
                 OnError_                       ->
                 (String -> OnTimeout)          ->
                 (String -> Transformer o)      ->
-                (Service -> IO ())             -> IO ()
+                (Service -> IO a)              -> IO a
   withDevice ctx name param tmo acs iconv oconv onerr ontmo trans action =
     withService ctx name param service action
     where service = device_ tmo acs iconv oconv onerr ontmo trans
@@ -138,7 +138,7 @@ where
                (AccessPoint, LinkType)    ->
                (AccessPoint, LinkType)    ->
                OnError_                   -> 
-               (Service -> IO ())         -> IO ()
+               (Service -> IO a)          -> IO a
   withQueue ctx name (dealer, l1) (router, l2) onerr act = 
     withDevice ctx name noparam (-1)
           [pollEntry "clients" XDealer dealer l1 "",
@@ -183,7 +183,7 @@ where
                    (AccessPoint, LinkType)    ->
                    (AccessPoint, LinkType)    ->
                    OnError_                   -> 
-                   (Service -> IO ())         -> IO ()
+                   (Service -> IO a)          -> IO a
   withForwarder ctx name topics (sub, l1) (pub, l2) onerr act = 
     withDevice ctx name noparam (-1)
           [pollEntry "subscriber" XSub sub l1 topics, 
@@ -227,7 +227,7 @@ where
                    (AccessPoint, LinkType)    ->
                    (AccessPoint, LinkType)    ->
                    OnError_                   -> 
-                   (Service -> IO ())         -> IO ()
+                   (Service -> IO a)          -> IO a
   withPipeline ctx name (puller, l1) (pusher, l2) onerr act = 
     withDevice ctx name noparam (-1)
           [pollEntry "pull"  XPull puller l1 "", 
@@ -287,45 +287,46 @@ where
   -- a transformer.
   ------------------------------------------------------------------------
   -- | Sends all stream elements to the targets identified
-  --   by the list of 'Identifier';
-  --   then it calls the 'Transformer' with an empty sequence.
-  --   The Boolean parameter determines whether the stream 
-  --   ends with this sequence. 
-  --   Note that all outgoing streams, once started,
-  --   have to be terminated before the transformer ends.
-  --   Otherwise, a protocol error will occur.
+  --   by the list of 'Identifier' and ends the transformation
+  --   by ignoring the rest of the incoming stream.
   ------------------------------------------------------------------------
-  emit :: Streamer o    -> [Identifier] -> S.Seq o -> Bool ->
-          Transformer o -> E.Iteratee o IO ()
-  emit s is os lst go = tryIO sender >> go s S.empty
-    where sender = mapM_ (\i -> sendStreamer s i (sendseq s os lst)) is
+  emit :: Streamer o -> [Identifier] -> S.Seq o -> E.Iteratee o IO ()
+  emit s is os = tryIO sender >> go
+    where sender = mapM_ (\i -> sendStreamer s i (sendseq s os True)) is
+          go     = EL.consume >>= \_ -> return () 
 
   ------------------------------------------------------------------------
   -- | Like 'emit' but adds a new element 
   --   at the end of the sequence before sending it
   ------------------------------------------------------------------------
-  emit2 :: Streamer o    -> [Identifier] -> o -> S.Seq o -> Bool -> 
-           Transformer o -> E.Iteratee o IO ()
+  emit2 :: Streamer o -> [Identifier] -> o -> S.Seq o -> E.Iteratee o IO ()
   emit2 s is o os = emit s is (os |> o)
 
   ------------------------------------------------------------------------
   -- | Sends one element to the targets and starts the transformer
-  --   with an empty sequence
+  --   with an empty sequence;
+  --   the Boolean parameter determines whether this is the last message
+  --   to send. 
+  --   Note that all outgoing streams, once started, 
+  --   have to be terminated before the transformer ends. 
+  --   Otherwise, a protocol error will occur.
   ------------------------------------------------------------------------
   pass :: Streamer o    -> [Identifier] -> o -> Bool ->
           Transformer o -> E.Iteratee o IO ()
-  pass s is o = emit s is (S.singleton o)
+  pass s is o lst go = tryIO sender >> go s S.empty
+    where sender = mapM_ (\i -> sendStreamer s i 
+                                 (sendseq s (S.singleton o) lst)) is
 
   ------------------------------------------------------------------------
   -- | Sends one element to the targets, but leaves the sequence untouched;
   --   the transformer will, hence, continue working 
   --   with sequence passed into 'pass2'
   ------------------------------------------------------------------------
-  pass2 :: Streamer o    -> [Identifier] -> o -> S.Seq o -> Bool ->
+  pass2 :: Streamer o    -> [Identifier] -> o -> S.Seq o -> 
            Transformer o -> E.Iteratee o IO ()
-  pass2 s is o os lst go = tryIO sender >> go s os
+  pass2 s is o os go = tryIO sender >> go s os
     where sender = mapM_ (\i -> sendStreamer s i 
-                                 (sendseq s (S.singleton o) lst)) is
+                                 (sendseq s (S.singleton o) False)) is
 
   ------------------------------------------------------------------------
   -- | Terminates the outgoing stream by sending the new element
@@ -421,9 +422,9 @@ where
                            Just p   -> act p
 
   mapIOSeq :: (a -> IO ()) -> S.Seq a -> IO ()
-  mapIOSeq f os = case S.viewr os of
-                    EmptyR  -> return ()
-                    xs :> x -> f x >> mapIOSeq f xs
+  mapIOSeq f os = case S.viewl os of
+                    EmptyL  -> return ()
+                    x :< xs -> f x >> mapIOSeq f xs
 
   sendseq :: Streamer o -> S.Seq o -> Bool -> Z.Poll -> IO ()
   sendseq s os lst p 
@@ -449,13 +450,14 @@ where
              (String -> OnTimeout)     ->
              (String -> Transformer o) ->
              Z.Context -> String       -> 
-             String -> String          -> IO ()
+             String -> String -> IO () -> IO ()
   device_ tmo acs iconv oconv onerr ontmo trans
-          ctx name sockname param = do 
+          ctx name sockname param imReady = do 
     xp <- catch (mkPoll ctx tmo acs Map.empty [] [])
                 (\e -> onerr Fatal e name param >> throwIO e)
     m  <- newMVar xp
-    finally (runDevice name m iconv oconv onerr ontmo trans sockname param)
+    finally (runDevice name m iconv oconv onerr ontmo trans 
+                       sockname param imReady)
             (do _ <- withMVar m (\xp' -> mapM_ closeS (xpPoll xp'))
                 return ())
 
@@ -500,14 +502,15 @@ where
                OnError_                  -> 
                (String -> OnTimeout)     ->
                (String -> Transformer o) -> 
-               String -> String          -> IO ()
-  runDevice name mxp iconv oconv onerr ontmo trans sockname param = (do
+               String -> String -> IO () -> IO ()
+  runDevice name mxp iconv oconv onerr ontmo trans sockname param imReady = (do
       xp <- readMVar mxp
       Z.withSocket (xpCtx xp) Z.Sub $ \cmd -> do
         trycon      cmd sockname retries
         Z.subscribe cmd ""
         let p = Z.S cmd Z.In
         modifyMVar_ mxp $ \_ -> return xp {xpPoll = p : xpPoll xp}
+        imReady
         finally (xpoll False mxp ontmo go param)
                 (modifyMVar_ mxp $ \xp' -> 
                    return xp' {xpPoll = tail (xpPoll xp')})) 

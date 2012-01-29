@@ -111,18 +111,22 @@ where
                        else Left  $ "No Command: " ++ x
 
   withService :: Z.Context -> String -> String -> 
-                (Z.Context -> String -> String -> String -> IO ()) -> 
-                (Service -> IO ()) -> IO ()
+                (Z.Context -> String -> String -> String -> IO () -> IO ()) -> 
+                (Service -> IO a) -> IO a
   withService ctx name param service action = do
-    m <- newEmptyMVar
-    Z.withSocket ctx Z.Pub $ \cmd -> do
-      sn <- ("inproc://srv_" ++) <$> show <$> mkUniqueId
-      Z.bind cmd sn
-      bracket (start sn cmd m) stop action
-    takeMVar m
-    where start sn cmd m = do
-            tid <- forkIO $ (service ctx name sn param) `finally` (putMVar m ())
+    running <- newEmptyMVar
+    ready   <- newEmptyMVar
+    x <- Z.withSocket ctx Z.Pub $ \cmd -> do
+           sn <- ("inproc://srv_" ++) <$> show <$> mkUniqueId
+           Z.bind cmd sn
+           bracket (start sn cmd ready running) stop (doAction ready)
+    _ <- takeMVar running
+    return x
+    where start sn cmd ready m = do
+            let imReady = putMVar ready ()
+            tid <- forkIO $ (service ctx name sn param imReady) `finally` (putMVar m ())
             return $ Service ctx name cmd tid
+          doAction ready srv = takeMVar ready >>= \_ -> action srv
 
   poll :: Bool -> [Z.Poll] -> (String -> IO ()) -> String -> IO ()
   poll paused poller rcv param 

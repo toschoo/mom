@@ -420,7 +420,7 @@ where
   -- some helpers
   ------------------------------------------------------------------------
   retries :: Int
-  retries = 10
+  retries = 100
 
   trycon :: Z.Socket a -> String -> Int -> IO ()
   trycon sock add i = catch (Z.connect sock add) 

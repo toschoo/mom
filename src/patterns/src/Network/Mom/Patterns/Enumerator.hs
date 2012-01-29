@@ -29,7 +29,7 @@ module Network.Mom.Patterns.Enumerator (
           -- $its
 
           -- ** Raw Iteratees
-          one, mbOne, toList, toString, append, fold,
+          one, mbOne, toList, toString, append,
           store,
           -- ** Dumps 
           Dump, sink, sinkI, nosink) 
@@ -39,8 +39,9 @@ where
 
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
-  import qualified Data.Enumerator.List   as EL (head)
+  import qualified Data.Enumerator.List   as EL
   import qualified Data.Monoid            as M
+  import           Data.List (foldl', intercalate)
 
   import           Control.Applicative ((<$>))
   import           Control.Monad
@@ -195,6 +196,7 @@ where
       (E.Continue k) -> 
         if null os then E.continue k
                    else listFetcher ctx p (tail os) $$ k (E.Chunks [head os])
+      _ -> E.returnI step
 
   ------------------------------------------------------------------------
   -- | A variant of 'listFetcher' for services without input;
@@ -288,7 +290,7 @@ where
   -- | Calls the application-defined IO action
   --   for each element of the stream;
   --   The IO action could, for instance, 
-  --   write to an opened file,
+  --   write to an already opened file,
   --   store values in an 'MVar' or
   --   send them through a 'Chan' to another thread 
   --   for further processing.
@@ -316,23 +318,19 @@ where
 
   ------------------------------------------------------------------------
   -- | Returns one value of type 'Maybe' /i/;
+  --   equal to 'Data.Enumerator.List.head'
   ------------------------------------------------------------------------
   mbOne :: E.Iteratee i IO (Maybe i)
   mbOne = EL.head
 
   ------------------------------------------------------------------------
   -- | Returns a list containing all chunks of the stream;
+  --   equal to 'Data.Enumerator.List.consume';
   --   note that this iteratee causes a space leak
   --   and is not suitable for huge streams or streams of unknown size.
   ------------------------------------------------------------------------
-  toList :: E.Iteratee i IO [i]
-  toList = do
-    mbi <- EL.head
-    case mbi of
-      Nothing -> return []
-      Just i  -> do
-        is <- toList
-        return (i:is)
+  toList :: E.Iteratee i IO [i] -- equal to EL.consume
+  toList = EL.consume
 
   ------------------------------------------------------------------------
   -- | Returns a string containing all chunks of the stream
@@ -345,14 +343,8 @@ where
   --   Note that this iteratee causes a space leak
   --   and is not suitable for huge streams or streams of unknown size.
   ------------------------------------------------------------------------
-  toString :: String -> E.Iteratee String IO String
-  toString s = do
-    mbi <- EL.head
-    case mbi of
-      Nothing -> return ""
-      Just i  -> do
-        is <- toString s
-        return $ concat [i, s, is]
+  toString :: String -> E.Iteratee String IO String 
+  toString s = intercalate s <$> EL.consume
 
   ------------------------------------------------------------------------
   -- | Merges the elements of a stream using 'M.mappend';
@@ -362,27 +354,7 @@ where
   --   and is not suitable for huge streams or streams of unknown size.
   ------------------------------------------------------------------------
   append :: M.Monoid i => E.Iteratee i IO i
-  append = do
-    mbi <- EL.head
-    case mbi of
-      Nothing -> return M.mempty
-      Just i  -> do
-        is <- append
-        return (i `M.mappend` is)
-
-  ------------------------------------------------------------------------
-  -- | Folds the stream on a value of type /a/;
-  --   note that this iteratee causes a space leak
-  --   and is not suitable for huge streams or streams of unknown size.
-  ------------------------------------------------------------------------
-  fold :: (i -> a -> a) -> a -> E.Iteratee i IO a
-  fold f acc = do
-    mbi <- EL.head
-    case mbi of
-      Nothing -> return acc
-      Just i  -> do
-        is <- fold f acc
-        return (f i is)
+  append = foldl' M.mappend M.mempty <$> EL.consume
 
   ------------------------------------------------------------------------
   -- | Opens a data sink, dumps the stream into this sink
@@ -401,7 +373,7 @@ where
             mbi <- EL.head
             case mbi of
               Nothing -> tryIO (cl ctx p s)
-              Just i  -> tryIO (sv ctx p s i) >> go s
+              Just i  -> tryIO (sv ctx p s i) >> body s
           onerr  s e  =  tryIO (cl ctx p s)   >> E.throwError e
 
   ------------------------------------------------------------------------
@@ -416,20 +388,19 @@ where
   sinkI :: (Z.Context -> String ->      i -> IO s ) -> 
            (Z.Context -> String -> s      -> IO ()) -> 
            (Z.Context -> String -> s -> i -> IO ()) -> Dump i
-  sinkI op cl sv ctx p = go Nothing
-    where go mbs   = E.catchError (body mbs) (onerr mbs)
-          body mbs = do
+  sinkI op cl sv ctx p = do
+          mbi <- EL.head
+          case mbi of
+            Nothing -> return ()
+            Just i  -> do
+              s <- tryIO (op ctx p i)
+              E.catchError (body s) (onerr s)
+    where body s = do
             mbi <- EL.head
             case mbi of
-              Nothing -> case mbs of
-                           Just s  -> tryIO (cl ctx p s)
-                           Nothing -> return ()
-              Just i  -> case mbs of
-                           Nothing -> Just <$> tryIO (op ctx p i) >>= go
-                           Just s  -> tryIO (sv ctx p s i) >> go (Just s)
-          onerr mbs e =  case mbs of
-                           Just s  -> tryIO (cl ctx p s) >> E.throwError e
-                           Nothing -> E.throwError e
+              Nothing -> tryIO (cl ctx p s)
+              Just i  -> tryIO (sv ctx p s i) >> body s
+          onerr s e   =  tryIO (cl ctx p s)   >> E.throwError e
 
   ------------------------------------------------------------------------
   -- | Similar to 'sink', but uses a data sink that is opened and closed

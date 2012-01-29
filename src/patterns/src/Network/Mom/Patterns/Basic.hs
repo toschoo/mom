@@ -163,7 +163,7 @@ where
                 OnError                        ->
                 (String  -> E.Iteratee c IO i) ->
                 Fetch i o                      -> 
-                (Service -> IO ())             -> IO ()
+                (Service -> IO a)              -> IO a
   withServer ctx name param n ac t iconv oconv onerr build fetch action =
     withService ctx name param service action
     where service = serve n ac t iconv oconv onerr 
@@ -180,9 +180,9 @@ where
            OnError                        ->
            (String  -> E.Iteratee c IO i) ->
            Fetch i o                      -> 
-           Z.Context -> String -> String  -> String -> IO ()
+           Z.Context -> String -> String  -> String -> IO () -> IO ()
   serve n ac t iconv oconv onerr 
-        build fetch ctx name sockname param
+        build fetch ctx name sockname param ready
   ------------------------------------------------------------------------
   -- prepare service for single client
   ------------------------------------------------------------------------
@@ -192,6 +192,7 @@ where
         Z.withSocket ctx Z.Sub $ \cmd -> do
           trycon      cmd sockname retries
           Z.subscribe cmd ""
+          ready
           poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param)
       `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
@@ -203,6 +204,7 @@ where
         withQueue ctx ("Queue " ++ name)
                       (ac, t) (Address add [], Bind) onQErr $ \_ -> do
           _ <- mapM (\m -> start add m) ms
+          ready
           mapM_ takeMVar ms)
         `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
@@ -469,7 +471,7 @@ where
   --   * 'Pub' -> IO (): The action to invoke
   ------------------------------------------------------------------------
   withPub :: Z.Context -> AccessPoint -> OutBound o -> 
-             (Pub o -> IO ()) -> IO ()
+             (Pub o -> IO a) -> IO a
   withPub ctx ac oconv act = Z.withSocket ctx Z.Pub $ \s -> do
     Z.bind s (acAdd ac)
     act Pub {
@@ -569,7 +571,7 @@ where
                      OutBound o         ->
                      OnError_           ->
                      Fetch_ o           -> 
-                     (Service -> IO ()) -> IO ()
+                     (Service -> IO a) -> IO a
   withPeriodicPub ctx name param period ac oconv onerr fetch action =
     withService ctx name param service action
     where service = publish period ac oconv onerr fetch
@@ -583,14 +585,15 @@ where
              OnError_             ->
              Fetch_  o            -> 
              Z.Context -> String  -> 
-             String -> String     -> IO ()
+             String -> String     -> IO () -> IO ()
   publish period ac oconv onerr 
-          fetch ctx name sockname param = (
+          fetch ctx name sockname param ready = (
     Z.withSocket ctx Z.Pub $ \sock -> do
       Z.bind sock (acAdd ac)
       Z.withSocket ctx Z.Sub $ \cmd -> do
         trycon      cmd sockname retries
         Z.subscribe cmd ""
+        ready
         periodicSend False period cmd (go sock) param)
     `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
@@ -661,7 +664,7 @@ where
              AccessPoint                 -> 
              InBound i   -> OnError_     ->
              Dump i                      -> 
-             (Service -> IO ())          -> IO ()
+             (Service -> IO a)           -> IO a
   withSub ctx name sub param ac iconv onErr dump action =
     withService ctx name param service action
     where service = subscribe sub ac iconv onErr dump
@@ -673,15 +676,16 @@ where
                Dump i           -> 
                Z.Context        -> 
                String           -> 
-               String -> String -> IO ()
+               String -> String -> IO () -> IO ()
   subscribe sub ac iconv onerr dump 
-            ctx name sockname param = (
+            ctx name sockname param ready = (
     Z.withSocket ctx Z.Sub $ \sock -> do
       trycon      sock (acAdd ac) retries
       Z.subscribe sock sub
       Z.withSocket ctx Z.Sub $ \cmd -> do
         trycon cmd sockname retries
         Z.subscribe cmd ""
+        ready
         poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
     `catch` (\e -> onerr Fatal e name param)
     where go sock p = E.run_ (rcvEnum sock iconv $$ dump ctx p)
@@ -698,6 +702,10 @@ where
   ------------------------------------------------------------------------
   resubscribe :: Service -> IO ()
   resubscribe = resume
+
+  -- withSporadicSub
+  -- checkSub
+  -- waitSub
 
   ------------------------------------------------------------------------
   -- | A puller is a background service 
@@ -745,7 +753,7 @@ where
                 InBound i           ->  
                 OnError_            ->
                 Dump   i            -> 
-                (Service -> IO ())  -> IO ()
+                (Service -> IO a)   -> IO a
   withPuller ctx name param ac iconv onerr dump action =
     withService ctx name param service action
     where service = pull ac iconv onerr dump 
@@ -755,13 +763,14 @@ where
           OnError_             ->
           Dump   i             ->
           Z.Context -> String  -> 
-          String    -> String  -> IO ()
-  pull ac iconv onerr dump ctx name sockname param = (
+          String    -> String  -> IO () -> IO ()
+  pull ac iconv onerr dump ctx name sockname param ready = (
     Z.withSocket ctx Z.Pull $ \sock -> do
       trycon sock (acAdd ac) retries
       Z.withSocket ctx Z.Sub $ \cmd -> do
         trycon      cmd sockname retries
         Z.subscribe cmd ""
+        ready
         poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
     `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
@@ -812,7 +821,7 @@ where
   ------------------------------------------------------------------------
   withPipe :: Z.Context  -> AccessPoint -> 
               OutBound o -> 
-              (Pipe o -> IO ())     -> IO ()
+              (Pipe o -> IO a)     -> IO a
   withPipe ctx ac oconv act = Z.withSocket ctx Z.Push $ \s -> do 
     Z.bind s (acAdd ac)
     act Pipe {
@@ -845,8 +854,8 @@ where
   --         Right _ -> return ()
   --  @
   ------------------------------------------------------------------------
-  push :: Pipe o -> E.Enumerator o IO () -> IO (Either SomeException ()) 
-  push p enum = E.run (enum $$ itSend (pipSock p) (pipOut p))
+  push :: Pipe o -> E.Enumerator o IO () -> IO () 
+  push p enum = E.run_ (enum $$ itSend (pipSock p) (pipOut p))
 
   ------------------------------------------------------------------------
   -- | Exclusive Pair
