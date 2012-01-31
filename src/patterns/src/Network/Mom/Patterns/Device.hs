@@ -14,14 +14,13 @@ module Network.Mom.Patterns.Device (
          Streamer, getStreamSource, filterTargets,
          -- * Transformer
          Transformer,
-         putThrough,
+         putThrough, ignoreStream, continueHere,
 
          -- * Transformer Building Blocks
          -- $recursive_helpers
 
-         emit, emit2, pass, pass2, end,
-         absorb, merge, ignore, purge,
-         set, reset,
+         emit, emitPart, pass, passBy, end,
+         absorb, merge, ignore, purge, set, reset,
          Identifier,
          Timeout, OnTimeout)
 where
@@ -287,20 +286,25 @@ where
   -- a transformer.
   ------------------------------------------------------------------------
   -- | Sends all stream elements to the targets identified
-  --   by the list of 'Identifier' and ends the transformation
-  --   by ignoring the rest of the incoming stream.
+  --   by the list of 'Identifier' and terminates the outgoing stream.
+  --   The transformation continues with the transformator 
+  --   passed in. 
   ------------------------------------------------------------------------
-  emit :: Streamer o -> [Identifier] -> S.Seq o -> E.Iteratee o IO ()
-  emit s is os = tryIO sender >> go
+  emit :: Streamer o    -> [Identifier] -> S.Seq o -> 
+          Transformer o -> E.Iteratee o IO ()
+  emit s is os go = tryIO sender >> go s S.empty
     where sender = mapM_ (\i -> sendStreamer s i (sendseq s os True)) is
-          go     = EL.consume >>= \_ -> return () 
 
   ------------------------------------------------------------------------
-  -- | Like 'emit' but adds a new element 
-  --   at the end of the sequence before sending it
+  -- | Sends all stream elements to the targets identified
+  --   by the list of 'Identifier' and terminates the outgoing stream.
+  --   The transformation continues with the transformator 
+  --   passed in. 
   ------------------------------------------------------------------------
-  emit2 :: Streamer o -> [Identifier] -> o -> S.Seq o -> E.Iteratee o IO ()
-  emit2 s is o os = emit s is (os |> o)
+  emitPart :: Streamer o    -> [Identifier] -> S.Seq o -> 
+              Transformer o -> E.Iteratee o IO ()
+  emitPart s is os go = tryIO sender >> go s S.empty
+    where sender = mapM_ (\i -> sendStreamer s i (sendseq s os False)) is
 
   ------------------------------------------------------------------------
   -- | Sends one element to the targets and starts the transformer
@@ -322,9 +326,9 @@ where
   --   the transformer will, hence, continue working 
   --   with sequence passed into 'pass2'
   ------------------------------------------------------------------------
-  pass2 :: Streamer o    -> [Identifier] -> o -> S.Seq o -> 
+  passBy :: Streamer o    -> [Identifier] -> o -> S.Seq o -> 
            Transformer o -> E.Iteratee o IO ()
-  pass2 s is o os go = tryIO sender >> go s os
+  passBy s is o os go = tryIO sender >> go s os
     where sender = mapM_ (\i -> sendStreamer s i 
                                  (sendseq s (S.singleton o) False)) is
 
@@ -397,10 +401,10 @@ where
   purge s go = go s S.empty
 
   ------------------------------------------------------------------------
-  -- | Simple Transformer for devices with two access points;
-  --   passes messages one to one to the respectively other access point
+  -- | Simple Transformer;
+  --   passes messages one to one to all respectively other access points
   ------------------------------------------------------------------------
-  putThrough :: Transformer B.ByteString
+  putThrough :: Transformer a
   putThrough s' os' = EL.head >>= \mbo -> go mbo s' os'
     where go mbo s _ = do
             mbo' <- EL.head
@@ -412,6 +416,12 @@ where
                             Just _  -> False
                 let trg = filterTargets s (/= getStreamSource s)
                 pass s trg x lst (go mbo')
+
+  ignoreStream :: Transformer a
+  ignoreStream _ _ = EL.consume >>= \_ -> return ()
+
+  continueHere :: Transformer a
+  continueHere _ _ = return ()
 
   ------------------------------------------------------------------------
   -- Internal

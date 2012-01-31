@@ -15,6 +15,7 @@ where
   import           Data.Sequence ((|>))
   import           Data.List ((\\))
   import qualified Data.ByteString.Char8 as B
+  import           Data.Monoid
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad
@@ -77,6 +78,37 @@ where
     l  <- run $ testDevice (emitOn 3) ss
     -- run $ putStrLn $ "expected: " ++ (show $ take 4 ss) ++ " got: " ++ show l
     assert $ take 4 ss == l
+
+  ------------------------------------------------------------------------------
+  -- emitPart emits all + end
+  ------------------------------------------------------------------------------
+  prp_emitPart :: NonEmptyList String -> Property
+  prp_emitPart (NonEmpty ss) = {- collect (length ls) $ -} monadicIO $ do 
+    l  <- run $ testDevice (emitPOn 3 "END") ss
+    -- run $ putStrLn $ "expected: " ++ (show $ take 4 ss) ++ " got: " ++ show l
+    case l of
+      [] -> assert False
+      xs -> assert $ (take 4 ss == init l) && (last l == "END")
+
+  ------------------------------------------------------------------------------
+  -- absorb until
+  ------------------------------------------------------------------------------
+  prp_absorb :: NonEmptyList String -> Property
+  prp_absorb (NonEmpty ss) = {- collect (length ls) $ -} monadicIO $ do 
+    l  <- run $ testDevice (absorbUntil 3) ss
+    -- run $ putStrLn $ "expected: " ++ (show $ take 4 ss) ++ " got: " ++ show l
+    assert $ take 4 ss == l
+
+  ------------------------------------------------------------------------------
+  -- merge until
+  ------------------------------------------------------------------------------
+  prp_merge :: NonEmptyList String -> Property
+  prp_merge (NonEmpty ss) = {- collect (length ls) $ -} monadicIO $ do 
+    l  <- run $ testDevice (mergeUntil 3) ss
+    if null l then assert False
+      else assert $ concat (take 4 ss) == head l
+
+  ------------------------------------------------------------------------------
 
   ------------------------------------------------------------------------------
   -- Device works with sockets
@@ -328,8 +360,8 @@ where
                 let lst = case mbo' of 
                             Nothing -> True
                             Just _  -> False
-                    trg = filterTargets str (/= getStreamSource str)
                 pass str trg x lst (go mbo')
+          trg = filterTargets s (/= getStreamSource s)
 
   ------------------------------------------------------------------------------
   -- end on i
@@ -340,14 +372,14 @@ where
             case mbo of
               Nothing -> return ()
               Just x  -> 
-                let trg = filterTargets s (/= getStreamSource s)
-                 in if c >= i then end s trg x
-                    else do
-                      mbo' <- EL.head
-                      let lst = case mbo' of
-                                  Nothing -> True
-                                  Just _  -> False
-                       in pass s trg x lst (go (c+1) mbo')
+                 if c >= i then end s trg x
+                   else do
+                     mbo' <- EL.head
+                     let lst = case mbo' of
+                                 Nothing -> True
+                                 Just _  -> False
+                      in pass s trg x lst (go (c+1) mbo')
+          trg = filterTargets s (/= getStreamSource s)
 
   ------------------------------------------------------------------------------
   -- emit on i
@@ -355,15 +387,64 @@ where
   emitOn :: Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   emitOn i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
     where go c mbo s os = 
-            let trg = filterTargets s (/= getStreamSource s)
-             in case mbo of
-                  Nothing -> if c > i then return ()
-                               else emit s trg os
-                  Just x  -> do
-                    mbo' <- EL.head
-                    if c == i 
-                      then emit s trg (os |> x)
-                      else go (c+1) mbo' s (os |> x)
+             case mbo of
+               Nothing -> if c > i then return ()
+                            else emit s trg os continueHere
+               Just x  -> do
+                 mbo' <- EL.head
+                 if c == i 
+                   then emit s trg (os |> x) ignoreStream
+                    else go (c+1) mbo' s (os |> x)
+          trg = filterTargets s (/= getStreamSource s)
+
+  ------------------------------------------------------------------------------
+  -- emitPart on i
+  ------------------------------------------------------------------------------
+  emitPOn :: Int -> o -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
+  emitPOn i e s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
+    where go c mbo s os = 
+             case mbo of
+               Nothing -> if c > i then end s trg e
+                            else emitPart s trg os (sendLast trg)
+               Just x  -> do
+                 mbo' <- EL.head
+                 if c == i 
+                   then emitPart s trg  (os |> x) (sendLast trg)
+                   else go (c+1) mbo' s (os |> x)
+          sendLast t _ _ = end s t e
+          trg = filterTargets s (/= getStreamSource s)
+
+  ------------------------------------------------------------------------------
+  -- absorb until i
+  ------------------------------------------------------------------------------
+  absorbUntil :: Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
+  absorbUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
+    where go c mbo s os = 
+             case mbo of
+               Nothing -> if c > i + 1 then return ()
+                            else emit s trg os continueHere
+               Just x  -> do
+                 mbo' <- EL.head
+                 if c <= i 
+                   then absorb s x   os $ go (c+1) mbo'
+                   else emit   s trg os ignoreStream
+          trg = filterTargets s (/= getStreamSource s)
+
+  ------------------------------------------------------------------------------
+  -- merge until i
+  ------------------------------------------------------------------------------
+  mergeUntil :: Monoid o => Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
+  mergeUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
+    where go c mbo s os = 
+             case mbo of
+               Nothing -> if c > i + 1 then return ()
+                            else emit s trg os continueHere
+               Just x  -> do
+                 mbo' <- EL.head
+                 if c <= i 
+                   then merge s x   os $ go (c+1) mbo'
+                   else emit  s trg os ignoreStream
+          trg = filterTargets s (/= getStreamSource s)
     
   -------------------------------------------------------------
   -- controlled quickcheck, arbitrary tests
@@ -406,7 +487,10 @@ where
     r <- runTest "Pass all passes all"
                   (deepCheck prp_passAll)  ?>
          runTest "emit" (deepCheck prp_emit) ?>
+         runTest "emitPart" (deepCheck prp_emitPart) ?>
          runTest "End" (deepCheck prp_end) ?>
+         runTest "absorb" (deepCheck prp_absorb) ?>
+         runTest "merge" (deepCheck prp_merge) ?>
          runTest "Device works with Sockets"
                   (deepCheck prp_deviceWithSocks) ?>
          runTest "Queue" (deepCheck prp_Queue)    ?>
