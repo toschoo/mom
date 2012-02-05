@@ -19,8 +19,8 @@ module Network.Mom.Patterns.Device (
          -- * Transformer Building Blocks
          -- $recursive_helpers
 
-         emit, emitPart, pass, passBy, end,
-         absorb, merge, ignore, purge, set, reset,
+         emit, emitPart, pass, passBy, end, absorb, merge,
+         -- * Helpers
          Identifier,
          Timeout, OnTimeout)
 where
@@ -371,36 +371,6 @@ where
      in go s os'
 
   ------------------------------------------------------------------------
-  -- | Simply ignores the new element
-  --   and continues the transformer with the same sequence
-  --   and without sending anything
-  ------------------------------------------------------------------------
-  ignore :: Streamer o -> S.Seq o -> Transformer o -> E.Iteratee o IO ()
-  ignore s os go = go s os
-
-  ------------------------------------------------------------------------
-  -- | Continues with the sequence passed in
-  --   without sending anything
-  ------------------------------------------------------------------------
-  set :: Streamer o -> S.Seq o -> Transformer o -> E.Iteratee o IO ()
-  set s os go = go s os
-
-  ------------------------------------------------------------------------
-  -- | Continues the transformer with the new element 
-  --   as the only member of the sequence
-  --   without sending anything
-  ------------------------------------------------------------------------
-  reset :: Streamer o -> o -> Transformer o -> E.Iteratee o IO ()
-  reset s o = set s (S.singleton o)
-
-  ------------------------------------------------------------------------
-  -- | Continues with an empty sequence
-  --   without sending anything
-  ------------------------------------------------------------------------
-  purge :: Streamer o -> Transformer o -> E.Iteratee o IO ()
-  purge s go = go s S.empty
-
-  ------------------------------------------------------------------------
   -- | Simple Transformer;
   --   passes messages one to one to all respectively other access points
   ------------------------------------------------------------------------
@@ -496,6 +466,7 @@ where
   mkPoll ctx t (k:ks) m is ps = bracketOnError
     (access ctx (pollType k)
                 (pollLink k) 
+                (pollOs   k) 
                 (pollAdd  k) 
                 (pollSub  k))
     (\p -> closeS p >> return [])
@@ -537,7 +508,10 @@ where
                 eiR <- E.run (rcvEnum s iconv $$ 
                               trans p strm S.empty) 
                 case eiR of
-                  Left e  -> onerr Error e name p
+                  Left e  -> consumeOnErr s >> onerr Error e name p 
                   Right _ -> return ()
               _ -> error "Ouch!"
+
+  consumeOnErr :: Z.Socket a -> IO ()
+  consumeOnErr s = E.run_ (rcvEnum s idIn $$ EL.consume >>= \_ -> return ())
 

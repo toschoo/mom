@@ -32,7 +32,7 @@ where
                          (address l3 "tcp" "localhost" p3 []) l3
                          toCmd fromResult onErr
                          (\_ -> one Empty) 
-                         (fetch1 (commander cc rc)) $ \s -> go cc rc d s
+                         (fetch1 (commander cc rc)) $ go cc rc d
        where go cc rc d s = do
               cmd <- readChan cc
               putStrLn $ srvName s ++ " received: " ++ show cmd

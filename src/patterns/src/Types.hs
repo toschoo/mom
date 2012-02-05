@@ -1,7 +1,7 @@
 module Types (
           -- * Service Access Point
           AccessPoint(..), LinkType(..), parseLink, link,
-          AccessType(..), access, safeClose,
+          AccessType(..), access, safeClose, setSockOs,
           -- * PollEntry
           PollEntry(..), pollEntry,
           -- * Enumerators
@@ -86,9 +86,9 @@ where
          | XPeer   
     deriving (Eq, Show, Read)
 
-  access :: Z.Context -> AccessType -> LinkType -> 
+  access :: Z.Context -> AccessType -> LinkType -> [Z.SocketOption] ->
                String -> String     -> IO Z.Poll
-  access ctx a l u t = 
+  access ctx a l os u t = 
     case a of 
       XServer -> Z.socket ctx Z.Rep  >>= go
       XClient -> Z.socket ctx Z.Req  >>= go
@@ -100,7 +100,8 @@ where
       XPeer   -> Z.socket ctx Z.Pair >>= go
       XSub    -> Z.socket ctx Z.Sub  >>= \s -> 
                   Z.subscribe s t >> go s
-   where go s = do case l of
+   where go s = do setSockOs s os
+                   case l of
                      Bind    -> Z.bind s u
                      Connect -> trycon s u retries
                    return $ Z.S s Z.In
@@ -145,7 +146,7 @@ where
   
   instance Show AccessPoint where
     show (Address s _) = s
-
+  
   ------------------------------------------------------------------------
   -- | A poll entry describes how to handle an AccessPoint
   ------------------------------------------------------------------------
@@ -158,9 +159,6 @@ where
                      pollOs   :: [Z.SocketOption]
                    }
     deriving (Show, Read)
-
-  instance Read Z.SocketOption where
-    readsPrec _ s = [(Z.Affinity 0,"")]
 
   instance Eq PollEntry where
     x == y = pollId x == pollId y
@@ -319,9 +317,16 @@ where
   -- binds or connects to the address
   -------------------------------------------------------------------------
   link :: LinkType -> AccessPoint -> Z.Socket a -> IO ()
-  link t ac s = case t of
-                  Bind    -> Z.bind s (acAdd ac)
-                  Connect -> trycon s (acAdd ac) 10
+  link t ac s = do setSockOs s (acOs ac) 
+                   case t of
+                     Bind    -> Z.bind s (acAdd ac)
+                     Connect -> trycon s (acAdd ac) 10
+
+  -------------------------------------------------------------------------
+  -- Sets Socket Options
+  -------------------------------------------------------------------------
+  setSockOs :: Z.Socket a -> [Z.SocketOption] -> IO ()
+  setSockOs s = mapM_ (Z.setOption s)
 
   ------------------------------------------------------------------------
   -- | Converters are user-defined functions

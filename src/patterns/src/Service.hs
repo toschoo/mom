@@ -1,6 +1,6 @@
 module Service (
           Service, srvContext, srvName, srvId,
-          stop, pause, resume, appCmd,
+          stop, pause, resume, changeParam, changeOption,
           addDevice, remDevice, changeTimeout,
           withService, poll, xpoll, XPoll(..),
           periodic, periodicSend
@@ -58,8 +58,14 @@ where
   ------------------------------------------------------------------------
   -- | Changes the 'Service' control parameter
   ------------------------------------------------------------------------
-  appCmd :: Service -> String ->IO ()
-  appCmd s c = sendCmd (APP c) s
+  changeParam :: Service -> String -> IO ()
+  changeParam s c = sendCmd (APP c) s
+
+  ------------------------------------------------------------------------
+  -- | Changes SocketOption
+  ------------------------------------------------------------------------
+  changeOption :: Service -> Z.SocketOption -> IO ()
+  changeOption s o = sendCmd (OPT o) s
 
   ------------------------------------------------------------------------
   -- | Add a 'PollEntry' to a device;
@@ -85,7 +91,8 @@ where
   changeTimeout :: Service -> Timeout -> IO ()
   changeTimeout s t = sendDevCmd (TMO t) s
 
-  data Command = STOP | PAUSE | RESUME | DEVICE DevCmd | APP String
+  data Command = STOP | PAUSE  | RESUME 
+               | DEVICE DevCmd | APP String | OPT Z.SocketOption
     deriving (Eq, Show, Read)
 
   data DevCmd = ADD PollEntry | REM Identifier | TMO Z.Timeout
@@ -106,9 +113,12 @@ where
                  if take 4 x == "APP " 
                    then Right $ read x
                    else 
-                     if take 6 x == "DEVICE"
+                     if take 4 x == "OPT "
                        then Right $ read x
-                       else Left  $ "No Command: " ++ x
+                       else 
+                         if take 6 x == "DEVICE"
+                           then Right $ read x
+                           else Left  $ "No Command: " ++ x
 
   withService :: Z.Context -> String -> String -> 
                 (Z.Context -> String -> String -> String -> IO () -> IO ()) -> 
@@ -150,8 +160,14 @@ where
                      PAUSE  -> poll True   poller rcv param
                      RESUME -> poll False  poller rcv param
                      APP p  -> poll paused poller rcv p
+                     OPT o  -> changeOpt poller o >> 
+                               poll paused poller rcv param
                      _      -> poll paused poller rcv param -- ignore
   handleCmd _ _ _ _ = ouch "invalid poller in 'handleCmd'!"
+
+  changeOpt :: [Z.Poll] -> Z.SocketOption -> IO ()
+  changeOpt (_:Z.S s _:_) o = Z.setOption s o
+  changeOpt _             _ = return ()
 
   data XPoll = XPoll {
                  xpCtx   :: Z.Context,
@@ -226,6 +242,7 @@ where
         s <- access (xpCtx   xp)
                     (pollType p) 
                     (pollLink p) 
+                    (pollOs   p) 
                     (pollAdd  p) 
                     (pollSub  p)
         case xpPoll xp of

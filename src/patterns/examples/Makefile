@@ -67,6 +67,9 @@ $(BASICDIR)/pubsub/wuissue:	$(BASICDIR)/pubsub/wuissue.hs $(SUBSRC)
 $(BASICDIR)/pubsub/wuclient:	$(BASICDIR)/pubsub/wuclient.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
+$(BASICDIR)/pubsub/sporadic:	$(BASICDIR)/pubsub/sporadic.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
+
 $(BASICDIR)/pipes/push:		$(BASICDIR)/pipes/push.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
@@ -107,6 +110,7 @@ clients:	$(BASICDIR)/clients/append \
 pubsub:		$(BASICDIR)/pubsub/wuserver \
 		$(BASICDIR)/pubsub/wufile \
 		$(BASICDIR)/pubsub/wuclient \
+		$(BASICDIR)/pubsub/sporadic \
 		$(BASICDIR)/pubsub/wuissue 
  
 
@@ -147,6 +151,7 @@ clean:
 	rm -f $(BASICDIR)/pubsub/wuserver
 	rm -f $(BASICDIR)/pubsub/wufile
 	rm -f $(BASICDIR)/pubsub/wuclient
+	rm -f $(BASICDIR)/pubsub/sporadic
 	rm -f $(BASICDIR)/pubsub/wuissue
 	rm -f $(BASICDIR)/pipes/push
 	rm -f $(BASICDIR)/pipes/worker

@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns, ExistentialQuantification #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module     : Network/Mom/Patterns/Basic.hs
@@ -12,27 +11,31 @@
 module Network.Mom.Patterns.Basic (
           -- * Server/Client
           withServer,
-          Client, withClient, clientContext,
+          Client, withClient, clientContext, setClientOptions,
           request, askFor, checkFor,
           -- * Publish/Subscribe
-          Pub, pubContext, withPub, issue,
+          Pub, pubContext, setPubOptions, withPub, issue,
           withPeriodicPub,
-          withSub, unsubscribe, resubscribe,
+          withSub,
+          Sub, subContext, setSubOptions,
+          withSporadicSub, checkSub, waitSub, resubscribe,
           -- * Pipeline
           withPuller,
-          Pipe, withPipe, push, pipeContext, 
+          Pipe, withPipe, push, pipeContext, setPipeOptions,
           -- * Exclusive Pair
-          Peer, peerContext, withPeer, send, receive,
+          Peer, peerContext, setPeerOptions, withPeer, send, receive,
           -- * Service Access Point
           AccessPoint(..), LinkType(..), parseLink,
           -- * Converters
           InBound, OutBound,
           idIn, idOut, inString, outString, inUTF8, outUTF8,
-          -- * Error Handlers
+          -- * Errors and Error Handlers
+          Criticality(..),
           OnError, OnError_,
           chainIO, chainIOe, tryIO, tryIOe,
           -- * Generic Serivce
-          Service, srvName, srvContext, pause, resume,
+          Service, srvName, srvContext, pause, resume, 
+          changeParam, changeOption,
           -- * ZMQ Context
           Z.Context, Z.withContext,
           Z.SocketOption(..),
@@ -262,6 +265,9 @@ where
   clientContext :: Client i o -> Z.Context
   clientContext = cliCtx
 
+  setClientOptions :: Client i o -> [Z.SocketOption] -> IO ()
+  setClientOptions c = setSockOs (cliSock c)
+
   ------------------------------------------------------------------------
   -- | Create a 'Client';
   --   a client is not a background process like a server,
@@ -444,6 +450,9 @@ where
   ------------------------------------------------------------------------
   pubContext :: Pub o -> Z.Context
   pubContext = pubCtx
+
+  setPubOptions :: Pub o -> [Z.SocketOption] -> IO ()
+  setPubOptions p = setSockOs (pubSock p)
 
   ------------------------------------------------------------------------
   -- | Creates a publisher;
@@ -691,21 +700,47 @@ where
     where go sock p = E.run_ (rcvEnum sock iconv $$ dump ctx p)
                       `catch` (\e -> do onerr Error e name p)
 
-  ------------------------------------------------------------------------
-  -- | Pauses the subscriber service
-  ------------------------------------------------------------------------
-  unsubscribe :: Service -> IO ()
-  unsubscribe = pause
+  data Sub i = Sub {
+               subCtx   :: Z.Context,
+               subSock  :: Z.Socket Z.Sub,
+               subAdd   :: AccessPoint,
+               subIn    :: InBound i}
 
-  ------------------------------------------------------------------------
-  -- | Resumes the subscriber service
-  ------------------------------------------------------------------------
-  resubscribe :: Service -> IO ()
-  resubscribe = resume
+  subContext :: Sub i -> Z.Context
+  subContext = subCtx
+
+  setSubOptions :: Sub i -> [Z.SocketOption] -> IO ()
+  setSubOptions s = setSockOs (subSock s)
 
   -- withSporadicSub
+  withSporadicSub :: Z.Context -> AccessPoint -> InBound i -> String ->
+                     (Sub i -> IO a) -> IO a
+  withSporadicSub ctx ac iconv topic act = Z.withSocket ctx Z.Sub $ \s -> do
+    trycon      s (acAdd ac) retries
+    Z.subscribe s topic
+    act Sub {
+          subCtx   = ctx,
+          subSock  = s,
+          subAdd   = ac,
+          subIn    = iconv}
+
   -- checkSub
+  checkSub :: Sub i -> E.Iteratee i IO a -> 
+              IO (Maybe (Either SomeException a))
+  checkSub s it = Z.poll [Z.S (subSock s) Z.In] 0 >>= \[p] ->
+    case p of
+      Z.S _ Z.In -> Just <$> rcvSub s it
+      _          -> return Nothing
+
   -- waitSub
+  waitSub :: Sub i -> E.Iteratee i IO a -> IO (Either SomeException a)
+  waitSub = rcvSub
+
+  resubscribe :: Sub i -> String -> IO ()
+  resubscribe s t = Z.subscribe (subSock s) t
+
+  rcvSub :: Sub i -> E.Iteratee i IO a -> IO (Either SomeException a)
+  rcvSub s it = E.run (rcvEnum (subSock s) (subIn s) $$ it)
 
   ------------------------------------------------------------------------
   -- | A puller is a background service 
@@ -798,6 +833,9 @@ where
   pipeContext :: Pipe o -> Z.Context
   pipeContext = pipCtx
 
+  setPipeOptions :: Pipe o -> [Z.SocketOption] -> IO ()
+  setPipeOptions p = setSockOs (pipSock p)
+
   ------------------------------------------------------------------------
   -- | Creates a pipeline;
   --   a pipeline, similar to a 'Client', is a data type 
@@ -869,6 +907,18 @@ where
                 }
 
   ------------------------------------------------------------------------
+  -- | Obtains the 'Z.Context' from a 'Peer'
+  ------------------------------------------------------------------------
+  peerContext :: Peer a -> Z.Context
+  peerContext = peeCtx
+
+  ------------------------------------------------------------------------
+  -- | Sets 'Z.SocketOption' 
+  ------------------------------------------------------------------------
+  setPeerOptions :: Peer a -> [Z.SocketOption] -> IO ()
+  setPeerOptions p = setSockOs (peeSock p)
+
+  ------------------------------------------------------------------------
   -- | Creates a 'Peer';
   --   a peer, similar to a 'Client', is a data type 
   --   that provides an interface to exchange data with another peer.
@@ -930,9 +980,3 @@ where
   ------------------------------------------------------------------------
   receive :: Peer i -> E.Iteratee i IO a -> IO (Either SomeException a)
   receive p it = E.run (rcvEnum (peeSock p) (peeIn p) $$ it)
-
-  ------------------------------------------------------------------------
-  -- Obtains the 'Z.Context' from a 'Peer'
-  ------------------------------------------------------------------------
-  peerContext :: Peer a -> Z.Context
-  peerContext = peeCtx

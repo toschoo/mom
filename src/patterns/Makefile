@@ -27,9 +27,18 @@ INC  =	-i./src \
 	-i./examples/common
 
 suite:	$(TDIR)/enum \
+	$(TDIR)/basic \
+	$(TDIR)/device
+
+run:	
+	$(TDIR)/enum
+	$(TDIR)/basic
 	$(TDIR)/device
 
 $(TDIR)/enum:	$(TDIR)/enum.hs $(SUBSRC)
+		$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/basic:	$(TDIR)/basic.hs $(SUBSRC)
 		$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/device:	$(TDIR)/device.hs $(SUBSRC)
@@ -164,6 +173,7 @@ clean:
 	rm -f $(HELPER)/*.o
 	rm -f $(TDIR)/enum
 	rm -f $(TDIR)/device
+	rm -f $(TDIR)/basic
 	rm -f $(SMOKEDIR)/db
 	rm -f $(SMOKEDIR)/db2
 	rm -f $(SMOKEDIR)/db3

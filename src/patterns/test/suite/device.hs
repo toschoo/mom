@@ -2,6 +2,7 @@ module Main
 where
 
   import           Helper
+  import           System.IO
   import           System.Exit
   import           System.Timeout
   import qualified System.ZMQ as Z
@@ -13,12 +14,11 @@ where
   import           Data.Enumerator (($$))
   import qualified Data.Sequence as S
   import           Data.Sequence ((|>))
-  import           Data.List ((\\))
   import qualified Data.ByteString.Char8 as B
+  import           Data.Time.Clock
   import           Data.Monoid
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (try, throwIO, AssertionFailed(..), SomeException)
 
@@ -33,23 +33,6 @@ where
 
   instance Arbitrary Digit where
     arbitrary = Digit <$> elements [0..9]
-
-  data Legal = Legal Char 
-    deriving (Read, Eq, Ord)
-
-  toChar :: Legal -> Char
-  toChar (Legal c) = c
-
-  type LStr = [Legal]
-  
-  strString :: [Legal] -> String
-  strString = map toChar
-
-  instance Show Legal where
-    show (Legal s) = show s
-
-  instance Arbitrary Legal where
-    arbitrary = Legal <$> elements ['a'..'z']
 
   ------------------------------------------------------------------------------
   -- pass all gets all
@@ -88,7 +71,7 @@ where
     -- run $ putStrLn $ "expected: " ++ (show $ take 4 ss) ++ " got: " ++ show l
     case l of
       [] -> assert False
-      xs -> assert $ (take 4 ss == init l) && (last l == "END")
+      _  -> assert $ (take 4 ss == init l) && (last l == "END")
 
   ------------------------------------------------------------------------------
   -- absorb until
@@ -108,6 +91,196 @@ where
     if null l then assert False
       else assert $ concat (take 4 ss) == head l
 
+  ------------------------------------------------------------------------------
+  -- Test timeout
+  ------------------------------------------------------------------------------
+  prp_onTmo :: Property
+  prp_onTmo = monadicIO $ run (withContext 1 tstDevice) >>= assert
+    where go d m _ = do
+            now <- getCurrentTime
+            threadDelay $ 2 * (fromIntegral d)
+            t   <- readMVar m
+            if t > now && t <= uToNominal (3 * (fromIntegral d)) 
+                               `addUTCTime` now
+              then putStr "." >> hFlush stdout >> return True
+              else return False
+          uToNominal :: Int -> NominalDiffTime 
+          uToNominal t = fromIntegral t / (1000000::NominalDiffTime)
+          tstTmo m = do
+            now <- getCurrentTime
+            modifyMVar_ m (\_ -> return now)
+          tstDevice ctx = 
+            withPub ctx (Address "inproc://pub" []) idOut $ \_ -> do
+              let d = 10000
+              t     <- getCurrentTime
+              tmo   <- newMVar t
+              withDevice ctx "Test" noparam d
+                             [pollEntry "XSub" XSub 
+                                  (Address "inproc://pub" []) Connect "",
+                              pollEntry "XPub" XPub
+                                  (Address "inproc://sub" []) Bind ""]
+                              idIn idOut onErr_ 
+                              (\_ -> tstTmo tmo) (\_ -> putThrough) $ \dv -> do
+                  (and <$> mapM (go d tmo) ([1..100]::[Int])) ~> (do
+                    let d' = 2 * d
+                    putStrLn "\nchange Timeout"
+                    changeTimeout dv d'
+                    ok <- and <$> mapM (go d' tmo) ([1..100]::[Int])
+                    putStrLn ""
+                    return ok)
+
+  ------------------------------------------------------------------------------
+  -- Error
+  ------------------------------------------------------------------------------
+  prp_onErr :: Property
+  prp_onErr = monadicIO $ run (withContext 1 tstDevice) >>= assert
+    where mkErr           = throwIO (AssertionFailed "Test")
+          onerr m c _ _ _ = putMVar m c
+          tstFatal m _    = do
+            e <- takeMVar m
+            case e of
+              Fatal -> return True
+              _     -> return False
+          tstError p m _  = do
+            issue p (mkStream [B.pack "test"])
+            e <- takeMVar m
+            case e of
+              Error -> return True
+              _     -> return False
+          tstDevice ctx   = 
+            withPub ctx (Address "inproc://pub" []) idOut $ \p -> do
+              errDevice ctx p mkErr tstFatal ~> (do
+                threadDelay 10000 >> -- give the ZMQ some time
+                  errDevice ctx p (return ()) (tstError p))
+          errDevice ctx _ tmo action = do
+              e <- newEmptyMVar
+              withDevice ctx "Test" noparam 10000
+                             [pollEntry "XSub" XSub 
+                                  (Address "inproc://pub" []) Connect "",
+                              pollEntry "XPub" XPub
+                                  (Address "inproc://sub" []) Bind ""]
+                              idIn idOut (onerr e)
+                              (\_ -> tmo) (\_ _ _ -> tryIO mkErr) (action e)
+
+  ------------------------------------------------------------------------------
+  -- Param
+  ------------------------------------------------------------------------------
+  prp_Param :: String -> Property
+  prp_Param s = monadicIO $ run (withContext 1 tstDevice) >>= assert
+    where tstDevice ctx   = 
+            withPub ctx (Address "inproc://pub" []) idOut $ \pub -> do
+              m <- newEmptyMVar
+              withDevice ctx "Test" noparam (-1)
+                             [pollEntry "XSub" XSub 
+                                  (Address "inproc://pub" []) Connect "",
+                              pollEntry "XPub" XPub
+                                  (Address "inproc://sub" []) Bind ""]
+                              idIn idOut onErr_
+                              (\_ -> return ()) 
+                              (\p _ _ -> EL.consume >>= \_ -> liftIO $
+                                           putMVar m p) $ \dv -> do
+                  issue pub (mkStream [B.pack "test"])
+                  x <- takeMVar m
+                  case x of
+                    "" -> do
+                      changeParam dv s
+                      issue pub (mkStream [B.pack "test"])
+                      y <- takeMVar m 
+                      return (y == s)
+                    _ -> return False
+
+  ------------------------------------------------------------------------------
+  -- start / pause
+  ------------------------------------------------------------------------------
+  prp_Pause :: NonEmptyList String -> Property
+  prp_Pause (NonEmpty ss) = monadicIO $ run (withContext 1 tstDevice) >>= assert
+    where tstDevice ctx   = 
+            withPub ctx (Address "inproc://pub" []) outString $ \pub -> do
+              m <- newEmptyMVar
+              withDevice ctx "Test" noparam (-1)
+                             [pollEntry "XSub" XSub 
+                                  (Address "inproc://pub" []) Connect "",
+                              pollEntry "XPub" XPub
+                                  (Address "inproc://sub" []) Bind ""]
+                              inString outString onErr_
+                              (\_ -> return()) 
+                              (\_ -> passall) $ \dv ->
+                withSub ctx "Sub" noparam "" (Address "inproc://sub" []) 
+                      inString onErr_ (dump m) $ \_ -> do
+                  issue pub (mkStream ss)
+                  mbx <- timeout 50000 $ takeMVar m
+                  case mbx of
+                    Nothing -> return False
+                    Just x  -> 
+                      if x /= ss then 
+                          putStrLn ("received: " ++ show x) >> return False
+                        else do
+                          pause dv
+                          issue pub (mkStream ss)
+                          y <- timeout 50000 $ takeMVar m
+                          case y of
+                            Just _  -> return False
+                            Nothing -> do
+                              resume dv
+                              issue pub (mkStream ss)
+                              mbz <- timeout 50000 $ takeMVar m
+                              case mbz of
+                                Nothing -> return False
+                                Just z  -> return (z == ss)
+
+  ------------------------------------------------------------------------------
+  -- device commands
+  -- note: we cannot test remove in this manner 
+  --       since we use "inproc" sockets, withSub can only connect
+  --       to a publisher that has already bound its address;
+  --       when we remove this publisher, withSub runs into an error...
+  ------------------------------------------------------------------------------
+  prp_add :: NonEmptyList String -> Property
+  prp_add (NonEmpty ss) = monadicIO $ run (withContext 1 tstDevice) >>= assert
+    where tstSub ctx m action =
+            withSub ctx "Sub2" noparam ""
+                        (Address "inproc://sub2" []) 
+                        inString onErr_ (dump m) $ \_ -> action
+          tstReceive m mb = do
+            mbx <- timeout 50000 $ takeMVar m
+            case mbx of
+              Nothing -> case mb of
+                           Just _  -> putStrLn "Just expected" >> return False
+                           Nothing -> return True
+              Just x  -> case mb of
+                           Nothing -> putStrLn "Nothing expected" >> return False
+                           Just _  -> return (x == ss)
+          tstDevice ctx   = 
+            withPub ctx (Address "inproc://pub" []) outString $ \pub -> do
+              m1 <- newEmptyMVar
+              m2 <- newEmptyMVar
+              withDevice ctx "Test" noparam (-1)
+                             [pollEntry "XSub" XSub 
+                                  (Address "inproc://pub" []) Connect "",
+                              pollEntry "XPub1" XPub
+                                  (Address "inproc://sub1" []) Bind ""]
+                              inString outString onErr_
+                              (\_ -> return())
+                              (\_ -> passall) $ \dv -> 
+                withSub ctx "Sub1" noparam "" 
+                        (Address "inproc://sub1" []) 
+                        inString onErr_ (dump m1) $ \_ -> do
+                    let pe = pollEntry "XPub2" XPub 
+                             (Address "inproc://sub2" []) Bind ""
+                    issue pub (mkStream ss)
+                    tstReceive m1 (Just ss) ~> (do
+                        addDevice dv pe
+                        tstSub ctx m2 $ do
+                          issue pub (mkStream ss)
+                          tstReceive m1 (Just ss) ~>
+                            tstReceive m2 (Just ss))
+
+  infixr ~>
+  (~>) :: IO Bool -> IO Bool -> IO Bool
+  x ~> y = x >>= \r -> if r then y else return False
+  
+  ------------------------------------------------------------------------------
+  -- unicode
   ------------------------------------------------------------------------------
 
   ------------------------------------------------------------------------------
@@ -264,61 +437,6 @@ where
                                   let _ = show (e::SomeException)
                                   trycon s a
                     Right _ -> return ()
-                  
-
-  ------------------------------------------------------------------------------
-  -- Server Test
-  ------------------------------------------------------------------------------
-
-  ------------------------------------------------------------------------------
-  -- Store previous value in MVar, increment to bound
-  ------------------------------------------------------------------------------
-  listup :: MVar Int -> Int -> IO (Maybe Int)
-  listup m e = do
-    c <- modifyMVar m (\i -> return (i + 1, i))
-    if c >= e then return Nothing else return $ Just c 
-
-  ------------------------------------------------------------------------
-  -- Return counter
-  ------------------------------------------------------------------------
-  listupFor :: Int -> Int -> IO Int
-  listupFor c _ = return c
-
-  ------------------------------------------------------------------------
-  -- increment counter
-  ------------------------------------------------------------------------
-  listup' :: Int -> IO Int
-  listup' i = return (i+1)
-
-  ------------------------------------------------------------------------
-  -- listup for fetch
-  ------------------------------------------------------------------------
-  fetchup :: MVar Int -> Context -> String -> Int -> IO (Maybe Int)
-  fetchup m _ _ i = listup m i
-
-  ------------------------------------------------------------------------
-  -- listupFor for fetch
-  ------------------------------------------------------------------------
-  fetchupFor :: Context -> String -> Int -> Int -> IO Int
-  fetchupFor _ _ c i = listupFor c i
-
-  ------------------------------------------------------------------------
-  -- listup' for fetch
-  ------------------------------------------------------------------------
-  fetchup' :: Context -> String -> Int -> IO Int
-  fetchup' _ _ = listup'
-
-  ------------------------------------------------------------------------
-  -- Make Int stream [0..i]
-  ------------------------------------------------------------------------
-  mkIntStream :: Int -> E.Enumerator Int IO a
-  mkIntStream = go 0
-    where go c i step = 
-            case step of
-              (E.Continue k) -> 
-                if c < i then go (c+1) i $$ k (E.Chunks [c])
-                  else E.continue k
-              _ -> E.returnI step  
 
   ------------------------------------------------------------------------
   -- stream from list
@@ -352,7 +470,7 @@ where
   ------------------------------------------------------------------------------
   passall :: Streamer o -> S.Seq o -> E.Iteratee o IO ()
   passall s os = EL.head >>= \mbo -> go mbo s os
-    where go mbo str _ = do
+    where go mbo str _ = 
             case mbo of
               Nothing -> return ()
               Just x  -> do
@@ -368,7 +486,7 @@ where
   ------------------------------------------------------------------------------
   endOn :: Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   endOn i s os = EL.head >>= \mbo -> go 0 mbo s os
-    where go c mbo s os = 
+    where go c mbo _ _ = 
             case mbo of
               Nothing -> return ()
               Just x  -> 
@@ -386,7 +504,7 @@ where
   ------------------------------------------------------------------------------
   emitOn :: Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   emitOn i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
-    where go c mbo s os = 
+    where go c mbo _ os = 
              case mbo of
                Nothing -> if c > i then return ()
                             else emit s trg os continueHere
@@ -402,7 +520,7 @@ where
   ------------------------------------------------------------------------------
   emitPOn :: Int -> o -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   emitPOn i e s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
-    where go c mbo s os = 
+    where go c mbo _ os = 
              case mbo of
                Nothing -> if c > i then end s trg e
                             else emitPart s trg os (sendLast trg)
@@ -419,7 +537,7 @@ where
   ------------------------------------------------------------------------------
   absorbUntil :: Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   absorbUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
-    where go c mbo s os = 
+    where go c mbo _ os = 
              case mbo of
                Nothing -> if c > i + 1 then return ()
                             else emit s trg os continueHere
@@ -435,7 +553,7 @@ where
   ------------------------------------------------------------------------------
   mergeUntil :: Monoid o => Int -> Streamer o -> S.Seq o -> E.Iteratee o IO ()
   mergeUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
-    where go c mbo s os = 
+    where go c mbo _ os = 
              case mbo of
                Nothing -> if c > i + 1 then return ()
                             else emit s trg os continueHere
@@ -485,17 +603,22 @@ where
     let good = "OK. All Tests passed."
     let bad  = "Bad. Some Tests failed."
     r <- runTest "Pass all passes all"
-                  (deepCheck prp_passAll)  ?>
-         runTest "emit" (deepCheck prp_emit) ?>
+                  (deepCheck prp_passAll)            ?>
+         runTest "emit" (deepCheck prp_emit)         ?>
          runTest "emitPart" (deepCheck prp_emitPart) ?>
-         runTest "End" (deepCheck prp_end) ?>
-         runTest "absorb" (deepCheck prp_absorb) ?>
-         runTest "merge" (deepCheck prp_merge) ?>
+         runTest "End" (deepCheck prp_end)           ?>
+         runTest "absorb" (deepCheck prp_absorb)     ?>
+         runTest "merge" (deepCheck prp_merge)       ?>
          runTest "Device works with Sockets"
-                  (deepCheck prp_deviceWithSocks) ?>
-         runTest "Queue" (deepCheck prp_Queue)    ?>
-         runTest "Forward" (deepCheck prp_Forwarder)  ?>
-         runTest "Pipeline" (deepCheck prp_Pipeline) 
+                  (deepCheck prp_deviceWithSocks)    ?>
+         runTest "Queue" (deepCheck prp_Queue)       ?>
+         runTest "Forward" (deepCheck prp_Forwarder) ?>
+         runTest "Pipeline" (deepCheck prp_Pipeline) ?>
+         runTest "Timeout" (oneCheck prp_onTmo)      ?>
+         runTest "Error" (deepCheck prp_onErr)        ?> 
+         runTest "Parameter" (deepCheck prp_Param)   ?> 
+         runTest "Start/Pause" (deepCheck prp_Pause) ?> 
+         runTest "add"         (deepCheck prp_add)
     case r of
       Success _ -> do
         putStrLn good
