@@ -11,17 +11,17 @@
 module Network.Mom.Patterns.Basic (
           -- * Server/Client
           withServer,
-          Client, withClient, clientContext, setClientOptions,
+          Client, clientContext, setClientOptions, withClient,
           request, askFor, checkFor,
           -- * Publish/Subscribe
           Pub, pubContext, setPubOptions, withPub, issue,
           withPeriodicPub,
           withSub,
           Sub, subContext, setSubOptions,
-          withSporadicSub, checkSub, waitSub, resubscribe,
+          withSporadicSub, checkSub, waitSub, unsubscribe, resubscribe,
           -- * Pipeline
+          Pipe, pipeContext, setPipeOptions, withPipe, push, 
           withPuller,
-          Pipe, withPipe, push, pipeContext, setPipeOptions,
           -- * Exclusive Pair
           Peer, peerContext, setPeerOptions, withPeer, send, receive,
           -- * Service Access Point
@@ -40,7 +40,8 @@ module Network.Mom.Patterns.Basic (
           Z.Context, Z.withContext,
           Z.SocketOption(..),
           -- * Helpers
-          Millisecond, noparam)
+          Topic, alltopics, notopic,
+          Timeout, Parameter, noparam)
 where
 
   import           Types
@@ -63,19 +64,26 @@ where
   import qualified System.ZMQ as Z
 
   ------------------------------------------------------------------------
-  -- | Starts a server as a background process
-  --   and an action that
+  -- | Starts one or more server threads
+  --   and executes an action that
   --   receives a 'Service' to control the server.
-  --   This 'Service' variable is a thread local resource.
-  --   It must not be passed to threads that are forked 
-  --   from the action.
+  --   The 'Service' is a thread local resource.
+  --   It must not be passed to threads forked 
+  --   from the thread that has started the service.
   --   The 'Service' is valid only in the scope of the action.
-  --   When the action ends, the server is automatically stopped.
+  --   When the action terminates, the server is automatically stopped.
   --   During the action, the server can be paused and restarted.
-  --   The application may also implement control parameters
-  --   that may be changed during run-time.
-  --   Control parameters are strings that are passed
+  --   Also, the 'SocketOption' of the underlying ZMQ 'Z.Socket' 
+  --   can be changed.
+  --   Please refer to 'pause', 'resume' and 'changeOption' for more details.
+  --
+  --   The application may implement control parameters.
+  --   Control parameters are mere strings that are passed
   --   to the application call-backs. 
+  --   It is up to the application to enquire these strings
+  --   and to implement different behaviour for the possible settings.
+  --   Control parameter can be changed during run-time
+  --   by means of 'changeParam'.
   --
   --   Parameters:
   --
@@ -83,11 +91,12 @@ where
   --
   --   * 'String': The name of the server, useful for debugging;
   --
-  --   * 'String': The initial parameter passed to all application call-backs;
+  --   * 'Parameter': The initial value of the control parameter 
+  --                  passed to all application call-backs;
   --
   --   * 'Int': The number of worker threads;
   --            note that a server with only one thread
-  --            could handle client requests only sequentially.
+  --            handles client requests sequentially.
   --            The number of threads 
   --            (together with the number of hardware processing resources)
   --            defines how many client requests can be processed in parallel. 
@@ -100,7 +109,8 @@ where
   --                 whereas clients connect to it.
   --                 Instead, a server may also connect
   --                 to a load-balancing device,
-  --                 to which other servers and clients connect.
+  --                 to which other servers and clients connect
+  --                 (see 'withDevice' and 'withQueue').
   --
   --   * 'InBound': The converter to convert the incoming
   --                data stream (of type 'B.ByteString') 
@@ -108,15 +118,18 @@ where
   --                Note that the converter converts
   --                single message segments to components of type /c/.
   --                The 'E.Iteratee', receiving this /c/-typed
-  --                elements has to combine them 
-  --                to single request of type /i/,
-  --                which is then processed by an 'E.Enumerator'.
+  --                elements shall combine them 
+  --                to a complete request of type /i/,
+  --                which is then processed by an 'E.Enumerator'
+  --                to create the server response.
   --
   --   * 'OutBound': The converter to convert the results of type /o/
-  --                 to a 'B.ByteString', which, then, is sent
-  --                 back to the client internally.
+  --                 to a 'B.ByteString', which then is sent
+  --                 back to the client.
   --
-  --   * String -> 'E.Iteratee': The 'E.Iteratee' that processes
+  --   * 'OnError': The error handler
+  --
+  --   * 'String' -> 'E.Iteratee': The 'E.Iteratee' that processes
   --                             request components of type /c/
   --                             and yields a request of type /i/.
   --                             The 'String' argument is
@@ -124,14 +137,18 @@ where
   --                             whose logic is implemented 
   --                             by the application.
   --
-  --   * String -> 'Fetch': The 'E.Enumerator' that processes
-  --                        the request of type /i/ to produce
-  --                        results of type /o/.
+  --   * 'Fetch': The 'E.Enumerator' that processes
+  --              the request of type /i/ to produce
+  --              results of type /o/.
   --
-  --   * 'Service' -> IO (): The action to invoke with the server.
+  --   * 'Service' -> IO (): The action to invoke, 
+  --                         when the server has been started; 
+  --                         the service is used to control the server.
   --   
-  --   A simple server to process data base queries 
-  --   may be implemented like:
+  --   The following code fragment shows a 
+  --   simple server to process data base queries 
+  --   using standard converters and error handlers
+  --   not further defined here:
   --
   --   @
   --   withContext 1 $ \\ctx -> do
@@ -146,20 +163,48 @@ where
   --          onErr       -- some standard error handler
   --          (\\_  -> one []) -- 'E.Iteratee' for single segment messages;
   --                           -- refer to 'Enumerator' for details
-  --          (\\_ -> dbFetcher s) $ \\srv -> -- an 'E.Enumerator';
-  --                                        -- refer to 'Enumerator' 
-  --                                        -- for details
+  --          (dbFetcher s) $ \\srv -> -- the 'E.Enumerator';
   --            untilInterrupt $ do -- install a signal handler for /SIGINT/
   --                                -- and repeat the following action
   --                                -- until /SIGINT/ is received;
-  --                                -- refer to 'Helpers' for details
   --              putStrLn $ \"server \" ++ srvName srv ++ 
   --                         \" up and running...\"
   --              threadDelay 1000000
   --   @
+  --
+  --   The untilInterrupt loop may be implemented as follows:
+  --
+  --   @
+  --
+  --     untilInterrupt :: IO () -> IO ()
+  --     untilInterrupt run = do
+  --       continue <- newMVar True
+  --       _ <- installHandler sigINT (Catch $ handler continue) Nothing
+  --       go continue 
+  --      where handler m = modifyMVar_ m (\\_ -> return False)
+  --            go      m = do run
+  --                           continue <- readMVar m
+  --                           when continue $ go m
+  --   @
+  -- 
+  --   Finally, a simple dbFetcher:
+  --
+  --   @
+  --     dbFetcher :: SQL.Statement -> Fetch [SQL.SqlValue] String
+  --     dbFetcher s _ _ _ stp = tryIO (SQL.execute s []) >>= \\_ -> go stp
+  --       where go step = 
+  --               case step of
+  --                 E.Continue k -> do
+  --                   mbR <- tryIO $ SQL.fetchRow s
+  --                   case mbR of
+  --                     Nothing -> E.continue k
+  --                                        -- convRow is not defined here
+  --                     Just r  -> go $$ k (E.Chunks [convRow r]) 
+  --                 _ -> E.returnI step
+  --   @
   ------------------------------------------------------------------------
   withServer :: Z.Context   -> String          -> 
-                String      -> Int             ->
+                Parameter   -> Int             ->
                 AccessPoint                    -> 
                 LinkType                       ->
                 InBound c   -> OutBound o      -> 
@@ -175,7 +220,7 @@ where
   ------------------------------------------------------------------------
   -- the server implementation
   ------------------------------------------------------------------------
-  serve :: Int                    ->
+  serve :: Int                            ->
            AccessPoint                    ->
            LinkType                       -> 
            InBound c                      ->
@@ -203,25 +248,28 @@ where
   ------------------------------------------------------------------------
     | otherwise = (do
         add <- ("inproc://wrk_" ++) <$> show <$> mkUniqueId
-        ms  <- replicateM n newEmptyMVar
+        as  <- replicateM n newEmptyMVar 
+        zs  <- replicateM n newEmptyMVar
         withQueue ctx ("Queue " ++ name)
                       (ac, t) (Address add [], Bind) onQErr $ \_ -> do
-          _ <- mapM (\m -> start add m) ms
-          ready
-          mapM_ takeMVar ms)
+          _ <- mapM (\(a,z) -> start add a z) (zip as zs)
+          mapM_ takeMVar as  -- wait for workers to start
+          ready              -- report state to service
+          mapM_ takeMVar zs) -- wait for workers to terminate
         `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
   -- start thread
   ------------------------------------------------------------------------
-    where start add m = forkIO (startWork add `finally` putMVar m ())
+    where start add a z = forkIO (startWork add a `finally` putMVar z ())
   ------------------------------------------------------------------------
   -- start worker for multiple clients 
   ------------------------------------------------------------------------
-          startWork add = Z.withSocket ctx Z.Rep $ \worker -> (do
+          startWork add starter = Z.withSocket ctx Z.Rep $ \worker -> (do
             trycon worker add retries
             Z.withSocket ctx Z.Sub $ \cmd -> do
               trycon cmd sockname retries
               Z.subscribe cmd noparam
+              putMVar starter ()
               poll False [Z.S cmd Z.In, Z.S worker Z.In] (go worker) param)
             `catch` (\e -> onerr Critical e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
@@ -265,11 +313,14 @@ where
   clientContext :: Client i o -> Z.Context
   clientContext = cliCtx
 
+  ------------------------------------------------------------------------
+  -- | Setting 'Z.SocketOption' to the underlying ZMQ 'Z.Socket'
+  ------------------------------------------------------------------------
   setClientOptions :: Client i o -> [Z.SocketOption] -> IO ()
   setClientOptions c = setSockOs (cliSock c)
 
   ------------------------------------------------------------------------
-  -- | Create a 'Client';
+  -- | Creates a 'Client';
   --   a client is not a background process like a server,
   --   but a data type that provides functions
   --   to interoperate with a server.
@@ -278,7 +329,7 @@ where
   --   which receives a 'Client' argument.
   --   The lifetime of the 'Client' is limited
   --   to the invoked action.
-  --   When the action is left, the 'Client' /dies/.
+  --   When the action terminates, the 'Client' /dies/.
   --
   --   Parameters:
   --
@@ -431,7 +482,7 @@ where
       _          -> return Nothing
 
   ------------------------------------------------------------------------
-  -- The real working horse behind the scenes
+  -- The real working horse behind the scene
   ------------------------------------------------------------------------
   rcvClient :: Client i o -> E.Iteratee i IO a -> IO (Either SomeException a)
   rcvClient c it = E.run (rcvEnum (cliSock c) (cliIn c) $$ it)
@@ -451,18 +502,21 @@ where
   pubContext :: Pub o -> Z.Context
   pubContext = pubCtx
 
+  ------------------------------------------------------------------------
+  -- | Setting 'Z.SocketOption' to the underlying ZMQ 'Z.Socket'
+  ------------------------------------------------------------------------
   setPubOptions :: Pub o -> [Z.SocketOption] -> IO ()
   setPubOptions p = setSockOs (pubSock p)
 
   ------------------------------------------------------------------------
   -- | Creates a publisher;
-  --   like 'Client', a publisher is a data type
+  --   A publisher is a data type
   --   that provides an interface to publish data to subscribers.
   --   'withPub' creates a publisher and invokes
   --   an application-defined action,
   --   which receives a 'Pub' argument.
   --   The lifetime of the publisher is limited to the action.
-  --   When the action ends, the publisher /dies/.
+  --   When the action terminates, the publisher /dies/.
   --
   --   Parameter:
   --
@@ -510,12 +564,12 @@ where
   --   @
   --
   --   @
-  --     -- fake weather report with some random value
+  --     -- fake weather report with some random values
   --     weather :: String -> IO (Maybe String)
   --     weather _ = do
   --         zipcode     <- randomRIO (10000, 99999) :: IO Int
   --         temperature <- randomRIO (-10, 30) :: IO Int
-  --         humidity    <- randomRIO (10, 60) :: IO Int
+  --         humidity    <- randomRIO ( 10, 60) :: IO Int
   --         return $ Just (unwords [show zipcode, 
   --                                 show temperature, 
   --                                 show humidity])
@@ -535,11 +589,11 @@ where
   --   * 'String': Name of this Publisher; 
   --               useful for debugging
   --
-  --   * 'String': The parameter
+  --   * 'Parameter': The initial value of the control parameter
   --
-  --   * 'Millisecond': The period of the publisher in milliseconds;
-  --                    the process will issue the publisher data 
-  --                    every n milliseconds.
+  --   * 'Z.Timeout': The period of the publisher in microseconds;
+  --                  the process will issue the publisher data 
+  --                  every n microseconds.
   --
   --   * 'AccessPoint': Bind address 
   --
@@ -560,7 +614,7 @@ where
   --
   --   @
   --     withPeriodicPub ctx \"Weather Report\" noparam 
-  --       100 -- publish every 100ms
+  --       100000 -- publish every 100ms
   --       (Address \"tcp:\/\/*:5555\" []) 
   --       (return . B.pack) -- string converter
   --       onErr_            -- standard error handler
@@ -568,19 +622,19 @@ where
   --                             -- of the return of \"fetch\";
   --                             -- see 'Enumerator' for details
   --       $ \\pub -> 
-  --         untilInterrupt $ do -- until /SIGINT/, see 'Helpers' for details
+  --         untilInterrupt $ do -- until /SIGINT/, see 'withServer' for details
   --           threadDelay 100000
   --           putStrLn $ \"I am doing nothing \" ++ srvName pub
   --   @
   ------------------------------------------------------------------------
-  withPeriodicPub :: Z.Context          -> 
-                     String -> String   ->
-                     Millisecond        ->
-                     AccessPoint        -> 
-                     OutBound o         ->
-                     OnError_           ->
-                     Fetch_ o           -> 
-                     (Service -> IO a) -> IO a
+  withPeriodicPub :: Z.Context           -> 
+                     String -> Parameter ->
+                     Z.Timeout           ->
+                     AccessPoint         -> 
+                     OutBound o          ->
+                     OnError_            ->
+                     Fetch_ o            -> 
+                     (Service -> IO a)   -> IO a
   withPeriodicPub ctx name param period ac oconv onerr fetch action =
     withService ctx name param service action
     where service = publish period ac oconv onerr fetch
@@ -588,7 +642,7 @@ where
   ------------------------------------------------------------------------
   -- PeriodicPub implementation
   ------------------------------------------------------------------------
-  publish :: Millisecond          ->
+  publish :: Z.Timeout            ->
              AccessPoint          -> 
              OutBound o           ->
              OnError_             ->
@@ -620,6 +674,11 @@ where
   -- | A subscription is a background service
   --   that receives and processes data streams
   --   from a publisher.
+  --   A typical use case is an application
+  --   that operates on periodically updated data;
+  --   the subscriber would receive these data and
+  --   and make them accessible to other threads in the process
+  --   through an 'MVar'.
   --   
   --   Parameters:
   --
@@ -627,25 +686,24 @@ where
   --
   --   * 'String': The subscriber's name 
   --
-  --   * 'String': The subscriber's parameter 
+  --   * 'Parameter': The initial value of the control parameter
   --
-  --   * 'String': The topic to subscribe;
-  --               in the example above ('withPub'),
-  --               the publisher publishes the weather report
-  --               per zip code; the zip code, in this example,
-  --               could be a meaningful topic for a subscriber.
-  --               It is good practice to send the topic
-  --               in an initial message segment,
-  --               the envelope, to avoid that the subscriber
-  --               matches on some arbitrary part of the message.
+  --   * ['Topic']:  The topics to subscribe to;
+  --                 in the example above ('withPub'),
+  --                 the publisher publishes the weather report
+  --                 per zip code; the zip code, in this example,
+  --                 could be a meaningful topic for a subscriber.
+  --                 It is good practice to send the topic
+  --                 in an initial message segment,
+  --                 the envelope, to avoid that the subscriber
+  --                 matches on some arbitrary part of the message.
   --
   --   * 'InBound': A converter that converts one segment
   --                of the incoming data stream to type /o/
   --
   --   * 'OnError_': Error handler
   --
-  --   * 'String' -> 'Dump': 'E.Iteratee' to process the incoming
-  --                         data stream.
+  --   * 'Dump': 'E.Iteratee' to process the incoming data stream.
   --
   --   * 'Service' -> IO (): Application-defined action to control
   --                         the service. Note that 'Service' is
@@ -657,74 +715,104 @@ where
   --  @
   --     withContext 1 $ \\ctx -> 
   --       withSub ctx \"Weather Report\" noparam 
-  --               \"10001\" -- zipcode to subscribe to
+  --               [\"10001\"] -- zipcode to subscribe to
   --               (Address \"tcp:\/\/localhost:5555\" []) 
   --               (return . B.unpack) 
-  --               onErr_ 
-  --               (\\_ -> output) -- Iteratee that just writes
-  --                               -- to stdout (see 'request')
+  --               onErr_ output -- Iteratee that just writes to stdout
   --               $ \\s -> untilInterrupt $ do
   --                 putStrLn $ \"Doing nothing \" ++ srvName s
   --                 threadDelay 1000000
   --  @
   ------------------------------------------------------------------------
-  withSub :: Z.Context                   -> 
-             String -> String -> String  -> 
-             AccessPoint                 -> 
-             InBound i   -> OnError_     ->
-             Dump i                      -> 
-             (Service -> IO a)           -> IO a
-  withSub ctx name sub param ac iconv onErr dump action =
+  withSub :: Z.Context              -> 
+             String                 -> 
+             Parameter              -> 
+             [Topic]                -> 
+             AccessPoint            -> 
+             InBound i -> OnError_  ->
+             Dump i                 -> 
+             (Service -> IO a)      -> IO a
+  withSub ctx name param sub ac iconv onErr dump action =
     withService ctx name param service action
     where service = subscribe sub ac iconv onErr dump
 
-  subscribe :: String           -> 
-               AccessPoint      -> 
-               InBound i        -> 
-               OnError_         -> 
-               Dump i           -> 
-               Z.Context        -> 
-               String           -> 
-               String -> String -> IO () -> IO ()
+  subscribe :: [Topic]     -> 
+               AccessPoint -> 
+               InBound i   -> 
+               OnError_    -> 
+               Dump i      -> 
+               Z.Context   -> 
+               String      -> 
+               String -> Parameter -> IO () -> IO ()
   subscribe sub ac iconv onerr dump 
             ctx name sockname param ready = (
     Z.withSocket ctx Z.Sub $ \sock -> do
       trycon      sock (acAdd ac) retries
-      Z.subscribe sock sub
+      mapM_ (Z.subscribe sock) sub
       Z.withSocket ctx Z.Sub $ \cmd -> do
         trycon cmd sockname retries
         Z.subscribe cmd ""
         ready
         poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
     `catch` (\e -> onerr Fatal e name param)
-    where go sock p = E.run_ (rcvEnum sock iconv $$ dump ctx p)
-                      `catch` (\e -> do onerr Error e name p)
+    where go sock p = do
+            eiR <- E.run (rcvEnum sock iconv $$ dump ctx p)
+            ifLeft eiR
+              (\e -> onerr Error e name p)
+              (\_ -> return ())
 
+  ------------------------------------------------------------------------
+  -- | An alternative to the background subscriber (see 'withSub');
+  ------------------------------------------------------------------------
   data Sub i = Sub {
                subCtx   :: Z.Context,
                subSock  :: Z.Socket Z.Sub,
                subAdd   :: AccessPoint,
                subIn    :: InBound i}
 
+  ------------------------------------------------------------------------
+  -- | Obtaining the 'Z.Context' from 'Sub'
+  ------------------------------------------------------------------------
   subContext :: Sub i -> Z.Context
   subContext = subCtx
 
+  ------------------------------------------------------------------------
+  -- | Setting 'Z.SocketOption' to the underlying ZMQ 'Z.Socket'
+  ------------------------------------------------------------------------
   setSubOptions :: Sub i -> [Z.SocketOption] -> IO ()
   setSubOptions s = setSockOs (subSock s)
 
-  -- withSporadicSub
-  withSporadicSub :: Z.Context -> AccessPoint -> InBound i -> String ->
+  ------------------------------------------------------------------------
+  -- | Similar to 'Pub', a 'Sub' is a data type
+  --   that provides an interface to subscribe data.
+  --   'withSporadicSub' creates a subscriber and invokes
+  --   an application-defined action,
+  --   which receives a 'Sub' argument.
+  --   The lifetime of the subscriber is limited to the action.
+  --   When the action terminates, the subscriber /dies/.
+  ------------------------------------------------------------------------
+  withSporadicSub :: Z.Context -> AccessPoint -> InBound i -> [Topic] ->
                      (Sub i -> IO a) -> IO a
-  withSporadicSub ctx ac iconv topic act = Z.withSocket ctx Z.Sub $ \s -> do
+  withSporadicSub ctx ac iconv topics act = Z.withSocket ctx Z.Sub $ \s -> do
     trycon      s (acAdd ac) retries
-    Z.subscribe s topic
+    mapM_ (Z.subscribe s) topics
     act Sub {
           subCtx   = ctx,
           subSock  = s,
           subAdd   = ac,
           subIn    = iconv}
 
-  -- checkSub
+  ------------------------------------------------------------------------
+  -- | Polling for data;
+  --   If nothing has been received, the function returns 'Nothing';
+  --   otherwise it returns 'Just' the result or an error.
+  --   
+  --   Parameters:
+  --
+  --   * 'Sub': The subscriber
+  --
+  --   * 'E.Iteratee': Iteratee to process the data
+  ------------------------------------------------------------------------
   checkSub :: Sub i -> E.Iteratee i IO a -> 
               IO (Maybe (Either SomeException a))
   checkSub s it = Z.poll [Z.S (subSock s) Z.In] 0 >>= \[p] ->
@@ -732,13 +820,36 @@ where
       Z.S _ Z.In -> Just <$> rcvSub s it
       _          -> return Nothing
 
-  -- waitSub
+  ------------------------------------------------------------------------
+  -- | Waiting for data;
+  --   the function blocks the current thread,
+  --   until data are being received from the publisher.
+  --   It returns either 'SomeException' or the result.
+  --   
+  --   Parameters:
+  --
+  --   * 'Sub': The subscriber
+  --
+  --   * 'E.Iteratee': Iteratee to process the data stream
+  ------------------------------------------------------------------------
   waitSub :: Sub i -> E.Iteratee i IO a -> IO (Either SomeException a)
   waitSub = rcvSub
 
-  resubscribe :: Sub i -> String -> IO ()
+  ------------------------------------------------------------------------
+  -- | Unsubscribe a topic
+  ------------------------------------------------------------------------
+  unsubscribe :: Sub i -> Topic -> IO ()
+  unsubscribe s t = Z.unsubscribe (subSock s) t
+
+  ------------------------------------------------------------------------
+  -- | Subscribe another topic
+  ------------------------------------------------------------------------
+  resubscribe :: Sub i -> Topic -> IO ()
   resubscribe s t = Z.subscribe (subSock s) t
 
+  ------------------------------------------------------------------------
+  -- The working horse behind the scene
+  ------------------------------------------------------------------------
   rcvSub :: Sub i -> E.Iteratee i IO a -> IO (Either SomeException a)
   rcvSub s it = E.run (rcvEnum (subSock s) (subIn s) $$ it)
 
@@ -750,9 +861,9 @@ where
   --
   --   * 'Z.Context': The ZMQ Context
   --
-  --   * 'String': The puller's name
+  --   * 'String': The service name
   --
-  --   * 'String': The puller's parameter
+  --   * 'Parameter': The initial value of the control parameter
   --
   --   * 'AccessPoint': The address to connect to
   --
@@ -763,27 +874,26 @@ where
   --
   --   * 'OnError_': Error Handler
   --
-  --   * 'String' -> 'Dump': 'E.Iteratee' to process
-  --                         the incoming data stream
+  --   * 'Dump': 'E.Iteratee' to process
+  --              the incoming data stream
   --
   --   * 'Service' -> IO (): Application-defined action
   --
-  --   A worker that just writes the incoming stream to stdout
+  --   A worker that just writes the incoming stream to /stdout/:
   --
   --   @
   --     withContext 1 $ \\ctx -> 
   --       withPuller ctx \"Worker\" noparam 
   --             (Address \"tcp:\/\/localhost:5555\" [])
   --             (return . B.unpack)
-  --             onErr_ 
-  --             (\\_ -> output) 
+  --             onErr_ output
   --             $ \\s -> untilInterrupt $ do
   --               putStrLn \"Doing nothing \" ++ srvName s
   --               threadDelay 100000
   --   @
   ------------------------------------------------------------------------
   withPuller :: Z.Context           ->
-                String    -> String ->
+                String -> Parameter ->
                 AccessPoint         ->
                 InBound i           ->  
                 OnError_            ->
@@ -815,10 +925,11 @@ where
                       `catch` (\e -> onerr Error e name p)
  
   ------------------------------------------------------------------------
-  -- | A pipeline consists of a \"pusher\" and a set of workers.
+  -- | A pipeline consists of a \"pusher\" 
+  --   and a set of workers (\"pullers\").
   --   The pusher sends jobs down the pipeline that will be
   --   assigned to one of the workers. 
-  --   The pipeline pattern is, thus, mainly a work-balancing scheme.
+  --   The pipeline pattern is, thus, a work-balancing scheme.
   ------------------------------------------------------------------------
   data Pipe o = Pipe {
                   pipCtx  :: Z.Context,
@@ -833,18 +944,21 @@ where
   pipeContext :: Pipe o -> Z.Context
   pipeContext = pipCtx
 
+  ------------------------------------------------------------------------
+  -- | Setting 'Z.SocketOption' to the underlying ZMQ 'Z.Socket'
+  ------------------------------------------------------------------------
   setPipeOptions :: Pipe o -> [Z.SocketOption] -> IO ()
   setPipeOptions p = setSockOs (pipSock p)
 
   ------------------------------------------------------------------------
   -- | Creates a pipeline;
-  --   a pipeline, similar to a 'Client', is a data type 
+  --   a 'Pipe' is a data type 
   --   that provides an interface to /push/ a data stream
   --   to workers connected to the other side of the pipe.
   --   'withPipe' creates a pipeline and invokes an application-defined
   --   action which receives a 'Pipe' argument.
-  --   The lifetime of the 'Pipe' limited to the action.
-  --   When the action ends, the 'Pipe' /dies/.
+  --   The lifetime of the 'Pipe' is limited to the action.
+  --   When the action terminates, the 'Pipe' /dies/.
   --
   --   Parameters:
   --
@@ -884,19 +998,20 @@ where
   --    sendF :: FilePath -> IO ()
   --    sendF f = withContext 1 $ \\ctx -> do
   --     let ap = Address \"tcp:\/\/*:5555\" []
-  --     withPipe ctx ap return $ \\p -> do
-  --       ei <- push pu (EB.enumFile f) -- file enumerator
-  --                                     -- see Data.Enumerator.Binary (EB)
-  --       case ei of
-  --         Left e  -> putStrLn $ \"Error: \" ++ show (e::SomeException)
-  --         Right _ -> return ()
+  --     withPipe ctx ap return $ \\p ->
+  --       push pu (EB.enumFile f) -- file enumerator
+  --                               -- see Data.Enumerator.Binary (EB)
   --  @
   ------------------------------------------------------------------------
   push :: Pipe o -> E.Enumerator o IO () -> IO () 
   push p enum = E.run_ (enum $$ itSend (pipSock p) (pipOut p))
 
   ------------------------------------------------------------------------
-  -- | Exclusive Pair
+  -- | An Exclusive Pair is a general purpose pattern
+  --   of two equal peers that communicate with each other
+  --   by sending ('send') and receiving ('receive') data.
+  --   One of the peers has to 'Z.bind' the 'AccessPoint'
+  --   the other 'Z.connect's to it.
   ------------------------------------------------------------------------
   data Peer a = Peer {
                   peeCtx  :: Z.Context,
@@ -920,23 +1035,22 @@ where
 
   ------------------------------------------------------------------------
   -- | Creates a 'Peer';
-  --   a peer, similar to a 'Client', is a data type 
+  --   a peer is a data type 
   --   that provides an interface to exchange data with another peer.
-  --   'withPeer' creates a peer and invokes an application-defined
-  --   action which receives a 'Peer' argument.
-  --   The lifetime of the 'Peer' limited to the action.
-  --   When the action ends, the 'Peer' /dies/.
+  --   'withPeer' creates the peer and invokes an application-defined
+  --   action that receives a 'Peer' argument.
+  --   The lifetime of the 'Peer' is limited to the action.
+  --   When the action terminates, the 'Peer' /dies/.
   --
   --   Parameters:
   --
   --   * 'Z.Context': The ZMQ Context
   --
-  --   * 'AccessPoint': The address to which this peer either
+  --   * 'AccessPoint': The address, to which this peer either
   --                    binds or connects
   --
   --   * 'LinkType': One of the peers has to bind the address,
   --                 the other has to connect.
-  --                 The application has to take care of this.
   --
   --   * 'InBound': A converter to convert message segments
   --                from the wire format 'B.ByteString' to type /i/
@@ -948,7 +1062,7 @@ where
   ------------------------------------------------------------------------
   withPeer :: Z.Context -> AccessPoint -> LinkType ->
               InBound a -> OutBound a  ->
-              (Peer a -> IO ())        -> IO ()
+              (Peer a -> IO b) -> IO b
   withPeer ctx ac t iconv oconv act = Z.withSocket ctx Z.Pair $ \s -> 
     link t ac s >> act Peer {
                          peeCtx  = ctx,

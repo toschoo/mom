@@ -13,7 +13,7 @@ where
                   [x] -> x       
                   _   -> "10001" 
     withContext 1 $ \ctx -> 
-      withSub ctx "Weather Report" noparam topic
+      withSub ctx "Weather Report" noparam [topic]
               (address Connect "tcp" "localhost" p [])
               (return . B.unpack)
               onErr_ output $ \s -> untilInterrupt $ do

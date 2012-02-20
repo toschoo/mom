@@ -413,6 +413,10 @@ where
   checkAll = do
     let good = "OK. All Tests passed."
     let bad  = "Bad. Some Tests failed."
+    putStrLn "========================================="
+    putStrLn "       Patterns Library Test Suite"
+    putStrLn "               Enumerator"
+    putStrLn "========================================="
     r <- runTest "enumWith stops on Nothing"
                   (deepCheck prp_ewStopOnNothing) ?>
          runTest "enumFor stops on last index"

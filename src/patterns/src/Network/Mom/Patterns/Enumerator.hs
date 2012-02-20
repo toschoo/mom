@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, ExistentialQuantification #-}
+{-# LANGUAGE CPP #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module     : Network/Mom/Patterns/Enumerator.hs
@@ -24,7 +24,9 @@ module Network.Mom.Patterns.Enumerator (
           fetchFor, fetchFor_,
           fetchJust, fetchJust_,
           listFetcher, listFetcher_,
+#ifdef _TEST
           err,
+#endif
           -- * Iteratees
           -- $its
 
@@ -70,7 +72,7 @@ where
   -- 'withServer' and 'withPeriodicPub'.
   ------------------------------------------------------------------------
   -- | Calls an application-defined /getter/ function
-  --   until it returns 'Nothing';
+  --   until this returns 'Nothing';
   --   if the getter throws an exception,
   --   the enumerator returns 'E.Error'.
   ------------------------------------------------------------------------
@@ -217,7 +219,7 @@ where
   --   with the current value of the counter as additional argument.
   --   For more details, refer to 'enumFor'.
   ------------------------------------------------------------------------
-  fetchFor :: (Z.Context -> String -> Int -> i -> IO o) -> 
+  fetchFor :: (Z.Context -> Parameter -> Int -> i -> IO o) -> 
               (Int, Int) -> Fetch i o
   fetchFor fetch (c,e) ctx p i step =
     case step of
@@ -230,7 +232,7 @@ where
   ------------------------------------------------------------------------
   -- | A variant of 'fetchFor' without input
   ------------------------------------------------------------------------
-  fetchFor_ :: (Z.Context -> String -> Int -> () -> IO o) -> 
+  fetchFor_ :: (Z.Context -> Parameter -> Int -> () -> IO o) -> 
                (Int, Int) -> Fetch_ o
   fetchFor_ = fetchFor
 
@@ -260,6 +262,7 @@ where
   ------------------------------------------------------------------------
   -- For testing only
   ------------------------------------------------------------------------
+#ifdef _TEST
   err :: Fetch_ o
   err _ _ _ s = do
     ei <- liftIO $ catch 
@@ -268,6 +271,7 @@ where
     case ei of
       Left e  -> E.returnI (E.Error e)
       Right _ -> E.returnI s
+#endif
 
   ------------------------------------------------------------------------
   -- $its
@@ -378,10 +382,10 @@ where
 
   ------------------------------------------------------------------------
   -- | Variant of 'sink' that uses the first segment of the stream
-  --   as input parameter to open the sink,
-  --   the first segment of the stream is hence not written to the sink.
-  --   The first segment could contain a file name or
-  --   parameters for an /SQL/ query.
+  --   as input parameter to open the sink.
+  --   The first segment, which could contain 
+  --   a file name or parameters for an /SQL/ query,
+  --   is not written to the sink.
   --   As with 'sink', the sink is closed when the stream terminates or
   --   when an error occurs.
   ------------------------------------------------------------------------

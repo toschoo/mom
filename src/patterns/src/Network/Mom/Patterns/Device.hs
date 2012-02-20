@@ -1,6 +1,4 @@
 module Network.Mom.Patterns.Device (
-         -- * Access Types
-         AccessType(..),
          -- * Device Services
          withDevice,
          withQueue, 
@@ -8,6 +6,8 @@ module Network.Mom.Patterns.Device (
          withPipeline, 
          -- * Polling
          PollEntry, pollEntry,
+         -- * Access Types
+         AccessType(..),
          -- * Device Service Commands
          addDevice, remDevice, changeTimeout,
          -- * Streamer 
@@ -16,13 +16,12 @@ module Network.Mom.Patterns.Device (
          Transformer,
          putThrough, ignoreStream, continueHere,
 
-         -- * Transformer Building Blocks
+         -- * Transformer Combinators
          -- $recursive_helpers
 
          emit, emitPart, pass, passBy, end, absorb, merge,
          -- * Helpers
-         Identifier,
-         Timeout, OnTimeout)
+         Identifier, OnTimeout)
 where
 
   import           Types
@@ -44,20 +43,22 @@ where
   import qualified System.ZMQ as Z
 
   ------------------------------------------------------------------------
-  -- | Starts a device;
+  -- | Starts a device and executes an action that receives a 'Service'
+  --   to control the device
   --
   --   Parameters:
   --
-  --   * 'Z.Context' - The /zmq/ context
+  --   * 'Z.Context' - The /ZMQ/ context
   --
   --   * 'String' - The device name
   --
-  --   * 'String' - The device parameter
+  --   * 'Parameter' - The initial value of the control parameter
   --
   --   * 'Timeout' - The polling timeout:
   --     /< 0/ - listens eternally,
   --     /0/ - returns immediately,
   --     /> 0/ - timeout in microseconds;
+  --     when the timeout expires, the 'OnTimeout' action is invoked.
   --
   --   * 'PollEntry' - List of 'PollEntry';
   --                   the device will polll over 
@@ -71,52 +72,52 @@ where
   -- 
   --   * 'OutBound' - out-bound converter
   -- 
-  --   * 'OnError' - Error handler
+  --   * 'OnError_' - Error handler
   -- 
-  --   * 'OnTimeout' - Action to perform on timeout;
-  --                   the 'String' represents 
-  --                   the current value of the device parameter.
+  --   * 'Parameter' -> 'OnTimeout' - Action to perform on timeout
   -- 
-  --   * 'Transformer' - The stream transformer;
-  --                     the 'String' represents 
-  --                     the current value of the device parameter.
+  --   * 'Parameter' -> 'Transformer' - The stream transformer
   -- 
   --   * 'Service' -> IO () - The action to invoke,
   --                          when the device has been started;
   --                          The 'Service' is used to control the device.
   ------------------------------------------------------------------------
-  withDevice :: Z.Context -> String -> String  ->
-                Timeout                        -> 
-                [PollEntry]                    -> 
-                InBound o -> OutBound o        -> 
-                OnError_                       ->
-                (String -> OnTimeout)          ->
-                (String -> Transformer o)      ->
-                (Service -> IO a)              -> IO a
+  withDevice :: Z.Context -> String -> Parameter ->
+                Timeout                          -> 
+                [PollEntry]                      -> 
+                InBound o -> OutBound o          -> 
+                OnError_                         ->
+                (Parameter -> OnTimeout)         ->
+                (Parameter -> Transformer o)     ->
+                (Service -> IO a)                -> IO a
   withDevice ctx name param tmo acs iconv oconv onerr ontmo trans action =
     withService ctx name param service action
     where service = device_ tmo acs iconv oconv onerr ontmo trans
 
   ------------------------------------------------------------------------
-  -- | Starts a controlled queue;
-  --   a queue links Clients with a Dealer, 
+  -- | Starts a queue;
+  --   a queue connects clients with a dealer ('XDealer'), 
   --                   /i.e./ a load balancer for requests,
-  --             and Servers with a Router that routes responses
+  --             and servers with a router ('XRouter') that routes responses
   --                   back to the client.
   --  
   --  Parameters:
   --
-  --  * 'Z.Context': the /zmq/ Context
+  --  * 'Z.Context': the /ZMQ/ Context
   --
   --  * 'String': the queue name
   --
-  --  * ('AccessPoint', 'AccessPoint'): 
-  --                       the access points;
-  --                       the first must be a /dealer/,
-  --                       the second must be a /router/;
-  --                       this rule is not enforced 
-  --                       by the type system;  
-  --                       you have to take care of it on your own!
+  --  * ('AccessPoint', 'LinkType'):
+  --                       the access point of the /dealer/ ('XDealer')
+  --                       and its link type;
+  --                       you usually want to bind the dealer
+  --                       so that many clients can connect to it.
+  --
+  --  * ('AccessPoint', 'LinkType'):
+  --                       the access point of the /router/ ('XRouter');
+  --                       and its link type;
+  --                       you usually want to bind the router
+  --                       so that many servers can connect to it.
   --
   --  * 'OnError_': the error handler
   --
@@ -125,10 +126,10 @@ where
   --   'withQueue' is implemented by means of 'withDevice' as:
   --   
   --   @  
-  --      withQueue ctx name (dealer, router) onerr act = 
+  --      withQueue ctx name (dealer, ld) (router, lr) onerr act = 
   --        withDevice ctx name noparam (-1)
-  --              [pollEntry \"clients\" XDealer dealer Bind    \"\",
-  --               pollEntry \"server\"  XRouter router Connect \"\"]
+  --              [pollEntry \"clients\" XDealer dealer ld [],
+  --               pollEntry \"server\"  XRouter router lr []]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
@@ -140,27 +141,29 @@ where
                (Service -> IO a)          -> IO a
   withQueue ctx name (dealer, l1) (router, l2) onerr act = 
     withDevice ctx name noparam (-1)
-          [pollEntry "clients" XDealer dealer l1 "",
-           pollEntry "servers" XRouter router l2 ""]
+          [pollEntry "clients" XDealer dealer l1 [],
+           pollEntry "servers" XRouter router l2 []]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
 
   ------------------------------------------------------------------------
   -- | Starts a Forwarder;
-  --   links a publisher and its subscribers;
-  --   implemented by means of 'withDevice' as:
+  --   a forwarder connects a publisher and its subscribers.
+  --   Note that the forwarder uses a /subscriber/ ('XSub') 
+  --   to conntect to the /publisher/ and
+  --   a /publisher/ ('XPub') to bind the /subscribers/.
   --  
   --  Parameters:
   --
-  --  * 'Z.Context': the /zmq/ Context
+  --  * 'Z.Context': the /ZMQ/ Context
   --
   --  * 'String': the forwarder name
   --
-  --  * 'String': the subscription topic
+  --  * 'Topic': the subscription topic
   --
   --  * ('AccessPoint', 'AccessPoint'):
   --                       the access points;
-  --                       the first must be a /subscriber/,
-  --                       the second must be a /publisher/;
+  --                       the first is the /subscriber/ ('XSub'),
+  --                       the second is the /publisher/ ('XPub');
   --                       this rule is not enforced 
   --                       by the type system;  
   --                       you have to take care of it on your own!
@@ -169,16 +172,18 @@ where
   --
   --  * 'Service' -> IO (): the action to run
   --   
+  --   'withForwarder' is implemented by means of 'withDevice' as:
+  --
   --   @  
   --      withForwarder ctx name topics (sub, pub) onerr act = 
   --        withDevice ctx name noparam (-1)
   --              [pollEntry \"subscriber\" XSub router Connect topics,
-  --               pollEntry \"publisher\"  XPub dealer Bind    \"\"]
+  --               pollEntry \"publisher\"  XPub dealer Bind    []]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
   withForwarder :: Z.Context                  -> 
-                   String -> String           -> 
+                   String -> [Topic]          -> 
                    (AccessPoint, LinkType)    ->
                    (AccessPoint, LinkType)    ->
                    OnError_                   -> 
@@ -186,38 +191,48 @@ where
   withForwarder ctx name topics (sub, l1) (pub, l2) onerr act = 
     withDevice ctx name noparam (-1)
           [pollEntry "subscriber" XSub sub l1 topics, 
-           pollEntry "publisher"  XPub pub l2 ""]
+           pollEntry "publisher"  XPub pub l2 []]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
 
   ------------------------------------------------------------------------
-  -- | Starts pipeline;
-  --   linking 'Pipe' and 'Puller';
+  -- | Starts a pipeline;
+  --   a pipeline connects a /pipe/
+  --   and its /workers/.
+  --   Note that the pipeline uses a /puller/ ('XPull')
+  --   to conntect to the /pipe/ and
+  --   a /pipe/ ('XPipe') to bind the /pullers/.
   --
   --  Parameters:
   --
-  --  * 'Z.Context': the /zmq/ Context
+  --  * 'Z.Context': the /ZMQ/ Context
   --
   --  * 'String': the pipeline name
   --
-  --  * ('AccessPoint', 'AccessPoint'): 
-  --                       the access points;
-  --                       the first must be a /puller/,
-  --                       the second must be a /pipe/;
-  --                       this rule is not enforced 
-  --                       by the type system;  
-  --                       you have to take care of it on your own!
+  --  * ('AccessPoint', 'LinkType'):
+  --                       the access point of the /puller/ ('XPull')
+  --                       and its link type;
+  --                       you usually want to connect the puller 
+  --                       to one pipe so that it appears 
+  --                       as one puller among others,
+  --                       to which the pipe may send jobs.
+  --
+  --  * ('AccessPoint', 'LinkType'):
+  --                       the access point of the /pipe/ ('XPipe');
+  --                       and its link type;
+  --                       you usually want to bind the pipe
+  --                       so that many pullers can connect to it.
   --
   --  * 'OnError_': the error handler
   --
   --  * 'Service' -> IO (): the action to run
   --
-  --   'withPipe' is implemented by means of 'withDevice' as:
+  --   'withPipeline' is implemented by means of 'withDevice' as:
   --   
   --   @  
-  --      withPipeline ctx name topics (puller, pusher) onerr act = 
+  --      withPipeline ctx name topics (puller, l1) (pusher, l2) onerr act =
   --        withDevice ctx name noparam (-1)
-  --              [pollEntry \"pull\"  XPull puller Connect topics,
-  --               pollEntry \"push\"  XPush pusher Bind    \"\"]
+  --              [pollEntry \"pull\"  XPull puller l1 [],
+  --               pollEntry \"push\"  XPush pusher l2 []]
   --              return return onerr (\_ -> return ()) (\_ -> putThrough) act
   --   @  
   ------------------------------------------------------------------------
@@ -229,21 +244,21 @@ where
                    (Service -> IO a)          -> IO a
   withPipeline ctx name (puller, l1) (pusher, l2) onerr act = 
     withDevice ctx name noparam (-1)
-          [pollEntry "pull"  XPull puller l1 "", 
-           pollEntry "push"  XPipe pusher l2 ""]
+          [pollEntry "pull"  XPull puller l1 [], 
+           pollEntry "push"  XPipe pusher l2 []]
           return return onerr (\_ -> return ()) (\_ -> putThrough) act
 
   ------------------------------------------------------------------------
   -- | A transformer is an 'E.Iteratee'
-  --   to transforms streams.
+  --   to transform streams.
   --   It receives two arguments:
   --   
   --   * a 'Streamer' which provides information on access points;
   --   
   --   * a 'Sequence' which may be used to store chunks of an incoming
-  --     stream before they are send to the target.
+  --     stream before they are sent to the target.
   --
-  --   Streamer and sequence hold state about the current transformation.
+  --   Streamer and sequence keep track of the current transformation.
   --   The streamer knows where the stream comes from and 
   --   may be queried about other streams in the device.
   ------------------------------------------------------------------------
@@ -251,7 +266,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Holds information on streams and the current state of the device;
-  --   streamers are passed into transformers by the device.
+  --   streamers are passed to transformers.
   ------------------------------------------------------------------------
   data Streamer o = Streamer {
                       strmSrc    :: (Identifier, Z.Poll),
@@ -268,9 +283,18 @@ where
   ------------------------------------------------------------------------
   -- | Filters target streams;
   --   the function resembles /filter/ of 'Data.List':
-  --   it receives a property of an 'Identifier';
-  --   if the 'PollEntry' identifier has this property, it is returned.
-  --   Identifiers are used to direct ougoing streams.
+  --   it receives the property of an 'Identifier';
+  --   if a 'PollEntry' has this property, it is added to the result set.
+  --
+  --   The function is intended to select targets for an out-going stream,
+  --   typically based on the identifier of the source stream.
+  --   The following example selects all poll entries, but the source:
+  --
+  --   @
+  --     broadcast :: Streamer o -> [Identifier]
+  --     broadcast s = filterTargets s notSource
+  --       where notSource = (/=) (getStreamSource s)
+  --   @
   ------------------------------------------------------------------------
   filterTargets :: Streamer o -> (Identifier -> Bool) -> [Identifier]
   filterTargets s f = map fst $ Map.toList $ Map.filterWithKey flt $ strmIdx s
@@ -285,10 +309,10 @@ where
   -- They manipulate streams, send them to targets and enter 
   -- a transformer.
   ------------------------------------------------------------------------
-  -- | Sends all stream elements to the targets identified
+  -- | Sends all sequence elements to the targets identified
   --   by the list of 'Identifier' and terminates the outgoing stream.
-  --   The transformation continues with the transformator 
-  --   passed in. 
+  --   The transformation continues with the transformer
+  --   passed in and an empty sequence. 
   ------------------------------------------------------------------------
   emit :: Streamer o    -> [Identifier] -> S.Seq o -> 
           Transformer o -> E.Iteratee o IO ()
@@ -296,10 +320,15 @@ where
     where sender = mapM_ (\i -> sendStreamer s i (sendseq s os True)) is
 
   ------------------------------------------------------------------------
-  -- | Sends all stream elements to the targets identified
-  --   by the list of 'Identifier' and terminates the outgoing stream.
-  --   The transformation continues with the transformator 
-  --   passed in. 
+  -- | Sends all sequence elements to the targets identified
+  --   by the list of 'Identifier', but unlike 'emit', 
+  --   does not terminate the outgoing stream.
+  --   The transformation continues with the transformer
+  --   passed in and an empty sequence. 
+  --
+  --   Note that all outgoing streams, once started, 
+  --   have to be terminated before the transformer ends. 
+  --   Otherwise, a protocol error will occur.
   ------------------------------------------------------------------------
   emitPart :: Streamer o    -> [Identifier] -> S.Seq o -> 
               Transformer o -> E.Iteratee o IO ()
@@ -307,10 +336,11 @@ where
     where sender = mapM_ (\i -> sendStreamer s i (sendseq s os False)) is
 
   ------------------------------------------------------------------------
-  -- | Sends one element to the targets and starts the transformer
+  -- | Sends one element (/o/) to the targets and continues 
   --   with an empty sequence;
   --   the Boolean parameter determines whether this is the last message
   --   to send. 
+  --
   --   Note that all outgoing streams, once started, 
   --   have to be terminated before the transformer ends. 
   --   Otherwise, a protocol error will occur.
@@ -322,9 +352,9 @@ where
                                  (sendseq s (S.singleton o) lst)) is
 
   ------------------------------------------------------------------------
-  -- | Sends one element to the targets, but leaves the sequence untouched;
-  --   the transformer will, hence, continue working 
-  --   with sequence passed into 'pass2'
+  -- | Sends one element (/o/) to the targets, 
+  --   but, unlike 'pass', passes the sequence to the transformer. 
+  --   'passBy' does not terminate the outgoing stream.
   ------------------------------------------------------------------------
   passBy :: Streamer o    -> [Identifier] -> o -> S.Seq o -> 
            Transformer o -> E.Iteratee o IO ()
@@ -371,8 +401,9 @@ where
      in go s os'
 
   ------------------------------------------------------------------------
-  -- | Simple Transformer;
-  --   passes messages one to one to all respectively other access points
+  -- | Transformer that
+  --   passes messages one-to-one to all poll entries 
+  --   but the current source
   ------------------------------------------------------------------------
   putThrough :: Transformer a
   putThrough s' os' = EL.head >>= \mbo -> go mbo s' os'
@@ -387,9 +418,22 @@ where
                 let trg = filterTargets s (/= getStreamSource s)
                 pass s trg x lst (go mbo')
 
+  ------------------------------------------------------------------------
+  -- | Transformer that
+  --   ignores the remainder of the current stream;
+  --   it is usually used to terminate a transformer.
+  ------------------------------------------------------------------------
   ignoreStream :: Transformer a
   ignoreStream _ _ = EL.consume >>= \_ -> return ()
 
+  ------------------------------------------------------------------------
+  -- | Transformer that
+  --   does nothing but continuing the transformer, from which it is called
+  --   and, hence, is identical to /return ()/;
+  --   it is usually passed to a transformer combinator,
+  --   like 'emit', to continue processing right here 
+  --   instead of recursing into another transformer.
+  ------------------------------------------------------------------------
   continueHere :: Transformer a
   continueHere _ _ = return ()
 
@@ -438,8 +482,7 @@ where
     m  <- newMVar xp
     finally (runDevice name m iconv oconv onerr ontmo trans 
                        sockname param imReady)
-            (do _ <- withMVar m (\xp' -> mapM_ closeS (xpPoll xp'))
-                return ())
+            (do withMVar m (\xp' -> mapM_ closeS (xpPoll xp')) >> return ())
 
   closeS :: Z.Poll -> IO ()
   closeS p = case p of 
@@ -495,7 +538,7 @@ where
         finally (xpoll False mxp ontmo go param)
                 (modifyMVar_ mxp $ \xp' -> 
                    return xp' {xpPoll = tail (xpPoll xp')})) 
-      `catch` (\e -> onerr Fatal e name param >> throwIO e)
+      `catch` (\e -> onerr Fatal e name param) -- >> throwIO e)
     where go i poller p =
             case poller of 
               Z.S s _ -> do

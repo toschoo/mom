@@ -34,7 +34,6 @@ module Network.Mom.Patterns (
           -- $enumerator
 
           module Network.Mom.Patterns.Enumerator
-          -- * Useful Helpers
           )
 where
 
@@ -47,35 +46,52 @@ where
      as the main back bone of reliable
      message exchange, zeromq implements
      an advanced socket concept.
-     zeromq sockets are thread-local resources 
+     Zeromq sockets are thread-local resources 
      that connect to each other across
      threads, processes and network nodes
      according to certain protocol patterns.
      
      The Patterns package hides details
      about sockets and instead 
-     provides high-level abstractions
-     that are based on a set of basic patterns
-     and a /device/ to connect patterns
-     with each other by means of
-     routers, brokers, load balancers, /etc./
+     provides higher-level abstractions,
+     in particular a set of basic patterns.
+     Additionally, it implements a /device/ to connect patterns
+     with each other to form more complex patterns.
+     Devices are stream transformers that may be used as 
+     routers, brokers or load balancers.
+
+     The interfaces provided by the Patterns package
+     support the separation of different concerns
+     involved with application design.
+     Most of the interfaces are higher-order functions
+     that accept 
+     data converters, stream processors, error handlers
+     and control actions.
+     The goal is to ease the implementation
+     of general purpose and domain-specific libraries
+     providing those building blocks.
+     Distributed application components can then be built
+     by bundling converters, stream processors and error handlers
+     together to request or provide services, 
+     publish or subscribe data or to 
+     allocate work to processing nodes.
+     
   -}
 
   {- $basic
      Basic patterns are:
 
      * Server\/Client (a.k.a Request\/Response)
-       consisting of a server process that waits for requests
-       and creates a response to a request
+       consisting of a server process that responds to requests
        and client processes that request a service
        and wait for the server response;
    
      * Publish\/Subscribe
        consisting of a publisher process that
        periodically or sporadically publishes data
-       and subscribers that receive these data
-       and select those data that correspond to a topic 
-       to which the subscriber has actually subscribed;
+       and subscribers that receive data
+       corresponding to topics, 
+       to which they have actually subscribed;
 
      * Pipeline (a.k.a. Push\/Pull)
        consisting of a /pusher/ process that sends jobs
@@ -89,10 +105,10 @@ where
 
      All of these basic patterns consist of two parts
      that, roughly, can be described as a client and a server side.
-     Only clients and servers of the same pattern
+     Only parts of the same pattern
      can communicate with each other. 
-     Since communication may - and usually is -
-     across processes and network nodes,
+     Since communication may - and usually does -
+     cross processes and network nodes,
      there is no way to enforce the correct combination
      by means of the type system. 
      The programmer has to take care
@@ -117,10 +133,10 @@ where
        can receive messages only from a publisher;
 
      * a pusher cannot receive messages and
-       can send message only to a puller;
+       can send message only to a pipe;
 
      * a puller cannot send messages and
-       can only receive messages from a pipe;
+       can receive messages only from a pipe;
 
      * peers can exchange messages only with other peers.
   -}
@@ -137,33 +153,28 @@ where
      the application may, at any time,
      add or remove access points.
      When data is available,
-     the device activates a stream transformer
-     defined by the application
-     that transforms the incoming data stream
-     into an outgoing data stream.
-     The application decides also
-     where the outgoing stream is directed to.
-     This may be one or more access points
+     the device activates an application-defined stream transformer.
+     The outgoing stream may be directed to
+     one or several access points
      including the source itself.
      Note, however, that the basic patterns
-     restrict the possible combinations. 
+     restrict possible combinations. 
      
-     Devices are more general than patterns
-     and could even be used to simulate basic patterns,
-     which may be usefull in some situations.
+     Devices are more general than basic patterns
+     and could even be used to simulate them,
+     which may indeed be usefull in some situations.
      It is preferrable, however, to use basic patterns instead of devices
      where ever possible.
      The main purpose of devices
      is to link topologies for 
      load-balancing, routing or scaling;
-     they can be seen as a kind of smart software switches
+     they can be seen as a kind of smart software switch
      connecting basic patterns.
   -}
 
   {- $enumerator
      Basic patterns and devices exchange messages.
-     Messages are composed of segments;
-     A message may consist of one or many segments.
+     Messages are composed of one or more segments;
      The underlying library guarantees that
      a message, consisting of many segments,
      is sent and received as a whole, 
@@ -199,8 +210,8 @@ where
      iteratees   (called /dumps/)
      that handle common stream patterns,
      such as single segment messages, 
-     messages with a fixed size of messages,
-     streams generated by lists,
+     messages with a fixed number of segments,
+     streams generated by lists and
      transformation into strings, lists, monoids, /etc./
  
   -}

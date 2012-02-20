@@ -15,7 +15,7 @@ where
     withContext 1 $ \ctx -> 
       withSporadicSub ctx
               (address Connect "tcp" "localhost" p [])
-              (return . B.unpack) topic $ \s -> untilInterrupt $ do
+              (return . B.unpack) [topic] $ \s -> untilInterrupt $ do
                 putStrLn "checking..."
                 mbW <- checkSub s mbOne
                 case mbW of

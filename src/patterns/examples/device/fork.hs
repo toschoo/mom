@@ -16,9 +16,9 @@ where
                              Just lp -> return lp
                   _     -> putStrLn (show r) >> usage
     let sub = pollEntry "Subscriber" XSub
-                        (address l1 "tcp" "localhost" p1 []) l1 noparam
+                        (address l1 "tcp" "localhost" p1 []) l1 [""]
     let pub = pollEntry "Publisher"  XPub
-                        (address l2 "tcp" "localhost" p2 []) l2 noparam
+                        (address l2 "tcp" "localhost" p2 []) l2 []
     -- don't stop process on sigINT
     _ <- installHandler sigINT Ignore Nothing
     withContext 1 $ \ctx -> 
@@ -47,7 +47,7 @@ where
                   go cc rc d s
                 AddPort i l p -> do
                   let e = pollEntry i XPub 
-                            (address l "tcp" "localhost" p []) l ""
+                            (address l "tcp" "localhost" p []) l []
                   addDevice d e
                   writeChan rc OK
                   go cc rc d s

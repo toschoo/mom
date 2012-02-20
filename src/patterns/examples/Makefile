@@ -120,6 +120,7 @@ pipes:		$(BASICDIR)/pipes/push \
 pairs:		$(BASICDIR)/pairs/ping
 
 devices:	$(DEVICEDIR)/queue \
+		$(DEVICEDIR)/forward \
 		$(DEVICEDIR)/fork \
 		$(DEVICEDIR)/ifc \
 		$(DEVICEDIR)/pipe 

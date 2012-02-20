@@ -20,9 +20,10 @@ module Types (
           Z.Context, Z.withContext,
           Z.SocketOption(..),
           -- * Helpers
-          retries, trycon, ifLeft, (?>), noparam,
+          retries, trycon, ifLeft, (?>), ouch,
           Timeout, OnTimeout,
-          Millisecond, Identifier)
+          Topic, alltopics, notopic,
+          Identifier, Parameter, noparam)
 
 where
 
@@ -43,14 +44,19 @@ where
   import           System.ZMQ as Z
 
   ------------------------------------------------------------------------
-  -- | Type of a 'PollEntry';
+  -- | Defines the type of a 'PollEntry';
+  --   the names of the constructors are similar to ZMQ socket types
+  --   but with some differences to keep the terminology in line
+  --   with basic patterns.
+  --   The leading \"X\" stands for \"Access\" 
+  --   (not for \"eXtended\" as in XRep and XReq).
   ------------------------------------------------------------------------
   data AccessType = 
-         -- | Represents a Service and expects connections from Clients;
+         -- | Represents a server and expects connections from clients;
          --   should be used with 'Bind';
          --   corresponds to ZMQ Socket Type 'Z.Rep'
          XServer    
-         -- | Represents a Client and connects to a Service;
+         -- | Represents a client and connects to a server;
          --   should be used with 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.Req'
          | XClient
@@ -86,9 +92,12 @@ where
          | XPeer   
     deriving (Eq, Show, Read)
 
+  ------------------------------------------------------------------------
+  -- Creates a socket, binds or links it and sets the socket options
+  ------------------------------------------------------------------------
   access :: Z.Context -> AccessType -> LinkType -> [Z.SocketOption] ->
-               String -> String     -> IO Z.Poll
-  access ctx a l os u t = 
+               String -> [Topic] -> IO Z.Poll
+  access ctx a l os u ts = 
     case a of 
       XServer -> Z.socket ctx Z.Rep  >>= go
       XClient -> Z.socket ctx Z.Req  >>= go
@@ -99,13 +108,16 @@ where
       XPull   -> Z.socket ctx Z.Pull >>= go
       XPeer   -> Z.socket ctx Z.Pair >>= go
       XSub    -> Z.socket ctx Z.Sub  >>= \s -> 
-                  Z.subscribe s t >> go s
+                  mapM_ (Z.subscribe s) ts >> go s
    where go s = do setSockOs s os
                    case l of
                      Bind    -> Z.bind s u
                      Connect -> trycon s u retries
                    return $ Z.S s Z.In
 
+  ------------------------------------------------------------------------
+  -- Close without throughing an exception
+  ------------------------------------------------------------------------
   safeClose :: Z.Socket a -> IO ()
   safeClose s = catch (Z.close s)
                       (\e -> let _ = (e::SomeException)
@@ -113,8 +125,9 @@ where
 
   ------------------------------------------------------------------------
   -- | Describes how to access a service;
-  --   usually an address and a list of 'Z.SocketOption';
-  --   addresses are passed in as strings of the form:
+  --   an 'AccessPoint' usually consists of an address 
+  --   and a list of 'Z.SocketOption'.
+  --   Addresses are passed in as strings of the form:
   --
   --   * \"tcp:\/\/*:5555\": for binding the port /5555/ via TCP\/IP
   --                         on all network interfaces;
@@ -126,7 +139,7 @@ where
   --                                 the endpoint may given as /DNS/ name
   --                                 or as an IPv4 address.
   --
-  --   * \"ipc:\/\/\/tmp\/queues/0\": for binding and connecting to
+  --   * \"ipc:\/\/tmp\/queues/0\": for binding and connecting to
   --                                  a local inter-process communication
   --                                  endpoint, in this case created under
   --                                  \/tmp\/queues\/0;
@@ -136,7 +149,6 @@ where
   --                            the process internal address /worker/
   --
   --   For more options, please refer to the zeromq documentation.
-  --   For 'Z.SocketOption', please refer to the ZMQ documentation.
   ------------------------------------------------------------------------
   data AccessPoint = Address {
                        -- | Address string
@@ -148,14 +160,14 @@ where
     show (Address s _) = s
   
   ------------------------------------------------------------------------
-  -- | A poll entry describes how to handle an AccessPoint
+  -- | A poll entry describes how to handle an 'AccessPoint'
   ------------------------------------------------------------------------
   data PollEntry = Poll {
                      pollId   :: Identifier,
                      pollAdd  :: String,
                      pollType :: AccessType,
                      pollLink :: LinkType,
-                     pollSub  :: String,
+                     pollSub  :: [Topic],
                      pollOs   :: [Z.SocketOption]
                    }
     deriving (Show, Read)
@@ -168,22 +180,22 @@ where
   --
   --   Parameters:
   --
-  --   * 'Identifier': identifies an 'AccessPoint' with a 'String';
-  --                    the string shall be unique for one device.
+  --   * 'Identifier': identifies an 'AccessPoint'; 
+  --                   the identifier shall be unique within the device.
   --
   --   * 'AccessType': the 'AccessType' of this 'AccessPoint'
   --
-  --   * 'AccessPoint': the 'AccessPoint' itself
+  --   * 'AccessPoint': the 'AccessPoint'
   --
   --   * 'LinkType': how to link to this 'AccessPoint'
   --
-  --   * 'String': A subscription topic - 
-  --                ignored for all 'AccessPoint', but those
-  --                with 'AccessType' 'Sub' 
+  --   * ['Topic']: The subscription topics - 
+  --                ignored for all poll entries, but those
+  --                with 'AccessType' 'XSub' 
   ------------------------------------------------------------------------
   pollEntry :: Identifier -> 
                AccessType -> AccessPoint -> LinkType ->
-               String     -> PollEntry
+               [Topic]    -> PollEntry
   pollEntry i at ac lt sub = Poll {
                                pollId   = i,
                                pollAdd  = acAdd ac,
@@ -194,12 +206,12 @@ where
 
   ------------------------------------------------------------------------
   -- | 'E.Enumerator' to process data segments of type /o/;
-  --   receives the 'Z.Context', a 'String' parameter 
+  --   receives the 'Z.Context', the control parameter 
   --   and an input of type /i/;
   --   'Fetch' is used by 'Server's that receive requests of type /i/
   --   and produce an outgoing stream with segments of type /o/.
   ------------------------------------------------------------------------
-  type Fetch       i o = Z.Context -> String -> i -> E.Enumerator o IO ()
+  type Fetch       i o = Z.Context -> Parameter -> i -> E.Enumerator o IO ()
 
   ------------------------------------------------------------------------
   -- | A variant of 'Fetch' without input
@@ -214,10 +226,10 @@ where
   --   FetchHelpers are used with 'Server's 
   --   that receive requests of type /i/.
   --   The function 
-  --   receives the 'Z.Context', a 'String' parameter 
+  --   receives the 'Z.Context', the conrol parameter
   --   and an input of type /i/;
   ------------------------------------------------------------------------
-  type FetchHelper i o = Z.Context -> String -> i -> IO (Maybe o)
+  type FetchHelper i o = Z.Context -> Parameter -> i -> IO (Maybe o)
 
   ------------------------------------------------------------------------
   -- | A variant of 'FetchHelper' that returns type /o/ instead of
@@ -225,7 +237,7 @@ where
   --   Please note that /'/ does not mean /strict/, here;
   --   it just means that the result is not a 'Maybe'.
   ------------------------------------------------------------------------
-  type FetchHelper' i o = Z.Context -> String -> i -> IO o
+  type FetchHelper' i o = Z.Context -> Parameter -> i -> IO o
 
   ------------------------------------------------------------------------
   -- | A variant of 'FetchHelper' without input
@@ -242,50 +254,69 @@ where
 
   ------------------------------------------------------------------------
   -- | 'E.Iteratee' to process data segments of type /i/;
-  --   receives the 'Z.Context' and a 'String' parameter
+  --   receives the 'Z.Context' and the control parameter
   ------------------------------------------------------------------------
-  type Dump i = Z.Context -> String -> E.Iteratee i IO ()
+  type Dump i = Z.Context -> Parameter -> E.Iteratee i IO ()
 
   ------------------------------------------------------------------------
-  -- | Error handler for 'Server';
+  -- | Error handler for servers;
   --   receives the 'Criticality' of the error event,
-  --   the exception, the server name and the parameter.
+  --   the exception, the server name and the service control parameter.
   --   If the error handler returns 'Just' a 'B.ByteString'
-  --   this value is sent to the client as error message.
+  --   this 'B.ByteString' is sent to the client as error message.
+  --   
+  --   A good policy for implementing servers is
+  --   to terminate or restart the 'Server'
+  --   when a 'Fatal' or 'Critical' error occurs
+  --   and to send an error message to the client
+  --   on a plain 'Error'.
+  --   The error handler, additionally, may log the incident
+  --   or inform an administrator.
   ------------------------------------------------------------------------
-  type OnError   = Criticality      -> 
-                   SomeException    -> 
-                   String -> String -> IO (Maybe B.ByteString)
+  type OnError   = Criticality         -> 
+                   SomeException       -> 
+                   String -> Parameter -> IO (Maybe B.ByteString)
 
   ------------------------------------------------------------------------
-  -- | Error handler for all services but 'Server';
+  -- | Error handler for all services but servers;
   --   receives the 'Criticality' of the error event,
-  --   the exception and the service name.
+  --   the exception, the service name 
+  --   and the service control parameter.
+  --   
+  --   A good policy is
+  --   to terminate or restart the service
+  --   when a 'Fatal' error occurs
+  --   and to continue, if possible,
+  --   on a plain 'Error'.
+  --   The error handler, additionally, may log the incident
+  --   or inform an administrator.
   ------------------------------------------------------------------------
-  type OnError_  = Criticality      -> 
-                   SomeException    -> 
-                   String -> String -> IO ()
+  type OnError_  = Criticality         -> 
+                   SomeException       -> 
+                   String -> Parameter -> IO ()
 
   -------------------------------------------------------------------------
   -- | Indicates criticality of the error event
   -------------------------------------------------------------------------
   data Criticality = 
-                     -- | The current processing 
-                     --   (/e.g./ answering a request)
-                     --   has not properly ended,
+                     -- | The current operation 
+                     --   (/e.g./ processing a request)
+                     --   has not terminated properly,
                      --   but the service is able to continue;
                      --   the error may have been caused by a faulty
                      --   request or other temporal conditions.
+                     --   Note that if an application-defined 'E.Iteratee' or
+                     --   'E.Enumerator' results in 'SomeException'
+                     --   (by means of 'E.throwError'),
+                     --   the incident is classified as 'Error';
+                     --   if it throws an IO Error, however,
+                     --   the incident is classified as 'Fatal'.
                      Error 
                      -- | One worker thread is lost ('Server' only)
                    | Critical 
                      -- | The service cannot recover and will terminate
                    | Fatal
     deriving (Eq, Ord, Show, Read)
-
-  -- | Ignore parameters
-  noparam :: String
-  noparam = ""
 
   -------------------------------------------------------------------------
   -- | How to link to an 'AccessPoint'
@@ -300,9 +331,9 @@ where
   -------------------------------------------------------------------------
   -- | Safely read 'LinkType';
   --   ignores the case of the input string
-  --   and, besides \"bind\" and \"connect\" 
+  --   and, besides \"bind\" and \"connect\", 
   --   also accepts \"bin\", \"con\" and \"conn\";
-  --   intended for use with command line arguments
+  --   intended for use with command line parameters
   -------------------------------------------------------------------------
   parseLink :: String -> Maybe LinkType 
   parseLink s = case map toLower s of
@@ -411,7 +442,7 @@ where
   itSend s oconv = EL.head >>= go
     where go mbO =
             case mbO of
-              Nothing -> return () -- liftIO $ Z.send s (B.empty) []
+              Nothing -> return ()
               Just o  -> do
                 x    <- tryIO $ oconv o           
                 mbO' <- EL.head
@@ -427,6 +458,11 @@ where
   retries :: Int
   retries = 100
 
+  ------------------------------------------------------------------------
+  -- try n times to connect
+  -- this is particularly useful for "inproc" sockets:
+  -- the socket, in this case, must be bound before we can connect to it.
+  ------------------------------------------------------------------------
   trycon :: Z.Socket a -> String -> Int -> IO ()
   trycon sock add i = catch (Z.connect sock add) 
                             (\e -> if i <= 0 
@@ -435,12 +471,15 @@ where
                                        threadDelay 1000
                                        trycon sock add (i-1))
 
+  ------------------------------------------------------------------------
+  -- either with the arguments flipped 
+  ------------------------------------------------------------------------
   ifLeft :: Either a b -> (a -> c) -> (b -> c) -> c
   ifLeft e l r = either l r e
 
   ------------------------------------------------------------------------
   -- | Chains IO Actions in an 'E.Enumerator' together;
-  --   returns 'E.Error' when an error in the action occurs
+  --   returns 'E.Error' when an error occurs
   ------------------------------------------------------------------------
   chainIOe :: IO a -> (a -> E.Iteratee b IO c) -> E.Iteratee b IO c
   chainIOe x f = liftIO (try x) >>= \ei ->
@@ -452,7 +491,7 @@ where
   -- | Chains IO Actions in an 'E.Enumerator' together;
   --   throws 'SomeException' 
   --   using 'E.throwError'
-  --   when an error in the action occurs
+  --   when an error occurs
   ------------------------------------------------------------------------
   chainIO :: IO a -> (a -> E.Iteratee b IO c) -> E.Iteratee b IO c
   chainIO x f = liftIO (try x) >>= \ei ->
@@ -463,7 +502,7 @@ where
   ------------------------------------------------------------------------
   -- | Executes an IO Actions in an 'E.Iteratee';
   --   throws 'SomeException'
-  --   using 'E.throwError' when an error in the action occurs
+  --   using 'E.throwError' when an error occurs
   ------------------------------------------------------------------------
   tryIO :: IO a -> E.Iteratee i IO a
   tryIO act = 
@@ -474,7 +513,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Executes an IO Actions in an 'E.Iteratee';
-  --   returns 'E.Error' when an error in the action occurs
+  --   returns 'E.Error' when an error occurs
   ------------------------------------------------------------------------
   tryIOe :: IO a -> E.Iteratee i IO a
   tryIOe act = 
@@ -483,6 +522,9 @@ where
         Left  e -> E.returnI (E.Error e)
         Right x -> return x
 
+  ------------------------------------------------------------------------
+  -- Ease working with either
+  ------------------------------------------------------------------------
   eiCombine :: IO (Either a b) -> (b -> IO (Either a c)) -> IO (Either a c)
   eiCombine x f = x >>= \mbx ->
                   case mbx of
@@ -493,6 +535,32 @@ where
   (?>) :: IO (Either a b) -> (b -> IO (Either a c)) -> IO (Either a c)
   (?>) = eiCombine
 
-  type Millisecond = Int
+  ------------------------------------------------------------------------
+  -- Ouch message
+  ------------------------------------------------------------------------
+  ouch :: String -> a
+  ouch s = error $ "Ouch! You hit a bug, please report: " ++ s
+
+  -- | A device identifier is just a plain 'String'
   type Identifier  = String
+
+  -- | A timeout action is just an IO action without arguments
   type OnTimeout   = IO ()
+
+  -- | Control Parameter
+  type Parameter = String
+
+  -- | Ignore parameter
+  noparam :: Parameter
+  noparam = ""
+
+  -- | Subscription Topic
+  type Topic = String
+
+  -- | Subscribe to all topics
+  alltopics :: [Topic]
+  alltopics = [""]
+
+  -- | Subscribe to no topic
+  notopic :: [Topic]
+  notopic = []

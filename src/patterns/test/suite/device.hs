@@ -20,7 +20,8 @@ where
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad.Trans (liftIO)
-  import           Control.Exception (try, throwIO, AssertionFailed(..), SomeException)
+  import           Control.Exception (AssertionFailed(..), 
+                                      try, throwIO, SomeException)
 
   ------------------------------------------------------------------------
   -- For debugging it's much nicer to work with digits
@@ -116,9 +117,9 @@ where
               tmo   <- newMVar t
               withDevice ctx "Test" noparam d
                              [pollEntry "XSub" XSub 
-                                  (Address "inproc://pub" []) Connect "",
+                                  (Address "inproc://pub" []) Connect [""],
                               pollEntry "XPub" XPub
-                                  (Address "inproc://sub" []) Bind ""]
+                                  (Address "inproc://sub" []) Bind [""]]
                               idIn idOut onErr_ 
                               (\_ -> tstTmo tmo) (\_ -> putThrough) $ \dv -> do
                   (and <$> mapM (go d tmo) ([1..100]::[Int])) ~> (do
@@ -150,15 +151,15 @@ where
           tstDevice ctx   = 
             withPub ctx (Address "inproc://pub" []) idOut $ \p -> do
               errDevice ctx p mkErr tstFatal ~> (do
-                threadDelay 10000 >> -- give the ZMQ some time
+                threadDelay 10000 >> -- give ZMQ some time
                   errDevice ctx p (return ()) (tstError p))
           errDevice ctx _ tmo action = do
               e <- newEmptyMVar
               withDevice ctx "Test" noparam 10000
                              [pollEntry "XSub" XSub 
-                                  (Address "inproc://pub" []) Connect "",
+                                  (Address "inproc://pub" []) Connect [""],
                               pollEntry "XPub" XPub
-                                  (Address "inproc://sub" []) Bind ""]
+                                  (Address "inproc://sub" []) Bind []]
                               idIn idOut (onerr e)
                               (\_ -> tmo) (\_ _ _ -> tryIO mkErr) (action e)
 
@@ -172,9 +173,9 @@ where
               m <- newEmptyMVar
               withDevice ctx "Test" noparam (-1)
                              [pollEntry "XSub" XSub 
-                                  (Address "inproc://pub" []) Connect "",
+                                  (Address "inproc://pub" []) Connect [""],
                               pollEntry "XPub" XPub
-                                  (Address "inproc://sub" []) Bind ""]
+                                  (Address "inproc://sub" []) Bind []]
                               idIn idOut onErr_
                               (\_ -> return ()) 
                               (\p _ _ -> EL.consume >>= \_ -> liftIO $
@@ -199,21 +200,20 @@ where
               m <- newEmptyMVar
               withDevice ctx "Test" noparam (-1)
                              [pollEntry "XSub" XSub 
-                                  (Address "inproc://pub" []) Connect "",
+                                  (Address "inproc://pub" []) Connect [""],
                               pollEntry "XPub" XPub
-                                  (Address "inproc://sub" []) Bind ""]
+                                  (Address "inproc://sub" []) Bind []]
                               inString outString onErr_
                               (\_ -> return()) 
                               (\_ -> passall) $ \dv ->
-                withSub ctx "Sub" noparam "" (Address "inproc://sub" []) 
+                withSub ctx "Sub" noparam [""] (Address "inproc://sub" []) 
                       inString onErr_ (dump m) $ \_ -> do
                   issue pub (mkStream ss)
                   mbx <- timeout 50000 $ takeMVar m
                   case mbx of
                     Nothing -> return False
                     Just x  -> 
-                      if x /= ss then 
-                          putStrLn ("received: " ++ show x) >> return False
+                      if x /= ss then return False
                         else do
                           pause dv
                           issue pub (mkStream ss)
@@ -238,7 +238,7 @@ where
   prp_add :: NonEmptyList String -> Property
   prp_add (NonEmpty ss) = monadicIO $ run (withContext 1 tstDevice) >>= assert
     where tstSub ctx m action =
-            withSub ctx "Sub2" noparam ""
+            withSub ctx "Sub2" noparam [""]
                         (Address "inproc://sub2" []) 
                         inString onErr_ (dump m) $ \_ -> action
           tstReceive m mb = do
@@ -256,17 +256,17 @@ where
               m2 <- newEmptyMVar
               withDevice ctx "Test" noparam (-1)
                              [pollEntry "XSub" XSub 
-                                  (Address "inproc://pub" []) Connect "",
+                                  (Address "inproc://pub" []) Connect [""],
                               pollEntry "XPub1" XPub
-                                  (Address "inproc://sub1" []) Bind ""]
+                                  (Address "inproc://sub1" []) Bind [""]]
                               inString outString onErr_
                               (\_ -> return())
                               (\_ -> passall) $ \dv -> 
-                withSub ctx "Sub1" noparam "" 
+                withSub ctx "Sub1" noparam [""] 
                         (Address "inproc://sub1" []) 
                         inString onErr_ (dump m1) $ \_ -> do
                     let pe = pollEntry "XPub2" XPub 
-                             (Address "inproc://sub2" []) Bind ""
+                             (Address "inproc://sub2" []) Bind []
                     issue pub (mkStream ss)
                     tstReceive m1 (Just ss) ~> (do
                         addDevice dv pe
@@ -329,13 +329,13 @@ where
       withPub ctx (Address "inproc://pub" []) outString $ \pub -> 
         withDevice ctx "Test" noparam (-1) 
                        [pollEntry "XSub" XSub 
-                            (Address "inproc://pub" []) Connect "",
+                            (Address "inproc://pub" []) Connect [""],
                         pollEntry "XPub" XPub
-                            (Address "inproc://sub" []) Bind ""]
+                            (Address "inproc://sub" []) Bind [""]]
                         inString outString onErr_ 
                         (\_ -> return ()) (\_ -> t) $ \_ -> do 
           m <- newEmptyMVar 
-          withSub ctx "Sub" noparam "" (Address "inproc://sub" []) 
+          withSub ctx "Sub" noparam [""] (Address "inproc://sub" []) 
                       inString onErr_ (dump m) $ \_ -> do
             issue pub (mkStream ss)
             mbl <- timeout 500000 $ takeMVar m
@@ -367,11 +367,11 @@ where
   testForward :: [String] -> IO [String]
   testForward ss = withContext 1 $ \ctx -> 
       withPub ctx (Address "inproc://pub" []) outString $ \pub -> 
-        withForwarder ctx "Test Forwarder" ""
+        withForwarder ctx "Test Forwarder" [""]
                       (Address "inproc://pub" [], Connect)
                       (Address "inproc://sub" [], Bind) onErr_ $ \_ -> do
           m <- newEmptyMVar 
-          withSub ctx "Sub" noparam "" (Address "inproc://sub" []) 
+          withSub ctx "Sub" noparam [""] (Address "inproc://sub" []) 
                       inString onErr_ (dump m) $ \_ -> do
             issue pub (mkStream ss)
             mbl <- timeout 500000 $ takeMVar m
@@ -409,9 +409,9 @@ where
         Z.bind pub "inproc://pub"
         withDevice ctx "Test" noparam (-1) 
                        [pollEntry "XSub" XSub 
-                            (Address "inproc://pub" []) Connect "",
+                            (Address "inproc://pub" []) Connect [""],
                         pollEntry "XPub" XPub
-                            (Address "inproc://sub" []) Bind ""]
+                            (Address "inproc://sub" []) Bind [""]]
                         inString outString onErr_ 
                         (\_ -> return ()) (\_ -> t) $ \_ -> 
           Z.withSocket ctx Z.Sub $ \sub -> do
@@ -602,6 +602,10 @@ where
   checkAll = do
     let good = "OK. All Tests passed."
     let bad  = "Bad. Some Tests failed."
+    putStrLn "========================================="
+    putStrLn "       Patterns Library Test Suite"
+    putStrLn "                 Device"
+    putStrLn "========================================="
     r <- runTest "Pass all passes all"
                   (deepCheck prp_passAll)            ?>
          runTest "emit" (deepCheck prp_emit)         ?>
@@ -615,7 +619,7 @@ where
          runTest "Forward" (deepCheck prp_Forwarder) ?>
          runTest "Pipeline" (deepCheck prp_Pipeline) ?>
          runTest "Timeout" (oneCheck prp_onTmo)      ?>
-         runTest "Error" (deepCheck prp_onErr)        ?> 
+         runTest "Error" (deepCheck prp_onErr)       ?> 
          runTest "Parameter" (deepCheck prp_Param)   ?> 
          runTest "Start/Pause" (deepCheck prp_Pause) ?> 
          runTest "add"         (deepCheck prp_add)

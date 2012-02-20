@@ -20,5 +20,5 @@ where
   doit :: LinkType -> Int -> FilePath -> IO ()
   doit l p f = withContext 1 $ \ctx -> do
     let ap = address l "tcp" "localhost" p []
-    withPipe ctx ap return $ \pu -> do
+    withPipe ctx ap return $ \pu ->
       push pu (EB.enumFile f)

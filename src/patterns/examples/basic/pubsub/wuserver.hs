@@ -11,7 +11,7 @@ where
   main = do
     (_, p, _) <- getOs
     withContext 1 $ \ctx -> do
-      withPeriodicPub ctx "Weather Report" noparam 100
+      withPeriodicPub ctx "Weather Report" noparam 10000
            (address Bind "tcp" "localhost" p [])
            (return . B.pack) onErr_
            (fetch1 fetch) $ \pub -> untilInterrupt $ do

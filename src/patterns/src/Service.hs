@@ -24,7 +24,10 @@ where
   import qualified System.ZMQ as Z
 
   ------------------------------------------------------------------------
-  -- | Generic Service data type
+  -- | Generic Service data type;
+  --   'Service' is passed to application-defined actions
+  --   used with background services, namely
+  --   withServer, withPeriodicPub, withSub, withPuller and withDevice. 
   ------------------------------------------------------------------------
   data Service = Service {
                    srvCtx    :: Z.Context,
@@ -40,6 +43,9 @@ where
   srvContext :: Service -> Z.Context
   srvContext = srvCtx
 
+  ------------------------------------------------------------------------
+  -- Stops a service - used internally only
+  ------------------------------------------------------------------------
   stop  :: Service -> IO ()
   stop = sendCmd STOP
 
@@ -58,7 +64,7 @@ where
   ------------------------------------------------------------------------
   -- | Changes the 'Service' control parameter
   ------------------------------------------------------------------------
-  changeParam :: Service -> String -> IO ()
+  changeParam :: Service -> Parameter -> IO ()
   changeParam s c = sendCmd (APP c) s
 
   ------------------------------------------------------------------------
@@ -68,42 +74,59 @@ where
   changeOption s o = sendCmd (OPT o) s
 
   ------------------------------------------------------------------------
-  -- | Add a 'PollEntry' to a device;
-  --   the 'Service' must be a device, of  course,
+  -- | Adds a 'PollEntry' to a device;
+  --   the 'Service', of course, must be a device, 
   --   the command is otherwise ignored.
   ------------------------------------------------------------------------
   addDevice  :: Service -> PollEntry -> IO ()
   addDevice s p = sendDevCmd (ADD p) s
 
   ------------------------------------------------------------------------
-  -- | Remove a 'PollEntry' from a device;
-  --   the 'Service' must be a device, of  course,
+  -- | Removes a 'PollEntry' from a device;
+  --   the 'Service', of course, must be a device, 
   --   the command is otherwise ignored.
   ------------------------------------------------------------------------
   remDevice :: Service -> Identifier -> IO ()
   remDevice s i = sendDevCmd (REM i) s
 
   ------------------------------------------------------------------------
-  -- | Change the timeout of a device;
-  --   the 'Service' must be a device, of  course,
+  -- | Changes the timeout of a device;
+  --   the 'Service', of course, must be a device,
   --   the command is otherwise ignored.
   ------------------------------------------------------------------------
   changeTimeout :: Service -> Timeout -> IO ()
   changeTimeout s t = sendDevCmd (TMO t) s
 
+  ------------------------------------------------------------------------
+  -- Service commands
+  ------------------------------------------------------------------------
   data Command = STOP | PAUSE  | RESUME 
-               | DEVICE DevCmd | APP String | OPT Z.SocketOption
+               | DEVICE DevCmd      -- device specific commands
+               | APP String         -- change control parameter 
+               | OPT Z.SocketOption -- change socket option
     deriving (Eq, Show, Read)
 
+  ------------------------------------------------------------------------
+  -- Device-specific commands
+  ------------------------------------------------------------------------
   data DevCmd = ADD PollEntry | REM Identifier | TMO Z.Timeout
     deriving (Eq, Show, Read)
 
+  ------------------------------------------------------------------------
+  -- Send a command
+  ------------------------------------------------------------------------
   sendCmd :: Command -> Service -> IO ()
   sendCmd c s = Z.send (srvCmd s) (B.pack $ show c) []
 
+  ------------------------------------------------------------------------
+  -- Send device-specific command
+  ------------------------------------------------------------------------
   sendDevCmd :: DevCmd -> Service -> IO ()
   sendDevCmd d = sendCmd (DEVICE d)
 
+  ------------------------------------------------------------------------
+  -- Parse a command string
+  ------------------------------------------------------------------------
   readCmd :: String -> Either String Command
   readCmd s = case s of
                "STOP"   -> Right STOP
@@ -120,28 +143,39 @@ where
                            then Right $ read x
                            else Left  $ "No Command: " ++ x
 
+  ------------------------------------------------------------------------
+  -- The work horse behind "with*" services
+  -- - starts the service in a separate thread and
+  --   waits until it is ready
+  -- - executes the control action
+  -- - stops the service and waits for its termination
+  ------------------------------------------------------------------------
   withService :: Z.Context -> String -> String -> 
-                (Z.Context -> String -> String -> String -> IO () -> IO ()) -> 
+                (Z.Context -> String -> String -> String -> IO () -> IO ()) ->
                 (Service -> IO a) -> IO a
   withService ctx name param service action = do
     running <- newEmptyMVar
     ready   <- newEmptyMVar
-    x <- Z.withSocket ctx Z.Pub $ \cmd -> do
-           sn <- ("inproc://srv_" ++) <$> show <$> mkUniqueId
-           Z.bind cmd sn
-           bracket (start sn cmd ready running) stop (doAction ready)
-    _ <- takeMVar running
-    return x
+    Z.withSocket ctx Z.Pub $ \cmd -> do
+      sn <- ("inproc://srv_" ++) <$> show <$> mkUniqueId
+      Z.bind cmd sn
+      bracket (start sn cmd ready running) 
+              (\s -> stop s >> takeMVar running)
+              (doAction ready)
     where start sn cmd ready m = do
             let imReady = putMVar ready ()
-            tid <- forkIO $ (service ctx name sn param imReady) `finally` (putMVar m ())
+            tid <- forkIO $ finally (service ctx name sn param imReady) 
+                                    (putMVar m ())
             return $ Service ctx name cmd tid
           doAction ready srv = takeMVar ready >>= \_ -> action srv
 
+  ------------------------------------------------------------------------
+  -- Poll on a command socket and the service socket
+  ------------------------------------------------------------------------
   poll :: Bool -> [Z.Poll] -> (String -> IO ()) -> String -> IO ()
   poll paused poller rcv param 
     | paused    = handleCmd paused poller rcv param
-    | otherwise = do  
+    | otherwise = do
         [c, s] <- Z.poll poller (-1)
         case c of 
           Z.S _ Z.In -> handleCmd paused poller rcv param
@@ -150,6 +184,9 @@ where
               Z.S _ Z.In -> rcv param >> poll paused poller rcv param
               _          ->              poll paused poller rcv param
 
+  ------------------------------------------------------------------------
+  -- Handle a message received on the command socket
+  ------------------------------------------------------------------------
   handleCmd :: Bool -> [Z.Poll] -> (String -> IO ()) -> String -> IO ()
   handleCmd paused poller@[Z.S sock _, _] rcv param = do
     x <- Z.receive sock []
@@ -165,10 +202,16 @@ where
                      _      -> poll paused poller rcv param -- ignore
   handleCmd _ _ _ _ = ouch "invalid poller in 'handleCmd'!"
 
+  ------------------------------------------------------------------------
+  -- Change a socket option
+  ------------------------------------------------------------------------
   changeOpt :: [Z.Poll] -> Z.SocketOption -> IO ()
   changeOpt (_:Z.S s _:_) o = Z.setOption s o
   changeOpt _             _ = return ()
 
+  ------------------------------------------------------------------------
+  -- XPoll descriptor for device services
+  ------------------------------------------------------------------------
   data XPoll = XPoll {
                  xpCtx   :: Z.Context,
                  xpTmo   :: Z.Timeout,
@@ -177,6 +220,9 @@ where
                  xpPoll  :: [Z.Poll]
                }
 
+  ------------------------------------------------------------------------
+  -- Remove a poll entry
+  ------------------------------------------------------------------------
   xpDelete :: Identifier -> XPoll -> XPoll
   xpDelete i xp = let (p:pp)     = xpPoll xp
                       (is, ps)   = go (xpIds xp) pp
@@ -190,6 +236,11 @@ where
                else let (  ds',   ps') = go ds ps
                      in (d:ds', p:ps')
 
+  ------------------------------------------------------------------------
+  -- Polling for device-based services:
+  -- - a command socket
+  -- - and a set of device sockets
+  ------------------------------------------------------------------------
   xpoll :: Bool -> MVar XPoll -> 
            (String -> IO ()) ->
            (Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
@@ -208,8 +259,12 @@ where
               Z.S _ Z.In -> rcv i s param >>
                             xpoll paused mxp ontmo rcv param
               _          -> go is ss
-          go _      _     = error "Ouch!"
+          go _      _     = ouch "Invalid xpoll entries"
 
+  ------------------------------------------------------------------------
+  -- Handle messages received through the command socket
+  -- of a device service
+  ------------------------------------------------------------------------
   handleCmdX :: Bool -> MVar XPoll    -> 
                 (String -> IO ())     -> 
                 (Identifier -> Z.Poll -> String -> IO ()) -> String -> IO ()
@@ -226,11 +281,15 @@ where
                          PAUSE    -> xpoll True   mxp ontmo rcv param
                          RESUME   -> xpoll False  mxp ontmo rcv param
                          APP p    -> xpoll paused mxp ontmo rcv p
+                         OPT _    -> xpoll paused mxp ontmo rcv param -- opt!
                          DEVICE d -> do modifyMVar_ mxp 
                                           (\_ -> handleDevCmd d xp)
                                         xpoll False mxp ontmo rcv param
       _ -> ouch "invalid poller in 'handleCmdX'!"
 
+  ------------------------------------------------------------------------
+  -- Handle a device command
+  ------------------------------------------------------------------------
   handleDevCmd :: DevCmd -> XPoll -> IO XPoll
   handleDevCmd d xp = 
     case d of
@@ -252,17 +311,23 @@ where
                                   xpMap  = Map.insert i s $ xpMap xp}
           _      -> return xp
 
-  periodicSend :: Bool -> Millisecond -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
+  ------------------------------------------------------------------------
+  -- Publish periodically
+  ------------------------------------------------------------------------
+  periodicSend :: Bool -> Z.Timeout -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   periodicSend paused period cmd send param = do
     release <- getCurrentTime
     periodicSend_ paused period release cmd send param
 
-  periodicSend_ :: Bool -> Millisecond -> UTCTime -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
+  periodicSend_ :: Bool -> Z.Timeout -> UTCTime -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   periodicSend_ paused period release cmd send param
     | paused    = handleCmdSnd True period release cmd send param 
     | otherwise = send param >> handleCmdSnd paused period release cmd send param 
 
-  handleCmdSnd :: Bool -> Millisecond -> UTCTime -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
+  ------------------------------------------------------------------------
+  -- Poll on a publisher's command socket
+  ------------------------------------------------------------------------
+  handleCmdSnd :: Bool -> Z.Timeout -> UTCTime -> Z.Socket Z.Sub -> (String -> IO ()) -> String -> IO ()
   handleCmdSnd paused period release sock send param = do
     [Z.S _ evt] <- Z.poll [Z.S sock Z.In] 0
     case evt of 
@@ -282,29 +347,35 @@ where
         release' <- waitNext period release
         periodicSend_ paused period release' sock send param
 
-  ouch :: String -> a
-  ouch s = error $ "Ouch! You hit a bug, please report: " ++ s
-
-  periodic :: Int -> IO () -> IO ()
+  ------------------------------------------------------------------------
+  -- Doing something periodically
+  ------------------------------------------------------------------------
+  periodic :: Z.Timeout -> IO () -> IO ()
   periodic period act = getCurrentTime                 >>= go
     where go release  = act >> waitNext period release >>= go 
 
-  waitNext :: Int -> UTCTime -> IO UTCTime
+  ------------------------------------------------------------------------
+  -- Wait for the next release point
+  ------------------------------------------------------------------------
+  waitNext :: Z.Timeout -> UTCTime -> IO UTCTime
   waitNext period release = do
      now <- getCurrentTime
      let next = release `timeAdd` period
-     if (now `timeAdd` 10) >= next
+     if (now `timeAdd` 1) >= next
        then return now
        else do
          let sleepTime = next `diffUTCTime` now
-         threadDelay (1000 * nominal2ms sleepTime)
+         threadDelay (nominal2mu sleepTime)
          getCurrentTime
 
-  timeAdd :: UTCTime -> Int -> UTCTime
-  timeAdd t p = ms2nominal p `addUTCTime` t
+  ------------------------------------------------------------------------
+  -- Some time processing helpers 
+  ------------------------------------------------------------------------
+  timeAdd :: UTCTime -> Z.Timeout -> UTCTime
+  timeAdd t p = mu2nominal p `addUTCTime` t
 
-  ms2nominal :: Int -> NominalDiffTime
-  ms2nominal m = fromIntegral m / (1000::NominalDiffTime)
+  mu2nominal :: Z.Timeout -> NominalDiffTime
+  mu2nominal m = (fromIntegral m / 1000000)::NominalDiffTime
 
-  nominal2ms :: NominalDiffTime -> Int
-  nominal2ms n = ceiling (n * (fromIntegral (1000::Int)))
+  nominal2mu :: NominalDiffTime -> Int
+  nominal2mu n = ceiling (n * (fromIntegral (1000000::Int)))
