@@ -12,8 +12,8 @@ where
   main :: IO ()
   main = do
     (l, p, _) <- getOs 
-    withContext 1 $ \ctx -> do
-    withServer ctx "Olleh Server" noparam 5
+    withContext 1 $ \ctx ->
+      withServer ctx "Olleh Server" noparam 5
           (address l "tcp" "localhost" p []) l
           inString outString onErr (\_ -> one []) 
           (fetch1 olleh) $ \s -> untilInterrupt $ do

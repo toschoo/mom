@@ -1,14 +1,13 @@
 Name:            patterns
-Version:         0.0.1
+Version:         0.0.2
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2012
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
-Homepage:        http://github.com/toschoo/mom/src/patterns
-Bug Tracker:     http://github.com/toschoo/mom/issues
 Category:        Network, Message-oriented Middleware, zeromq
+Homepage:        http://github.com/toschoo/mom/src/patterns
 Build-Type:      Simple
 Synopsis:        Common patterns in message-oriented applications
 Description:
@@ -33,7 +32,6 @@ Library
                    bytestring  >= 0.9.1.9,
                    utf8-string >= 0.3.6,
                    containers >= 0.3.0.0,
-                   split      >= 0.1.4.1,
                    zeromq-haskell >= 0.8.3,
                    enumerator >= 0.4.11,
                    mtl         >= 2.0.1.0,
@@ -46,4 +44,6 @@ Library
                    Network.Mom.Patterns.Device,
                    Network.Mom.Patterns.Enumerator
   other-modules: Factory, Types, Service
+
+  ghc-options: -Wall
 

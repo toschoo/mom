@@ -10,7 +10,6 @@ where
   import           Data.Enumerator (($$))
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad.Trans (liftIO)
   import           Control.Exception (throwIO, AssertionFailed(..))
   import           Data.List (intercalate)
 
@@ -328,13 +327,13 @@ where
   -- listup for fetch
   ------------------------------------------------------------------------
   fetchup :: MVar Int -> Context -> String -> Int -> IO (Maybe Int)
-  fetchup m _ _ i = listup m i
+  fetchup m _ _ = listup m 
 
   ------------------------------------------------------------------------
   -- listupFor for fetch
   ------------------------------------------------------------------------
   fetchupFor :: Context -> String -> Int -> Int -> IO Int
-  fetchupFor _ _ c i = listupFor c i
+  fetchupFor _ _ = listupFor
 
   ------------------------------------------------------------------------
   -- listup' for fetch

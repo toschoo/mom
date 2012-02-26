@@ -12,17 +12,13 @@ where
   import qualified Data.Enumerator      as E
   import qualified Data.Enumerator.List as EL
   import           Data.Enumerator (($$))
-  import qualified Data.Sequence as S
-  import           Data.Sequence ((|>))
   import           Data.List (nub)
   import qualified Data.ByteString.Char8 as B
-  import qualified Data.ByteString.UTF8  as U
   import           Data.Time.Clock
   import           Data.Either
   import           Data.Maybe
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad
   import           Control.Monad.Loops
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (try, throwIO, AssertionFailed(..), SomeException)
@@ -172,7 +168,7 @@ where
                                 outString onErr_ 
                                 (\_ _ _ -> mkStream [""]) $ \_ -> 
               withSporadicSub ctx add inString alltopics $ \s -> do
-                ok <- and <$> mapM (go s $ d) [1..100]
+                ok <- and <$> mapM (go s d) [1..100]
                 putStrLn "" 
                 return ok
           go :: Sub String -> Timeout -> Int -> IO Bool
@@ -184,7 +180,7 @@ where
               Right _ -> do
                 t2  <- getCurrentTime
                 if t2 > t1 && 
-                   t2 <= uToNominal (3 * (fromIntegral d)) `addUTCTime` t1
+                   t2 <= uToNominal (3 * fromIntegral d) `addUTCTime` t1
                   then putStr "." >> hFlush stdout >> return True
                   else putStrLn ("Diff: " ++ show t1 ++ " - " ++ show t2) >> return False
           uToNominal :: Int -> NominalDiffTime 
@@ -368,7 +364,7 @@ where
                 Z.connect s "inproc://pub"
                 Z.subscribe s ""
                 Z.send p (B.pack $ head ss) []
-                Right <$> (B.unpack) <$> Z.receive s  []
+                Right <$> B.unpack <$> Z.receive s  []
 
   ------------------------------------------------------------------------------
   -- Error
@@ -496,14 +492,14 @@ where
   prp_threads :: Property
   prp_threads = monadicIO $ do
     ts <- run $ withContext 1 action
-    assert $ (nub ts) == ts
+    assert $ nub ts == ts
     where inThread :: B.ByteString -> IO Int
           inThread  = return . read   . B.unpack
           outThread :: Int -> IO B.ByteString
           outThread = return . B.pack . show
           sndThread :: Fetch String Int
           sndThread c p i s = 
-            read <$> (drop 9) <$> show <$> liftIO myThreadId >>= \t -> 
+            read <$> drop 9 <$> show <$> liftIO myThreadId >>= \t -> 
               fetchJust t c p i s
           action ctx = let add = Address "inproc://srv" []
             in withServer ctx "Test" noparam 5 add Bind
@@ -523,7 +519,7 @@ where
   prp_pullThreads :: Property
   prp_pullThreads = monadicIO $ do
     ts <- run $ withContext 1 action
-    assert $ (nub ts) == ts
+    assert $ nub ts == ts
     where saveThread m _ _ = do
             liftIO (myThreadId >>= \t -> modifyMVar_ m (\l -> return $ t:l))
             EL.consume >>= \_ -> return ()
@@ -566,7 +562,7 @@ where
                         ei4 <- request c (just "") EL.consume 
                         let (ls,rs) = partitionEithers [ei2, ei3, ei4]
                         if not (null ls) then return False
-                          else return (and $ map (==[s]) rs)
+                          else return (all (==[s]) rs)
                   _         -> return False
 
   ------------------------------------------------------------------------------
@@ -809,7 +805,7 @@ where
               withSporadicSub ctx add1 inInt [""] $ \s1 -> do
                    ok <- issueN p1 s1 5 
                    if ok 
-                     then do
+                     then 
                        withPub ctx add2 outInt $ \p2 -> 
                          withSporadicSub ctx add2 inInt [""] $ \s2 ->
                              issueN p2 s2 5
@@ -822,7 +818,7 @@ where
               then do
                 (l,r) <- partitionEithers <$> catMaybes <$> mapM (\_ ->
                            checkSub s EL.consume) [1..x]
-                return $ null l && (length r) == x
+                return $ null l && length r == x
               else 
                 issue p (just x) >> issueN p s (x-1)
 
@@ -842,19 +838,19 @@ where
   testContext ss action = monadicIO $ do
     ei <- run $ withContext 1 action 
     case ei of
-      Left  e -> run (putStrLn $ show e) >> assert False
+      Left  e -> run (print e) >> assert False
       Right x -> assert (x == ss)
       
   ------------------------------------------------------------------------------
   -- Generic Server Tests
   ------------------------------------------------------------------------------
   testServer :: Z.Context -> [String] -> (Service -> IO a) -> IO a
-  testServer ctx ss action =
+  testServer ctx ss =
     withServer ctx "Test" noparam 1
                    (Address "inproc://srv" []) Bind 
                    inString outString onErr
                    (\_ -> one "") -- ignore
-                   (\_ _ _ -> mkStream ss) action
+                   (\_ _ _ -> mkStream ss)
 
   trycon :: Z.Socket a -> String -> IO ()
   trycon s a = do ei <- try $ Z.connect s a
@@ -879,7 +875,7 @@ where
   -- return a list in an MVar
   ------------------------------------------------------------------------------
   dump :: MVar [a] -> Dump a
-  dump m _ _ = EL.consume >>= liftIO . (putMVar m) 
+  dump m _ _ = EL.consume >>= liftIO . putMVar m
 
   -------------------------------------------------------------
   -- controlled quickcheck, arbitrary tests

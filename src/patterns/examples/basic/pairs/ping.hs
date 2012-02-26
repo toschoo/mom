@@ -42,10 +42,10 @@ where
             threadDelay 100000
             case eix of
               Left  e   -> putStrLn $ "Error: " ++ show e
-              Right png -> do when start $ putStrLn (show png) 
+              Right png -> do when start $ print png
                               sendPing p $ if start then swap png else png
                               continue <- readMVar m -- user interrupt?
-                              when (continue) $ receive p it >>= go p
+                              when continue $ receive p it >>= go p
           starter stopped = 
             forkIO (ping ctx m False 
                     `finally` putMVar stopped ()) >>= \_ -> return ()

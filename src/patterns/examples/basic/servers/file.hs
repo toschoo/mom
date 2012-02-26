@@ -14,7 +14,7 @@ where
   main = do
     (l, p, _) <- getOs
     withContext 1 $ \ctx -> 
-      withServer ctx "Player Service" noparam 5
+      withServer ctx "File Server" noparam 5
           (address l "tcp" "localhost" p []) l
           inString idOut onErr (\_ -> one []) 
           (\_ _ f -> EB.enumFile f) $ \s -> untilInterrupt $ do

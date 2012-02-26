@@ -10,7 +10,7 @@ where
   main :: IO ()
   main = do
     (_, p, _) <- getOs
-    withContext 1 $ \ctx -> do
+    withContext 1 $ \ctx ->
       withPeriodicPub ctx "Weather Report" noparam 10000
            (address Bind "tcp" "localhost" p [])
            (return . B.pack) onErr_
@@ -21,7 +21,7 @@ where
   fetch :: FetchHelper' () String
   fetch _ _ _ = do
       -- zipcode <- randomRIO (10000, 99999) :: IO Int 
-      let zipcode = (10001::Int) -- just publish one topic
+      let zipcode = 10001::Int -- just publish one topic
       temperature <- randomRIO (-10, 30) :: IO Int
       humidity    <- randomRIO (10, 60) :: IO Int
       return $ unwords [show zipcode, show temperature, show humidity]

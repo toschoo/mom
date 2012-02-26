@@ -47,9 +47,7 @@ where
 
   import           Control.Applicative ((<$>))
   import           Control.Monad
-  import           Control.Monad.Trans
   import           Prelude hiding (catch)
-  import           Control.Exception (AssertionFailed(..), catch, throwIO)
 
   import qualified System.ZMQ as Z
 

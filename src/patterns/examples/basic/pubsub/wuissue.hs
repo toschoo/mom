@@ -22,7 +22,7 @@ where
   weather :: String -> IO String
   weather _ = do
       -- zipcode <- randomRIO (10000, 99999) :: IO Int
-      let zipcode = (10001::Int)
+      let zipcode = 10001::Int
       temperature <- randomRIO (-10, 30) :: IO Int
       humidity    <- randomRIO (10, 60) :: IO Int
       return $ unwords [show zipcode, show temperature, show humidity]

@@ -6,6 +6,7 @@ where
   import qualified Data.Enumerator.Binary as EB
   import qualified Data.Enumerator.List   as EL
   import qualified Data.ByteString.Char8  as B
+  import           Data.Maybe (fromMaybe)
   import qualified Database.HDBC          as SQL
   import           Control.Concurrent
   import           Control.Monad.Trans
@@ -90,10 +91,8 @@ where
           convRow :: [SQL.SqlValue] -> String
           convRow [sqlId, sqlName] =
               show idf ++ ": " ++ name
-            where idf  = (SQL.fromSql sqlId)::Int
-                  name = case SQL.fromSql sqlName of
-                           Nothing -> "NN"
-                           Just r  -> r
+            where idf  = SQL.fromSql sqlId::Int
+                  name = fromMaybe "NN" $ SQL.fromSql sqlName 
           convRow _ = undefined
 
   fileFetcher :: IO.Handle -> Fetch_ B.ByteString 

@@ -14,5 +14,5 @@ where
         ei <- request c (mkRequest xs) append
         case ei of
           Left  e -> putStrLn $ "Error: " ++ show (e::SomeException)
-          Right m -> putStrLn $ m
+          Right m -> putStrLn   m
     where mkRequest xs = if null xs then just "test" else just $ head xs

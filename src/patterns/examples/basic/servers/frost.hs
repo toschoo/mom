@@ -12,7 +12,7 @@ where
   main :: IO ()
   main = do
     (l, p, _) <- getOs
-    withContext 1 $ \ctx -> do
+    withContext 1 $ \ctx ->
       withServer ctx "Frost" noparam 5
           (address l "tcp" "localhost" p []) l
           (\_ -> return ()) outString onErr (\_ -> one ())

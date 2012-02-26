@@ -30,8 +30,6 @@ where
   import qualified Data.ByteString.Char8  as B
   import qualified Data.ByteString.UTF8   as U -- standard converters
   import           Data.Char (toLower)
-  import           Data.List (intercalate)
-  import           Data.List.Split (splitOn)
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
   import qualified Data.Enumerator.List   as EL (head)
@@ -426,7 +424,7 @@ where
   rcvEnum s iconv = go True
     where go more step = 
             case step of 
-              E.Continue k -> do
+              E.Continue k ->
                 if more then do
                     x <- liftIO $ Z.receive s []
                     m <- liftIO $ Z.moreToReceive s

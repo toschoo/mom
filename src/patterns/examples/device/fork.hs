@@ -14,7 +14,7 @@ where
                   [l,p] -> case getThird l p of
                              Nothing -> usage
                              Just lp -> return lp
-                  _     -> putStrLn (show r) >> usage
+                  _     -> print r >> usage
     let sub = pollEntry "Subscriber" XSub
                         (address l1 "tcp" "localhost" p1 []) l1 [""]
     let pub = pollEntry "Publisher"  XPub

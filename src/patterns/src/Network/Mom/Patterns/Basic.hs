@@ -234,14 +234,12 @@ where
   ------------------------------------------------------------------------
   -- prepare service for single client
   ------------------------------------------------------------------------
-    | n <= 1 = (
+    | n <= 1 = 
       Z.withSocket ctx Z.Rep $ \client -> do
         link t ac client
         Z.withSocket ctx Z.Sub $ \cmd -> do
-          trycon      cmd sockname retries
-          Z.subscribe cmd ""
-          ready
-          poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param)
+          conCmd cmd sockname ready
+          poll False [Z.S cmd Z.In, Z.S client Z.In] (go client) param
       `catch` (\e -> onerr Fatal e name param >>= \_ -> return ())
   ------------------------------------------------------------------------
   -- prepare service for multiple clients 
@@ -252,7 +250,7 @@ where
         zs  <- replicateM n newEmptyMVar
         withQueue ctx ("Queue " ++ name)
                       (ac, t) (Address add [], Bind) onQErr $ \_ -> do
-          _ <- mapM (\(a,z) -> start add a z) (zip as zs)
+          _ <- mapM (uncurry $ start add) (zip as zs)
           mapM_ takeMVar as  -- wait for workers to start
           ready              -- report state to service
           mapM_ takeMVar zs) -- wait for workers to terminate
@@ -650,14 +648,12 @@ where
              Z.Context -> String  -> 
              String -> String     -> IO () -> IO ()
   publish period ac oconv onerr 
-          fetch ctx name sockname param ready = (
+          fetch ctx name sockname param ready = 
     Z.withSocket ctx Z.Pub $ \sock -> do
       Z.bind sock (acAdd ac)
       Z.withSocket ctx Z.Sub $ \cmd -> do
-        trycon      cmd sockname retries
-        Z.subscribe cmd ""
-        ready
-        periodicSend False period cmd (go sock) param)
+        conCmd cmd sockname ready
+        periodicSend False period cmd (go sock) param
     `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
   -- do the job periodically
@@ -745,15 +741,13 @@ where
                String      -> 
                String -> Parameter -> IO () -> IO ()
   subscribe sub ac iconv onerr dump 
-            ctx name sockname param ready = (
+            ctx name sockname param ready =
     Z.withSocket ctx Z.Sub $ \sock -> do
       trycon      sock (acAdd ac) retries
       mapM_ (Z.subscribe sock) sub
       Z.withSocket ctx Z.Sub $ \cmd -> do
-        trycon cmd sockname retries
-        Z.subscribe cmd ""
-        ready
-        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
+        conCmd cmd sockname ready
+        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
     `catch` (\e -> onerr Fatal e name param)
     where go sock p = do
             eiR <- E.run (rcvEnum sock iconv $$ dump ctx p)
@@ -839,13 +833,13 @@ where
   -- | Unsubscribe a topic
   ------------------------------------------------------------------------
   unsubscribe :: Sub i -> Topic -> IO ()
-  unsubscribe s t = Z.unsubscribe (subSock s) t
+  unsubscribe s = Z.unsubscribe (subSock s)
 
   ------------------------------------------------------------------------
   -- | Subscribe another topic
   ------------------------------------------------------------------------
   resubscribe :: Sub i -> Topic -> IO ()
-  resubscribe s t = Z.subscribe (subSock s) t
+  resubscribe s = Z.subscribe (subSock s)
 
   ------------------------------------------------------------------------
   -- The working horse behind the scene
@@ -909,14 +903,12 @@ where
           Dump   i             ->
           Z.Context -> String  -> 
           String    -> String  -> IO () -> IO ()
-  pull ac iconv onerr dump ctx name sockname param ready = (
+  pull ac iconv onerr dump ctx name sockname param ready = 
     Z.withSocket ctx Z.Pull $ \sock -> do
       trycon sock (acAdd ac) retries
       Z.withSocket ctx Z.Sub $ \cmd -> do
-        trycon      cmd sockname retries
-        Z.subscribe cmd ""
-        ready
-        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param)
+        conCmd cmd sockname ready
+        poll False [Z.S cmd Z.In, Z.S sock Z.In] (go sock) param
     `catch` (\e -> onerr Fatal e name param)
   ------------------------------------------------------------------------
   -- do the job 
@@ -1094,3 +1086,12 @@ where
   ------------------------------------------------------------------------
   receive :: Peer i -> E.Iteratee i IO a -> IO (Either SomeException a)
   receive p it = E.run (rcvEnum (peeSock p) (peeIn p) $$ it)
+
+  ------------------------------------------------------------------------
+  -- connect to command socket
+  ------------------------------------------------------------------------
+  conCmd :: Z.Socket Z.Sub -> String -> IO () -> IO ()
+  conCmd cmd sockname ready = do
+    trycon      cmd sockname retries
+    Z.subscribe cmd ""
+    ready

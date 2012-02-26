@@ -75,6 +75,10 @@ where
      together to request or provide services, 
      publish or subscribe data or to 
      allocate work to processing nodes.
+
+     Note that, since the patterns package is based on ZMQ,
+     applications based on patterns must be compiled with the 
+     /-threaded/ flag. 
      
   -}
 

@@ -27,7 +27,6 @@ where
   import           Types
   import           Service
 
-  import qualified Data.ByteString.Char8  as B
   import qualified Data.Enumerator        as E
   import           Data.Enumerator (($$))
   import qualified Data.Enumerator.List   as EL
@@ -139,11 +138,11 @@ where
                (AccessPoint, LinkType)    ->
                OnError_                   -> 
                (Service -> IO a)          -> IO a
-  withQueue ctx name (dealer, l1) (router, l2) onerr act = 
+  withQueue ctx name (dealer, l1) (router, l2) onerr = 
     withDevice ctx name noparam (-1)
           [pollEntry "clients" XDealer dealer l1 [],
            pollEntry "servers" XRouter router l2 []]
-          return return onerr (\_ -> return ()) (\_ -> putThrough) act
+          return return onerr (\_ -> return ()) (\_ -> putThrough)
 
   ------------------------------------------------------------------------
   -- | Starts a Forwarder;
@@ -188,11 +187,11 @@ where
                    (AccessPoint, LinkType)    ->
                    OnError_                   -> 
                    (Service -> IO a)          -> IO a
-  withForwarder ctx name topics (sub, l1) (pub, l2) onerr act = 
+  withForwarder ctx name topics (sub, l1) (pub, l2) onerr = 
     withDevice ctx name noparam (-1)
           [pollEntry "subscriber" XSub sub l1 topics, 
            pollEntry "publisher"  XPub pub l2 []]
-          return return onerr (\_ -> return ()) (\_ -> putThrough) act
+          return return onerr (\_ -> return ()) (\_ -> putThrough)
 
   ------------------------------------------------------------------------
   -- | Starts a pipeline;
@@ -242,11 +241,11 @@ where
                    (AccessPoint, LinkType)    ->
                    OnError_                   -> 
                    (Service -> IO a)          -> IO a
-  withPipeline ctx name (puller, l1) (pusher, l2) onerr act = 
+  withPipeline ctx name (puller, l1) (pusher, l2) onerr = 
     withDevice ctx name noparam (-1)
           [pollEntry "pull"  XPull puller l1 [], 
            pollEntry "push"  XPipe pusher l2 []]
-          return return onerr (\_ -> return ()) (\_ -> putThrough) act
+          return return onerr (\_ -> return ()) (\_ -> putThrough)
 
   ------------------------------------------------------------------------
   -- | A transformer is an 'E.Iteratee'
@@ -482,7 +481,7 @@ where
     m  <- newMVar xp
     finally (runDevice name m iconv oconv onerr ontmo trans 
                        sockname param imReady)
-            (do withMVar m (\xp' -> mapM_ closeS (xpPoll xp')) >> return ())
+            (withMVar m (mapM_ closeS . xpPoll) >> return ())
 
   closeS :: Z.Poll -> IO ()
   closeS p = case p of 

@@ -19,6 +19,7 @@ where
   import           Data.Monoid
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
+  import           Control.Monad (unless)
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (AssertionFailed(..), 
                                       try, throwIO, SomeException)
@@ -101,7 +102,7 @@ where
             now <- getCurrentTime
             threadDelay $ 2 * (fromIntegral d)
             t   <- readMVar m
-            if t > now && t <= uToNominal (3 * (fromIntegral d)) 
+            if t > now && t <= uToNominal (3 * fromIntegral d)
                                `addUTCTime` now
               then putStr "." >> hFlush stdout >> return True
               else return False
@@ -121,7 +122,7 @@ where
                               pollEntry "XPub" XPub
                                   (Address "inproc://sub" []) Bind [""]]
                               idIn idOut onErr_ 
-                              (\_ -> tstTmo tmo) (\_ -> putThrough) $ \dv -> do
+                              (\_ -> tstTmo tmo) (\_ -> putThrough) $ \dv -> 
                   (and <$> mapM (go d tmo) ([1..100]::[Int])) ~> (do
                     let d' = 2 * d
                     putStrLn "\nchange Timeout"
@@ -149,8 +150,8 @@ where
               Error -> return True
               _     -> return False
           tstDevice ctx   = 
-            withPub ctx (Address "inproc://pub" []) idOut $ \p -> do
-              errDevice ctx p mkErr tstFatal ~> (do
+            withPub ctx (Address "inproc://pub" []) idOut $ \p -> 
+              errDevice ctx p mkErr tstFatal ~> (
                 threadDelay 10000 >> -- give ZMQ some time
                   errDevice ctx p (return ()) (tstError p))
           errDevice ctx _ tmo action = do
@@ -384,7 +385,7 @@ where
   -- Pipe
   ------------------------------------------------------------------------------
   testPipeline :: [String] -> IO [String]
-  testPipeline ss = withContext 1 $ \ctx -> do
+  testPipeline ss = withContext 1 $ \ctx -> 
       withPipe ctx (Address "inproc://push" []) outString $ \p ->
         withPipeline ctx "Test Pipeline"
                       (Address "inproc://push" [], Connect)
@@ -463,7 +464,7 @@ where
   -- return a list in an MVar
   ------------------------------------------------------------------------------
   dump :: MVar [a] -> Dump a
-  dump m _ _ = EL.consume >>= liftIO . (putMVar m) 
+  dump m _ _ = EL.consume >>= liftIO . putMVar m
 
   ------------------------------------------------------------------------------
   -- return a list in an MVar
@@ -506,8 +507,7 @@ where
   emitOn i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
     where go c mbo _ os = 
              case mbo of
-               Nothing -> if c > i then return ()
-                            else emit s trg os continueHere
+               Nothing -> unless (c > i) $ emit s trg os continueHere
                Just x  -> do
                  mbo' <- EL.head
                  if c == i 
@@ -539,8 +539,7 @@ where
   absorbUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
     where go c mbo _ os = 
              case mbo of
-               Nothing -> if c > i + 1 then return ()
-                            else emit s trg os continueHere
+               Nothing -> unless (c > i + 1) $ emit s trg os continueHere
                Just x  -> do
                  mbo' <- EL.head
                  if c <= i 
@@ -555,8 +554,7 @@ where
   mergeUntil i s _ = EL.head >>= \mbo -> go 0 mbo s S.empty
     where go c mbo _ os = 
              case mbo of
-               Nothing -> if c > i + 1 then return ()
-                            else emit s trg os continueHere
+               Nothing -> unless (c > i + 1) $ emit s trg os continueHere
                Just x  -> do
                  mbo' <- EL.head
                  if c <= i 

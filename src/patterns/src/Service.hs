@@ -13,6 +13,7 @@ where
 
   import qualified Data.ByteString.Char8 as B
   import           Data.Time.Clock
+  import           Data.List (isPrefixOf)
   import           Data.Map (Map)
   import qualified Data.Map as Map
 
@@ -133,15 +134,11 @@ where
                "PAUSE"  -> Right PAUSE
                "RESUME" -> Right RESUME
                x        -> 
-                 if take 4 x == "APP " 
+                 if "APP"    `isPrefixOf` x ||
+                    "OPT"    `isPrefixOf` x ||
+                    "DEVICE" `isPrefixOf` x
                    then Right $ read x
-                   else 
-                     if take 4 x == "OPT "
-                       then Right $ read x
-                       else 
-                         if take 6 x == "DEVICE"
-                           then Right $ read x
-                           else Left  $ "No Command: " ++ x
+                   else Left  $ "No Command: " ++ x
 
   ------------------------------------------------------------------------
   -- The work horse behind "with*" services
@@ -378,4 +375,4 @@ where
   mu2nominal m = (fromIntegral m / 1000000)::NominalDiffTime
 
   nominal2mu :: NominalDiffTime -> Int
-  nominal2mu n = ceiling (n * (fromIntegral (1000000::Int)))
+  nominal2mu n = ceiling (n * fromIntegral (1000000::Int))

@@ -1,8 +1,8 @@
 Name:            stompl
 Category:        Message-Oriented Middleware, Network, Stomp, Parser
-Version:         0.0.1
+Version:         0.0.2
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2012
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
