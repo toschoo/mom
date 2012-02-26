@@ -6,8 +6,8 @@ Copyright:       Copyright (c) Tobias Schoofs, 2011
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
-Maintainer:      Tobias Schoofs <tobias dot schoofs at gmx dot net>
-Homepage:        http://github.com/toschoo/stompl
+Maintainer:      tobias dot schoofs at gmx dot net
+Homepage:        http://github.com/toschoo/mom
 Synopsis:        Stomp Parser and Utilities
 Build-Type:      Simple
 Description:
@@ -29,7 +29,7 @@ Description:
   It is used by the Stompl Queue library (stomp-queues).
 
   More documentation and a test suite can be found on 
-  <https://github.com/toschoo/stompl/>.
+  <https://github.com/toschoo/mom/>.
   The Stomp specification can be found at
   <http://stomp.github.com>.
 

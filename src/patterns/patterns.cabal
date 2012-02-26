@@ -6,7 +6,8 @@ License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
-Homepage:        http://github.com/toschoo/stompl
+Homepage:        http://github.com/toschoo/mom/src/patterns
+Bug Tracker:     http://github.com/toschoo/mom/issues
 Category:        Network, Message-oriented Middleware, zeromq
 Build-Type:      Simple
 Synopsis:        Common patterns in message-oriented applications
@@ -25,7 +26,7 @@ Description:
   <http://www.zeromq.org>.
 
   More examples and a test suite are available 
-  on <http://github.com/toschoo/stompl>.
+  on <http://github.com/toschoo/mom>.
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,

@@ -19,6 +19,7 @@ where
   import qualified Data.ByteString.UTF8  as U
   import           Data.Time.Clock
   import           Data.Either
+  import           Data.Maybe
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad
@@ -253,16 +254,17 @@ where
   -- Subscribe non-string
   ------------------------------------------------------------------------------
   prp_subNonString :: Int -> Property
-  prp_subNonString x = monadicIO $ run $ withContext 1 $ \ctx -> do
-    let add = Address "inproc://pub" []
-    withPub ctx add outInt $ \p -> 
-      withSporadicSub ctx add inInt [""] $ \s -> do
-        issue p (just x)
-        ei <- waitSub s EL.consume
-        case ei of
-          Right [i] -> return $ i == x
-          _         -> return False
-    where outInt = return . B.pack . show
+  prp_subNonString x = monadicIO $ run (withContext 1 action) >>= assert
+    where action ctx = do
+            let add = Address "inproc://pub" []
+            withPub ctx add outInt $ \p -> 
+              withSporadicSub ctx add inInt [""] $ \s -> do
+                issue p (just x)
+                ei <- waitSub s EL.consume
+                case ei of
+                  Right [i] -> return $ i == x
+                  _         -> return False
+          outInt = return . B.pack . show
           inInt  = return . read   . B.unpack
 
   ------------------------------------------------------------------------------
@@ -344,14 +346,14 @@ where
   -- Close Puller
   ------------------------------------------------------------------------------
   prp_closeAfterPuller :: Property
-  prp_closeAfterPuller = monadicIO $ run $ withContext 1 $ \ctx ->
-    action ctx >> threadDelay 10000 >> action ctx
-    where action ctx = let add = Address "inproc://pipe" []
+  prp_closeAfterPuller = monadicIO $ run (withContext 1 testcase) >>= assert
+    where testcase ctx = action ctx >> threadDelay 10000 >> action ctx
+          action ctx = let add = Address "inproc://pipe" []
             in withPipe ctx add outString $ \p ->
                 withPuller ctx "Test" noparam add
                            inString onErr_ 
                            (\_ _ -> EL.consume >>= \_ -> return ()) $ \_ ->
-                 push p (just "")
+                 push p (just "") >> return True
 
   ------------------------------------------------------------------------------
   -- Close Z.socket
@@ -796,6 +798,43 @@ where
               xs -> return $ Just xs
 
   ------------------------------------------------------------------------------
+  -- SocketOption
+  ------------------------------------------------------------------------------
+  prp_hwm :: Property
+  prp_hwm = monadicIO $ run (withContext 1 action) >>= assert
+    where action ctx = do
+            let add1 = Address "inproc://pub1" [HighWM  1]
+            let add2 = Address "inproc://pub2" [HighWM 10]
+            withPub ctx add1 outInt $ \p1 -> 
+              withSporadicSub ctx add1 inInt [""] $ \s1 -> do
+                   ok <- issueN p1 s1 5 
+                   if ok 
+                     then do
+                       withPub ctx add2 outInt $ \p2 -> 
+                         withSporadicSub ctx add2 inInt [""] $ \s2 ->
+                             issueN p2 s2 5
+                     else return False
+          outInt = return . B.pack . show
+          inInt  = return . read   . B.unpack
+          issueN :: Pub Int -> Sub Int -> Int -> IO Bool
+          issueN p s x = 
+            if x == 0
+              then do
+                (l,r) <- partitionEithers <$> catMaybes <$> mapM (\_ ->
+                           checkSub s EL.consume) [1..x]
+                return $ null l && (length r) == x
+              else 
+                issue p (just x) >> issueN p s (x-1)
+
+  ------------------------------------------------------------------------
+  -- Ease working with either
+  ------------------------------------------------------------------------
+  infixl 9 ~>
+  (~>) :: IO Bool -> IO Bool -> IO Bool
+  x ~> f = x >>= \t -> if t then f else return False
+
+
+  ------------------------------------------------------------------------------
   -- Generic Tests
   ------------------------------------------------------------------------------
   testContext :: Eq a => a -> 
@@ -905,7 +944,7 @@ where
          runTest "Periodicity"
                   (oneCheck prp_Periodicity)       ?> 
          runTest "Resubscribe"
-                  (deepCheck prp_Resubscribe)      ?>
+                  (deepCheck prp_Resubscribe)      ?> 
          runTest "Subscribe Non-String"
                   (deepCheck prp_subNonString)     ?> 
          runTest "Pipe"
@@ -949,7 +988,9 @@ where
          runTest "Pause Sub"               
                   (deepCheck prp_pauseSub)         ?>
          runTest "Pause Puller"               
-                  (deepCheck prp_pausePull)
+                  (deepCheck prp_pausePull)        ?> 
+         runTest "Socket Option"               
+                  (deepCheck prp_hwm)
         
     case r of
       Success _ -> do
