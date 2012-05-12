@@ -1,6 +1,14 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- Device that sends data streams coming from a connected publisher
+  -- to all connected subscribers;
+  -- subscribers can be connected and removed through the "ifc" program.
+  -- The program cannot be stopped by the INT signal.
+  -- Instead, it is stopped by using the "stop" command with ifc.
+  ------------------------------------------------------------------------
+
   import           Command
   import           Helper (getPorts, address, onErr_, onErr)
   import           Network.Mom.Patterns

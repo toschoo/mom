@@ -1,6 +1,7 @@
 module Main
 where
 
+  import           Common
   import           System.Exit
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
@@ -8,22 +9,9 @@ where
   import qualified Data.Enumerator      as E
   import qualified Data.Enumerator.List as EL
   import           Data.Enumerator (($$))
-  import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Exception (throwIO, AssertionFailed(..))
   import           Data.List (intercalate)
-
-  ------------------------------------------------------------------------
-  -- For debugging it's much nicer to work with digits
-  ------------------------------------------------------------------------
-  data Digit = Digit Int
-    deriving (Read, Eq, Ord)
-
-  instance Show Digit where
-    show (Digit d) = show d
-
-  instance Arbitrary Digit where
-    arbitrary = Digit <$> elements [0..9]
 
   ------------------------------------------------------------------------------
   -- enumWith stops on Nothing
@@ -353,61 +341,6 @@ where
                   else E.continue k
               _ -> E.returnI step  
 
-  ------------------------------------------------------------------------
-  -- stream from list
-  ------------------------------------------------------------------------
-  mkStream :: [a] -> E.Enumerator a IO b
-  mkStream ss step = 
-    case step of
-      (E.Continue k) -> 
-        if null ss then E.continue k
-          else mkStream (tail ss) $$ k (E.Chunks [head ss])
-      _ -> E.returnI step  
-
-  ------------------------------------------------------------------------------
-  -- Just build up a list and store it in MVar
-  ------------------------------------------------------------------------------
-  makeList :: MVar [Int] -> E.Iteratee Int IO ()
-  makeList m = do
-    mb <- EL.head
-    case mb of
-      Nothing -> return ()
-      Just i  -> tryIO (modifyMVar_ m (\l -> return (i:l))) >> makeList m
-    
-  -------------------------------------------------------------
-  -- controlled quickcheck, arbitrary tests
-  -------------------------------------------------------------
-  deepCheck :: (Testable p) => p -> IO Result
-  deepCheck = quickCheckWithResult stdArgs{maxSuccess=100,
-                                           maxDiscard=500}
-
-  -------------------------------------------------------------
-  -- do just one test
-  -------------------------------------------------------------
-  oneCheck :: (Testable p) => p -> IO Result
-  oneCheck = quickCheckWithResult stdArgs{maxSuccess=1,
-                                          maxDiscard=1}
-
-  -------------------------------------------------------------
-  -- combinator, could be a monad...
-  -------------------------------------------------------------
-  applyTest :: IO Result -> IO Result -> IO Result
-  applyTest r f = do
-    r' <- r
-    case r' of
-      Success _ -> f
-      x         -> return x
-
-  infixr ?>
-  (?>) :: IO Result -> IO Result -> IO Result
-  (?>) = applyTest
-
-  -------------------------------------------------------------
-  -- Name tests
-  -------------------------------------------------------------
-  runTest :: String -> IO Result -> IO Result
-  runTest s t = putStrLn ("Test: " ++ s) >> t
-
   checkAll :: IO ()
   checkAll = do
     let good = "OK. All Tests passed."
@@ -463,7 +396,7 @@ where
          runTest "Source is closed on Error (sinkI)"
                  (deepCheck prp_sinkIErr)
     case r of
-      Success _ -> do
+      Success {} -> do
         putStrLn good
         exitSuccess
       _ -> do

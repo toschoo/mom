@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- Simple puller
+  ------------------------------------------------------------------------
+
   import           Helper (getOs, address, onErr_, 
                            output, untilInterrupt)
   import           Network.Mom.Patterns

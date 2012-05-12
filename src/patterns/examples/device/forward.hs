@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- A simple forwarder (Publisher -> Subscriber)
+  ------------------------------------------------------------------------
+
   import           Helper (getPorts, address, untilInterrupt, onErr_)
   import           Network.Mom.Patterns
   import           Control.Concurrent

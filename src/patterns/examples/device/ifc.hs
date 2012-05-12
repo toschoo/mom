@@ -1,6 +1,10 @@
 module Main
 where
 
+  ------------------------------------------------------------------------
+  -- Client to send commands to the "fork" program
+  ------------------------------------------------------------------------
+
   import           Command
   import           Helper
   import           Network.Mom.Patterns

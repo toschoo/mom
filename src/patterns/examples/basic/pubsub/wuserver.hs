@@ -1,6 +1,10 @@
 module Main
 where
 
+  ------------------------------------------------------------------------
+  -- Simple weather report publisher
+  ------------------------------------------------------------------------
+
   import           Helper(getOs, address, untilInterrupt, onErr_)
   import           Network.Mom.Patterns
   import qualified Data.ByteString.Char8 as B

@@ -1,6 +1,10 @@
 module Main
 where
 
+  ------------------------------------------------------------------------
+  -- Simple weather report publisher, using "issue"
+  ------------------------------------------------------------------------
+
   import           Helper (getOs, address)
   import           Network.Mom.Patterns
 

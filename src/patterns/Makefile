@@ -35,13 +35,13 @@ run:
 	$(TDIR)/basic
 	$(TDIR)/device
 
-$(TDIR)/enum:	$(TDIR)/enum.hs $(SUBSRC)
+$(TDIR)/enum:	$(TDIR)/enum.hs $(TDIR)/Common.hs $(SUBSRC)
 		$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/basic:	$(TDIR)/basic.hs $(SUBSRC)
+$(TDIR)/basic:	$(TDIR)/basic.hs $(TDIR)/Common.hs $(SUBSRC)
 		$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/device:	$(TDIR)/device.hs $(SUBSRC)
+$(TDIR)/device:	$(TDIR)/device.hs $(TDIR)/Common.hs $(SUBSRC)
 		$(GHC) $(FLGS) $(INC) $@
 
 smoke:	$(SMOKEDIR)/db \

@@ -1,6 +1,7 @@
 module Main
 where
 
+  import           Common
   import           Helper
   import           System.IO
   import           System.Exit
@@ -11,7 +12,6 @@ where
   import           Network.Mom.Patterns
   import qualified Data.Enumerator      as E
   import qualified Data.Enumerator.List as EL
-  import           Data.Enumerator (($$))
   import qualified Data.Sequence as S
   import           Data.Sequence ((|>))
   import qualified Data.ByteString.Char8 as B
@@ -22,19 +22,7 @@ where
   import           Control.Monad (unless)
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (AssertionFailed(..), 
-                                      try, throwIO, SomeException)
-
-  ------------------------------------------------------------------------
-  -- For debugging it's much nicer to work with digits
-  ------------------------------------------------------------------------
-  data Digit = Digit Int
-    deriving (Read, Eq, Ord)
-
-  instance Show Digit where
-    show (Digit d) = show d
-
-  instance Arbitrary Digit where
-    arbitrary = Digit <$> elements [0..9]
+                                      throwIO, SomeException)
 
   ------------------------------------------------------------------------------
   -- pass all gets all
@@ -100,7 +88,7 @@ where
   prp_onTmo = monadicIO $ run (withContext 1 tstDevice) >>= assert
     where go d m _ = do
             now <- getCurrentTime
-            threadDelay $ 2 * (fromIntegral d)
+            threadDelay $ 2 * fromIntegral d
             t   <- readMVar m
             if t > now && t <= uToNominal (3 * fromIntegral d)
                                `addUTCTime` now
@@ -275,10 +263,6 @@ where
                           issue pub (mkStream ss)
                           tstReceive m1 (Just ss) ~>
                             tstReceive m2 (Just ss))
-
-  infixr ~>
-  (~>) :: IO Bool -> IO Bool -> IO Bool
-  x ~> y = x >>= \r -> if r then y else return False
   
   ------------------------------------------------------------------------------
   -- unicode
@@ -430,41 +414,6 @@ where
                      if m 
                        then go (x:ls)
                        else return (x:ls)
- 
-  trycon :: Z.Socket a -> String -> IO ()
-  trycon s a = do ei <- try $ Z.connect s a
-                  case ei of
-                    Left  e -> do threadDelay 1000
-                                  let _ = show (e::SomeException)
-                                  trycon s a
-                    Right _ -> return ()
-
-  ------------------------------------------------------------------------
-  -- stream from list
-  ------------------------------------------------------------------------
-  mkStream :: [a] -> E.Enumerator a IO b
-  mkStream ss step = 
-    case step of
-      (E.Continue k) -> 
-        if null ss then E.continue k
-          else mkStream (tail ss) $$ k (E.Chunks [head ss])
-      _ -> E.returnI step  
-
-  ------------------------------------------------------------------------------
-  -- Just build up a list and store it in MVar
-  ------------------------------------------------------------------------------
-  makeList :: MVar [Int] -> E.Iteratee Int IO ()
-  makeList m = do
-    mb <- EL.head
-    case mb of
-      Nothing -> return ()
-      Just i  -> tryIO (modifyMVar_ m (\l -> return (i:l))) >> makeList m
-
-  ------------------------------------------------------------------------------
-  -- return a list in an MVar
-  ------------------------------------------------------------------------------
-  dump :: MVar [a] -> Dump a
-  dump m _ _ = EL.consume >>= liftIO . putMVar m
 
   ------------------------------------------------------------------------------
   -- return a list in an MVar
@@ -562,40 +511,6 @@ where
                    else emit  s trg os ignoreStream
           trg = filterTargets s (/= getStreamSource s)
     
-  -------------------------------------------------------------
-  -- controlled quickcheck, arbitrary tests
-  -------------------------------------------------------------
-  deepCheck :: (Testable p) => p -> IO Result
-  deepCheck = quickCheckWithResult stdArgs{maxSuccess=100,
-                                           maxDiscard=500}
-
-  -------------------------------------------------------------
-  -- do just one test
-  -------------------------------------------------------------
-  oneCheck :: (Testable p) => p -> IO Result
-  oneCheck = quickCheckWithResult stdArgs{maxSuccess=1,
-                                          maxDiscard=1}
-
-  -------------------------------------------------------------
-  -- combinator, could be a monad...
-  -------------------------------------------------------------
-  applyTest :: IO Result -> IO Result -> IO Result
-  applyTest r f = do
-    r' <- r
-    case r' of
-      Success _ -> f
-      x         -> return x
-
-  infixr ?>
-  (?>) :: IO Result -> IO Result -> IO Result
-  (?>) = applyTest
-
-  -------------------------------------------------------------
-  -- Name tests
-  -------------------------------------------------------------
-  runTest :: String -> IO Result -> IO Result
-  runTest s t = putStrLn ("Test: " ++ s) >> t
-
   checkAll :: IO ()
   checkAll = do
     let good = "OK. All Tests passed."
@@ -622,7 +537,7 @@ where
          runTest "Start/Pause" (deepCheck prp_Pause) ?> 
          runTest "add"         (deepCheck prp_add)
     case r of
-      Success _ -> do
+      Success {} -> do
         putStrLn good
         exitSuccess
       _ -> do

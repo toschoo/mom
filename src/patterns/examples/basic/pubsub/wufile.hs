@@ -1,5 +1,9 @@
 module Main 
 where
+ 
+  ------------------------------------------------------------------------
+  -- Simple weather report subscriber that writes to a file
+  ------------------------------------------------------------------------
 
   import           Helper (getOs, address, untilInterrupt, onErr_)
   import           Network.Mom.Patterns

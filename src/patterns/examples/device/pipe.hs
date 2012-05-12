@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- A simple pipeline (pusher -> puller)
+  ------------------------------------------------------------------------
+
   import           Helper (getPorts, address, onErr_, untilInterrupt)
   import           Network.Mom.Patterns
   import           Control.Concurrent

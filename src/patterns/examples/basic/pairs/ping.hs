@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- Playing ping pong
+  ------------------------------------------------------------------------
+
   import           Network.Mom.Patterns
   import qualified Data.Enumerator       as E
   import qualified Data.ByteString.Char8 as B

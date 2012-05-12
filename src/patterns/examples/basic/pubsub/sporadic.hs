@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- Simple sporadic subscriber (just writing to stdout)
+  ------------------------------------------------------------------------
+
   import           Helper (getOs, address, untilInterrupt)
   import           Network.Mom.Patterns
   import qualified Data.ByteString.Char8 as B

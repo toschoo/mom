@@ -1,24 +1,23 @@
 Name:            patterns
-Version:         0.0.2
-Cabal-Version:   >= 1.8
+Version:         0.0.3
+Cabal-Version:   >= 1.14.0
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2012
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
 Category:        Network, Message-oriented Middleware, zeromq
-Homepage:        http://github.com/toschoo/mom/src/patterns
+Homepage:        http://github.com/toschoo/mom
 Build-Type:      Simple
 Synopsis:        Common patterns in message-oriented applications
 Description:
 
-  There are common patterns often reused 
-  - or, in fact, reimplemented,
-  in many distributed, message-oriented applications,
+  In distributed, message-oriented applications,
+  similar communication patterns are used over and over again,
   such as Server\/Client (a.k.a Request\/Response),
-         Publish\/Subscribe,
-         Pipline (a.k.a. Push\/Pull) and
-         Exclusive Pair (a.k.a. Peer-to-Peer).
+          Publish\/Subscribe,
+          Pipline (a.k.a. Push\/Pull) and
+          Exclusive Pair (a.k.a. Peer-to-Peer).
   The Patterns package implements those patterns based on zeromq.
 
   More information on zeromq can be found at
@@ -28,14 +27,16 @@ Description:
   on <http://github.com/toschoo/mom>.
 
 Library
-  Build-Depends:   base        >= 4.0 && <= 5.0,
-                   bytestring  >= 0.9.1.9,
-                   utf8-string >= 0.3.6,
-                   containers >= 0.3.0.0,
-                   zeromq-haskell >= 0.8.3,
-                   enumerator >= 0.4.11,
+  Build-Depends:   base        >= 4.5 && <= 5.0,
+                   bytestring  >= 0.9.2.1,
+                   utf8-string >= 0.3.7,
+                   containers >= 0.4.2.1,
+                   zeromq-haskell >= 0.8.4,
+                   enumerator >= 0.4.18,
                    mtl         >= 2.0.1.0,
-                   time        >= 1.1.4
+                   time        >= 1.4
+
+  default-language: Haskell98
 
   hs-source-dirs: src/Network/Mom, src
                    

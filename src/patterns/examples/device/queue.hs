@@ -1,6 +1,10 @@
 module Main 
 where
 
+  ------------------------------------------------------------------------
+  -- Simple queue (client <-> server)
+  ------------------------------------------------------------------------
+
   import           Helper (getPorts, untilInterrupt, address, onErr_)
   import           Network.Mom.Patterns
   import           Control.Concurrent

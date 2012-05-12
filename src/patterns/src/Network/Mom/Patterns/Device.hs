@@ -89,8 +89,8 @@ where
                 (Parameter -> OnTimeout)         ->
                 (Parameter -> Transformer o)     ->
                 (Service -> IO a)                -> IO a
-  withDevice ctx name param tmo acs iconv oconv onerr ontmo trans action =
-    withService ctx name param service action
+  withDevice ctx name param tmo acs iconv oconv onerr ontmo trans =
+    withService ctx name param service 
     where service = device_ tmo acs iconv oconv onerr ontmo trans
 
   ------------------------------------------------------------------------

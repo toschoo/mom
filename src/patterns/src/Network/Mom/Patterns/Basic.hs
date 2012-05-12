@@ -212,8 +212,8 @@ where
                 (String  -> E.Iteratee c IO i) ->
                 Fetch i o                      -> 
                 (Service -> IO a)              -> IO a
-  withServer ctx name param n ac t iconv oconv onerr build fetch action =
-    withService ctx name param service action
+  withServer ctx name param n ac t iconv oconv onerr build fetch =
+    withService ctx name param service 
     where service = serve n ac t iconv oconv onerr 
                           build fetch
 
@@ -633,8 +633,8 @@ where
                      OnError_            ->
                      Fetch_ o            -> 
                      (Service -> IO a)   -> IO a
-  withPeriodicPub ctx name param period ac oconv onerr fetch action =
-    withService ctx name param service action
+  withPeriodicPub ctx name param period ac oconv onerr fetch =
+    withService ctx name param service 
     where service = publish period ac oconv onerr fetch
 
   ------------------------------------------------------------------------
@@ -728,8 +728,8 @@ where
              InBound i -> OnError_  ->
              Dump i                 -> 
              (Service -> IO a)      -> IO a
-  withSub ctx name param sub ac iconv onErr dump action =
-    withService ctx name param service action
+  withSub ctx name param sub ac iconv onErr dump =
+    withService ctx name param service 
     where service = subscribe sub ac iconv onErr dump
 
   subscribe :: [Topic]     -> 
@@ -893,8 +893,8 @@ where
                 OnError_            ->
                 Dump   i            -> 
                 (Service -> IO a)   -> IO a
-  withPuller ctx name param ac iconv onerr dump action =
-    withService ctx name param service action
+  withPuller ctx name param ac iconv onerr dump =
+    withService ctx name param service 
     where service = pull ac iconv onerr dump 
 
   pull :: AccessPoint          ->

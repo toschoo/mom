@@ -1,7 +1,7 @@
 module Main
 where
   ------------------------------------------------------------------------
-  -- Sends the poem "Stopping by Woods on a Snowy Evening on request
+  -- Sends the poem "Stopping by Woods on a Snowy Evening" on request
   ------------------------------------------------------------------------
 
   import           Helper (getOs, address, onErr, 

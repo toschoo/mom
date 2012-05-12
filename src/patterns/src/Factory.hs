@@ -1,4 +1,3 @@
-{-# OPTIONS -fglasgow-exts -fno-cse #-}
 module Factory (
         mkUniqueId)
 where
