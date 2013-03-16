@@ -913,7 +913,8 @@ where
   ------------------------------------------------------------------------
   -- do the job 
   ------------------------------------------------------------------------
-    where go sock p = E.run_  (rcvEnum sock iconv $$ dump ctx p)
+    where go sock p = (do putStrLn "Running Worker Job"
+                          E.run_  (rcvEnum sock iconv $$ dump ctx p))
                       `catch` (\e -> onerr Error e name p)
  
   ------------------------------------------------------------------------
