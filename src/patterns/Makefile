@@ -8,41 +8,42 @@ OUTDIR = ./test/out
 SUTDIR = src/Network/Mom
 SRCDIR = src
 
-SUBSRC = $(SUTDIR)/Patterns.hs \
-	 $(SUTDIR)/Patterns/Basic.hs \
-	 $(SUTDIR)/Patterns/Device.hs \
-	 $(SUTDIR)/Patterns/Enumerator.hs \
-	 $(SRCDIR)/Factory.hs \
-	 $(SRCDIR)/Types.hs \
-	 $(SRCDIR)/Service.hs \
-         $(HELPER)/Helper.hs
+SUBSRC = $(SUTDIR)/Patterns/Streams/Streams.hs \
+ 	 $(SUTDIR)/Patterns/Streams/Types.hs \
+ 	 $(SUTDIR)/Patterns/Basic/Client.hs \
+ 	 $(SUTDIR)/Patterns/Basic/Server.hs \
+	 $(SUTDIR)/Patterns/Basic/Publisher.hs \
+	 $(SUTDIR)/Patterns/Basic/Subscriber.hs \
+	 $(SUTDIR)/Patterns/Basic/Pusher.hs \
+	 $(SUTDIR)/Patterns/Basic/Puller.hs \
+	 $(SUTDIR)/Patterns/Broker/Common.hs \
+	 $(SUTDIR)/Patterns/Broker/Broker.hs \
+	 $(SUTDIR)/Patterns/Broker/Client.hs \
+	 $(SUTDIR)/Patterns/Broker/Server.hs \
+	 $(SRCDIR)/broker/Registry.hs
 
 GHC = ghc
 FLGS = -DTEST -Wall --make -threaded
 INC  =	-i./src \
+	-i./src/broker \
 	-i./test/smoke \
 	-i./test/suite \
 	-i./test/common \
 	-i../test/common \
 	-i./examples/common
 
-suite:	$(TDIR)/enum \
-	$(TDIR)/basic \
-	$(TDIR)/device
+suite:	$(TDIR)/streams \
+	$(TDIR)/broker/registry
 
 run:	
-	$(TDIR)/enum
-	$(TDIR)/basic
-	$(TDIR)/device
+	$(TDIR)/streams
+	$(TDIR)/broker/registry
 
-$(TDIR)/enum:	$(TDIR)/enum.hs $(TDIR)/Common.hs $(SUBSRC)
-		$(GHC) $(FLGS) $(INC) $@
+$(TDIR)/streams:	$(TDIR)/streams.hs $(TDIR)/Common.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
 
-$(TDIR)/basic:	$(TDIR)/basic.hs $(TDIR)/Common.hs $(SUBSRC)
-		$(GHC) $(FLGS) $(INC) $@
-
-$(TDIR)/device:	$(TDIR)/device.hs $(TDIR)/Common.hs $(SUBSRC)
-		$(GHC) $(FLGS) $(INC) $@
+$(TDIR)/broker/registry:	$(TDIR)/broker/registry.hs $(TDIR)/Common.hs $(SUBSRC)
+				$(GHC) $(FLGS) $(INC) $@
 
 smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
@@ -71,7 +72,10 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/pipe1 \
 	$(SMOKEDIR)/queue1 \
 	$(SMOKEDIR)/queue2 \
-	$(SMOKEDIR)/cmd
+	$(SMOKEDIR)/stream \
+	$(SMOKEDIR)/client1 \
+	$(SMOKEDIR)/olleh \
+	$(SMOKEDIR)/broker \
 
 $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -154,7 +158,22 @@ $(SMOKEDIR)/queue1:	$(SMOKEDIR)/queue1.hs $(SUBSRC)
 $(SMOKEDIR)/queue2:	$(SMOKEDIR)/queue2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-$(SMOKEDIR)/cmd:	$(SMOKEDIR)/cmd.hs $(SUBSRC)
+$(SMOKEDIR)/stream:	$(SMOKEDIR)/stream.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/client1:	$(SMOKEDIR)/client1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/olleh:	$(SMOKEDIR)/olleh.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/pubsub:	$(SMOKEDIR)/pubsub.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/pipe:	$(SMOKEDIR)/pipe.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/broker:	$(SMOKEDIR)/broker.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 
@@ -163,10 +182,22 @@ clean:
 	rm -f $(SUTDIR)/*.o
 	rm -f $(SUTDIR)/Patterns/*.hi
 	rm -f $(SUTDIR)/Patterns/*.o
+	rm -f $(SUTDIR)/Patterns/Streams/*.hi
+	rm -f $(SUTDIR)/Patterns/Streams/*.o
+	rm -f $(SUTDIR)/Patterns/Basic/*.hi
+	rm -f $(SUTDIR)/Patterns/Basic/*.o
+	rm -f $(SUTDIR)/Patterns/Broker/*.hi
+	rm -f $(SUTDIR)/Patterns/Broker/*.o
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
+	rm -f $(TDIR)/streams
+	rm -f $(TDIR)/broker/*.hi
+	rm -f $(TDIR)/broker/*.o
+	rm -f $(TDIR)/broker/registry
 	rm -f $(SRCDIR)/*.hi
 	rm -f $(SRCDIR)/*.o
+	rm -f $(SRCDIR)/broker/*.hi
+	rm -f $(SRCDIR)/broker/*.o
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
 	rm -f $(HELPER)/*.hi
@@ -201,7 +232,14 @@ clean:
 	rm -f $(SMOKEDIR)/pipe1
 	rm -f $(SMOKEDIR)/queue1
 	rm -f $(SMOKEDIR)/queue2
-	rm -f $(SMOKEDIR)/cmd
+	rm -f $(SMOKEDIR)/stream
+	rm -f $(SMOKEDIR)/client1
+	rm -f $(SMOKEDIR)/olleh
+	rm -f $(SMOKEDIR)/conduit
+	rm -f $(SMOKEDIR)/broker
+	rm -f $(SMOKEDIR)/pipe
+	rm -f $(SMOKEDIR)/pubsub
+	rm -f $(SMOKEDIR)/zmqpubsub
 	rm -f $(OUTDIR)/*.txt
 
 dist-clean:	clean

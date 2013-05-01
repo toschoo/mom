@@ -51,7 +51,7 @@ where
       may <- concat <$> (mapM (mkHdr May ) $ getHdrs t May)
       mk  <- getMk t
       case mk (mst ++ may) of 
-        Left e  -> error e
+        Left  e -> error e
         Right f -> return f
 
   -- get a "frame maker" -------------------------------------------------
@@ -594,6 +594,6 @@ where
       else do
         r <- deepCheck prp_Parse
         case r of
-          Success _ -> exitSuccess
-          _         -> do putStrLn "Bad. Some tests failed"
-                          exitFailure
+          Success _ _ _ -> exitSuccess
+          _             -> do putStrLn "Bad. Some tests failed"
+                              exitFailure
