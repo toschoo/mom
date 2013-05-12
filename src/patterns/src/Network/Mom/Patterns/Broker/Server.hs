@@ -35,52 +35,16 @@ where
                 onTmo
                 onErr
                 job $ \c ->
-      finally (send c ["client"] connect >> act c)
-              (putStrLn "disconnect") -- send c S.outStream disconnect)
+      finally (send c ["client"] (mdpWConnect srv) >> act c)
+              (putStrLn "disconnect") -- send c S.outStream mdpWDisconnect)
     where job s = mdpServe s =$ passAll s ["client"]
-          connect    = streamList [B.empty, -- identity delimiter
-                                   B.empty,
-                                   mdpW01, 
-                                   xReady, 
-                                   B.pack srv]
-          disconnect = streamList [B.empty, -- identity delimiter
-                                   B.empty, 
-                                   mdpW01,
-                                   xDisc]
           mdpServe s = do
-            f <- getMDP
+            f <- mdpWRcvReq
             case f of
-              RequestFrame is -> serve s =$= mdpOut is
-              BeatFrame       -> propagateList beat
-              DiscFrame       -> liftIO (throwIO $ ProtocolExc 
+              WRequest is -> serve s =$= mdpWSndRep is
+              WBeat    i  -> mdpWBeat
+              WDisc    i  -> liftIO (throwIO $ ProtocolExc 
                                            "Broker disconnects")
-          getMDP = do
-            empty -- identity delimiter
-            empty
-            protocol
-            t <- frameType
-            case t of
-              HeartBeatT  -> return BeatFrame
-              DisconnectT -> return DiscFrame
-              RequestT    -> RequestFrame <$> identities
-              x           -> liftIO (throwIO $ ProtocolExc $ 
-                                       "Unexpected Frame: " ++ show x)
-          protocol   = chunk mdpW01 "Unknwon Protocol"
-          mdpOut is  = propagateList (mdpHead is) >> passThrough
-          beat       = [B.empty,
-                        B.empty,
-                        mdpW01,
-                        xHeartBeat]
-          mdpHead is = [B.empty, -- identity delimiter
-                        B.empty,
-                        mdpW01,
-                        xReply] ++ toIs is ++ [B.empty]
+              x           -> liftIO (throwIO $ Ouch 
+                                       "Unknown frame from Broker!")
                         
-  ------------------------------------------------------------------------
-  -- Broker Messages 
-  ------------------------------------------------------------------------
-  data Frame = RequestFrame [Identity] 
-             | BeatFrame
-             | DiscFrame
-    deriving (Eq, Show)
-

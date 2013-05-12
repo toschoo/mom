@@ -40,13 +40,7 @@ where
     runReceiver (clSock c) tmo $ mdpSnk (clService c) snk
     
   mdpSrc :: Service -> Source -> Source
-  mdpSrc sn src = src $= mdp 
-    where mdp = mapM_ C.yield [B.empty, B.empty, mdpC01, BC.pack sn] 
-                >> passThrough
+  mdpSrc sn src = src $= mdpCSndReq sn 
 
   mdpSnk :: Service -> SinkR (Maybe a) -> SinkR (Maybe a)
-  mdpSnk sn snk = mdp =$ snk
-    where mdp         = empty >> empty >> protocol >> serviceName 
-                        >> passThrough
-          protocol    = chunk mdpC01 "Unknown Protocol"
-          serviceName = chunk (BC.pack sn) "Wrong service"
+  mdpSnk sn snk = mdpCRcvRep sn =$ snk

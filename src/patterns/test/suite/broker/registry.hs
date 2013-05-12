@@ -9,9 +9,9 @@ where
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
 
-  import           Registry -- <--- SUT
+  import           Registry  -- <--- SUT
+  import           Heartbeat -- <--- SUT
 
-  -- import           Network.Mom.Patterns
   import           Data.List (nub, delete, sort)
   import qualified Data.ByteString.Char8 as B
   import           Data.Time.Clock
@@ -66,7 +66,7 @@ where
     let ws = map (makeW mq) is
     f <- run $ modifyMVar mq $ \q -> do
             let q1 = mapQ ws q insertQ
-            let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Free q)
+            let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Free id q)
             returnFree q2
     assert (f == is)
 
@@ -77,7 +77,7 @@ where
     let ws = map (makeW mq) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
-                      let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Busy q)
+                      let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Busy id q)
                       returnBoth q2
     assert (null f && b == is)
 
@@ -88,8 +88,8 @@ where
     let ws = map (makeW mq) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
-                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy qx)
-                      let q3 = mapQ ws q2 (\w qx -> setStateQ (fst w) Free qx)
+                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
+                      let q3 = mapQ ws q2 (\w qx -> setStateQ (fst w) Free id qx)
                       returnBoth q3
     assert (null b && f == is)
 
@@ -100,8 +100,8 @@ where
     let ws = map (makeW mq) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
-                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy qx)
-                      let q3 = mapQ ws q2 (\w qx -> setStateQ (fst w) Busy qx)
+                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
+                      let q3 = mapQ ws q2 (\w qx -> setStateQ (fst w) Busy id qx)
                       returnBoth q3
     assert (null f && b == is)
 
@@ -114,7 +114,7 @@ where
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let w  = B.pack $ is!!ix
                       let q1 = mapQ ws q insertQ
-                      let q2 = setStateQ w Busy q1
+                      let q2 = setStateQ w Busy id q1
                       returnBoth q2
     assert (f == delete (is!!ix) is && b == [is!!ix])
 
@@ -140,7 +140,7 @@ where
     ix <- pick $ choose (0, length is - 1)
     (_, b, w) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
-                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy qx)
+                      let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
                       let w  = firstBusyQ q2
                       returnBothMore q2 w
     case w of
@@ -175,7 +175,7 @@ where
 
   prpStatsPerService :: NonEmptyList (NonEmptyList Char) -> Property
   prpStatsPerService ns = let is = nub $ nonemptyString ns
-                     in monadicIO $ do
+                           in monadicIO $ do
     run $ clean
     run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
     n <- pick $ choose (1, length is)
@@ -186,6 +186,98 @@ where
             length sAll == 1  &&
             head sAll == sSrv && 
             sSrv == (B.pack "Test", length is - n, n)) 
+
+  prpNextHB :: NonEmptyList (NonEmptyList Char) -> Property
+  prpNextHB ns = let is = nub $ nonemptyString ns
+                  in monadicIO $ do
+    let sn = B.pack "Test"
+    run $ clean
+    run $ mapM_ (\i -> insert (B.pack i) sn) is
+    xs <- run $ checkWorker
+    assert (null xs)
+
+  prpCheckSnd :: NonEmptyList (NonEmptyList Char) -> Property
+  prpCheckSnd ns = let is = map B.pack $ nub $ nonemptyString ns
+                    in monadicIO $ do
+    let sn = B.pack "Test"
+    run $ do clean
+             mapM_ (\i -> insert i sn) is
+             setBack (-10000) is
+    xs <- run $ checkWorker
+    assert (xs == take nbCheck is)
+
+  prpCheckBurries :: NonEmptyList (NonEmptyList Char) -> Property
+  prpCheckBurries ns = let is = map B.pack $ nub $ nonemptyString ns
+                     in monadicIO $ do
+    let sn = B.pack "Test"
+    (xs, ys, zs, n1 , n2) <- run $ do 
+      clean
+      mapM_ (\i -> insert i sn) is
+      n1 <- size
+      xs <- checkWorker -- free
+      _  <- checkWorker -- busy
+      setBack (-10000) is
+      ys <- checkWorker -- free
+      _  <- checkWorker -- busy
+      setBack (-10000) is
+      zs <- checkWorker
+      n2 <- size
+      return (xs, ys, zs, n1, n2)
+    assert (null xs                &&
+            ys == take nbCheck is  &&
+            zs == take nbCheck (drop nbCheck is) &&
+            n1 > n2 &&
+            (n1 < nbCheck || n2 == n1 - nbCheck))
+
+  prpGetBurries :: NonEmptyList (NonEmptyList Char) -> Property
+  prpGetBurries ns = let is = map B.pack $ nub $ nonemptyString ns
+                     in monadicIO $ do
+    let sn = B.pack "Test"
+    (xs, ys, n1, n2) <- run $ do 
+      clean
+      mapM_ (\i -> insert i sn) is
+      n1 <- size
+      setBack (-10000) is
+      xs <- checkWorker -- free
+      _  <- checkWorker -- busy
+      setBack (-10000) is
+      mapM_ (\_ -> getWorker sn) is
+      setBack (-10000) is
+      _  <- checkWorker -- free
+      ys <- checkWorker -- busy
+      n2 <- size
+      return (xs, ys, n1, n2)
+    assert (xs == take nbCheck is  &&
+            ys == take nbCheck (drop nbCheck is) &&
+            n1 > n2 &&
+            (n1 < nbCheck || n2 == n1 - nbCheck))
+
+  prpFreeDead :: NonEmptyList (NonEmptyList Char) -> Property
+  prpFreeDead ns = let is = map B.pack $ nub $ nonemptyString ns
+                     in monadicIO $ do
+    let sn = B.pack "Test"
+    (xs, ys) <- run $ do 
+      clean
+      mapM_ (\i -> insert i sn) is
+      mapM_ (\_ -> getWorker sn) is
+      setBack (-10000) is
+      _  <- checkWorker -- free
+      xs <- checkWorker -- busy
+      setBack (-10000) is
+      mapM_ (\i -> freeWorker i) is
+      setBack (-10000) is
+      ys <- checkWorker -- free
+      _  <- checkWorker -- busy
+      return (xs, ys)
+    assert (xs == take nbCheck is  &&
+            ys == take nbCheck is)  
+
+  setBack :: Msec -> [B.ByteString] -> IO ()
+  setBack ms = mapM_ (\i -> updWorker i setTime) 
+    where setTime (i, w) = 
+            let hb  = wrkHB w 
+                hb2 = hb {hbNextHB = timeAdd (hbNextHB hb) ms}
+             in (i, w {wrkHB = hb2})
 
   returnFree :: Queue -> IO (Queue, [String])
   returnFree q = return (q, map (B.unpack . fst) $ toList $ qFree q)
@@ -217,6 +309,16 @@ where
   mapQ :: [WrkNode] -> Queue -> (WrkNode -> Queue -> Queue) -> Queue
   mapQ []     q _ = q
   mapQ (w:ws) q f = mapQ ws (f w q) f
+
+  makeW2 :: MVar Queue -> Msec -> String -> IO WrkNode
+  makeW2 mq ms s = do
+     hb <- newHeartbeat	ms
+     let i = B.pack s
+     return (i, Worker {
+                  wrkId    = i,
+                  wrkState = Free,
+                  wrkHB    = hb,
+                  wrkQ     = mq})
 
   makeW :: MVar Queue -> String -> WrkNode
   makeW mq s = let i = B.pack s
@@ -259,6 +361,16 @@ where
                   (deepCheck prpInsertSize)            ?>
          runTest "Insert all (same Service)"
                   (deepCheck prpInsertAll)             ?> 
+         runTest "Insert - NextHB = now + x"
+                  (deepCheck prpNextHB)                ?> 
+         runTest "Check finds hb for send"
+                  (deepCheck prpCheckSnd)              ?> 
+         runTest "Check burries the dead"
+                  (deepCheck prpCheckBurries)          ?> 
+         runTest "Get   burries the dead"
+                  (deepCheck prpGetBurries)            ?> 
+         runTest "Free the dead"
+                  (deepCheck prpFreeDead)              ?> 
          runTest "Stats"
                   (deepCheck prpStatsPerService)    
 

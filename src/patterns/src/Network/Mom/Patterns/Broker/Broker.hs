@@ -10,6 +10,7 @@ where
   import qualified Data.ByteString        as B
   import qualified Data.ByteString.Char8  as BC
   import qualified Data.Conduit           as C
+  import           Data.Conduit ((=$), ($$))
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
@@ -22,11 +23,16 @@ where
   withBroker :: Context  -> Service -> String -> String -> 
                 OnError_ -> (Controller -> IO ())       -> IO ()
   withBroker ctx srv aClients aServers onerr = 
-    withStreams ctx srv 1000000 -- (-1)
+    withStreams ctx srv 10000
                    [Poll "servers" aServers RouterT Bind [] [],
                     Poll "clients" aClients RouterT Bind [] []]
-                   (\_ -> return ()) onerr
-                   handleStream
+                   onTmo onerr handleStream 
+    where onTmo s = do
+            is <- R.checkWorker
+            mapM_ (sndHb s) is
+          hbM i = [i, B.empty, mdpW01, xHeartBeat]
+          sndHb s i = C.runResourceT $ streamList (hbM i) $$  
+                                       passAll s ["servers"]
  
   ------------------------------------------------------------------------
   -- Handle incoming Streams
@@ -40,68 +46,28 @@ where
   ------------------------------------------------------------------------
   recvClient :: StreamSink
   recvClient s = do
-    is  <- identities
-    protocol
-    sn  <- getChunk   -- service name
-    mbW <- liftIO $ R.getWorker sn
+    (i, sn) <- mdpCRcvReq
+    mbW     <- liftIO $ R.getWorker sn
     case mbW of
       Nothing -> noWorker sn
       Just w  -> let trg = filterStreams s (== "servers")
-                  in do part    s trg (c2w w is) 
-                        passAll s trg
-    where c2w w is = [w, B.empty, -- identity
-                      B.empty,
-                      mdpW01,
-                      xRequest] ++ toIs is ++ [B.empty]
-          noWorker sn = liftIO $ putStrLn $ 
+                  in mdpWSndReq w [i] =$ passAll s trg
+    where noWorker sn = liftIO $ putStrLn $ 
                                    "No Worker for service " ++ 
                                                   BC.unpack sn
-          protocol    = chunk mdpC01 "Unknown Protocol"
-
-  ------------------------------------------------------------------------
-  -- Worker frames
-  ------------------------------------------------------------------------
-  data WFrame = WBeat  Identity
-              | WReady Identity B.ByteString
-              | WReply Identity [Identity]
-              | WDisc  Identity
-    deriving (Eq, Show)
 
   ------------------------------------------------------------------------
   -- Receive stream from worker 
   ------------------------------------------------------------------------
   recvWorker :: StreamSink 
   recvWorker s = do
-    f <- getFrame 
+    f <- mdpWRcvRep
     case f of
-      WBeat  w    -> return () -- heartbeating
+      WBeat  w    -> liftIO (putStrLn "beat") >> liftIO (R.updWorkerHb w)
       WReady w sn -> liftIO $ R.insert w sn
       WReply w is -> handleReply w is s 
       WDisc  w    -> liftIO $ R.remove w
-
-  ------------------------------------------------------------------------
-  -- Stream to Frame
-  ------------------------------------------------------------------------
-  getFrame :: SinkR WFrame
-  getFrame = do
-    w <- getId
-    protocol
-    t <- frameType
-    case t of
-      HeartBeatT  -> return $ WBeat w
-      DisconnectT -> return $ WDisc w
-      ReadyT      -> WReady w <$> getSrvName
-      ReplyT      -> getRep w
-      x           -> liftIO $ throwIO $ ProtocolExc $
-                       "Unexpected Frame from Worker: " ++ show x
-    where protocol   = chunk mdpW01 "Unknown Protocol"
-          getSrvName = getChunk
-          getId      = do ws <- identities
-                          when (null ws) $ liftIO $ throwIO $ 
-                                           ProtocolExc "No Worker Id!"
-                          return $ head ws
-          getRep w   = do is <- identities
-                          return $ WReply w is 
+      _           -> liftIO $ throwIO $ Ouch "Unexpected Frame from Worker!"
 
   ------------------------------------------------------------------------
   -- Handle reply
@@ -113,14 +79,5 @@ where
       Nothing -> liftIO $ throwIO $ ProtocolExc "Unknown Worker"
       Just sn -> do sendReply sn is s
                     liftIO $ R.freeWorker w
-
-  ------------------------------------------------------------------------
-  -- Send reply to client
-  ------------------------------------------------------------------------
-  sendReply :: B.ByteString -> [Identity] -> StreamSink
-  sendReply sn is s = let trg = filterStreams s (== "clients")
-                       in do part    s trg w2c 
-                             passAll s trg
-    where w2c = toIs is ++ [B.empty,
-                            mdpC01,
-                            sn]
+    where sendReply sn is s = let trg = filterStreams s (== "clients")
+                               in mdpCSndRep sn is =$ passAll s trg

@@ -35,10 +35,10 @@ where
   type Body        = [B.ByteString]
 
   type RIO     = C.ResourceT IO
-  type Source  = C.Source RIO B.ByteString 
+  type Source  = C.Source RIO B.ByteString -- make it a producer!
   type Sink    = C.Sink       B.ByteString RIO ()
 
-  type SinkR a = C.Sink       B.ByteString RIO a
+  type SinkR a = C.Sink       B.ByteString RIO a -- make it a consumer!
 
   type Conduit o r = C.ConduitM   B.ByteString o RIO r
 

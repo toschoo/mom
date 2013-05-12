@@ -20,7 +20,9 @@ SUBSRC = $(SUTDIR)/Patterns/Streams/Streams.hs \
 	 $(SUTDIR)/Patterns/Broker/Broker.hs \
 	 $(SUTDIR)/Patterns/Broker/Client.hs \
 	 $(SUTDIR)/Patterns/Broker/Server.hs \
-	 $(SRCDIR)/broker/Registry.hs
+	 $(SUTDIR)/Patterns/Broker/Bridge.hs \
+	 $(SRCDIR)/broker/Registry.hs \
+	 $(SRCDIR)/broker/Heartbeat.hs
 
 GHC = ghc
 FLGS = -DTEST -Wall --make -threaded
@@ -76,6 +78,7 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/client1 \
 	$(SMOKEDIR)/olleh \
 	$(SMOKEDIR)/broker \
+	$(SMOKEDIR)/bridge 
 
 $(SMOKEDIR)/db:		$(SMOKEDIR)/db.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -176,6 +179,9 @@ $(SMOKEDIR)/pipe:	$(SMOKEDIR)/pipe.hs $(SUBSRC)
 $(SMOKEDIR)/broker:	$(SMOKEDIR)/broker.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/bridge:	$(SMOKEDIR)/bridge.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 
 clean:
 	rm -f $(SUTDIR)/*.hi
@@ -237,9 +243,11 @@ clean:
 	rm -f $(SMOKEDIR)/olleh
 	rm -f $(SMOKEDIR)/conduit
 	rm -f $(SMOKEDIR)/broker
+	rm -f $(SMOKEDIR)/bridge
 	rm -f $(SMOKEDIR)/pipe
 	rm -f $(SMOKEDIR)/pubsub
 	rm -f $(SMOKEDIR)/zmqpubsub
+	rm -f $(SMOKEDIR)/zmqrouter
 	rm -f $(OUTDIR)/*.txt
 
 dist-clean:	clean
