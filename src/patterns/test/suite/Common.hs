@@ -10,6 +10,7 @@ where
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad.Trans (liftIO)
+  import           Control.Monad (when)
   import           Control.Exception (try, SomeException)
 
   ------------------------------------------------------------------------
@@ -34,13 +35,15 @@ where
   ------------------------------------------------------------------------------
   -- Generic Tests
   ------------------------------------------------------------------------------
-  testContext :: Eq a => a -> 
+  testContext :: (Show a, Eq a) => a -> 
                  (Context -> IO (Either SomeException a)) -> Property
   testContext ss action = monadicIO $ do
     ei <- run $ withContext 1 action 
     case ei of
       Left  e -> run (print e) >> assert False
-      Right x -> assert (x == ss)
+      Right x -> do when (x /= ss) $ run (do putStrLn "differs: "
+                                             print x)
+                    assert (x == ss)
       
   ------------------------------------------------------------------------------
   -- Generic Server Tests
@@ -78,8 +81,8 @@ where
   -- controlled quickcheck, arbitrary tests
   -------------------------------------------------------------
   deepCheck :: (Testable p) => p -> IO Result
-  deepCheck = quickCheckWithResult stdArgs{maxSuccess=100,
-                                           maxDiscard=500}
+  deepCheck = quickCheckWithResult stdArgs{maxSuccess=1000,
+                                           maxDiscard=5000}
 
   -------------------------------------------------------------
   -- do just one test

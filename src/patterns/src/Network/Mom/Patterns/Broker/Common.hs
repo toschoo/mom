@@ -2,16 +2,12 @@
 module Network.Mom.Patterns.Broker.Common
 where
 
-  import           Network.Mom.Patterns.Streams.Streams
   import           Network.Mom.Patterns.Streams.Types
 
   import qualified Data.ByteString.Char8  as B
   import qualified Data.ByteString        as BB
-  import           Data.Word
-  import           Data.Typeable (Typeable)
   import qualified Data.Conduit as C
-  import qualified Data.Conduit.List as CL
-  import           Control.Monad (unless)
+  import           Control.Monad (unless, when)
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (throwIO)
   import           Control.Applicative ((<$>))
@@ -28,6 +24,15 @@ where
   xDisc      = BB.pack [0x05]
 
   type ServiceName = String
+
+  mmiHdr, mmiSrv :: B.ByteString 
+  mmiHdr = B.pack "mmi."
+  mmiSrv = B.pack "service"
+  
+  mmiFound, mmiNotFound, mmiNimpl :: B.ByteString
+  mmiFound    = B.pack "200"
+  mmiNotFound = B.pack "404"
+  mmiNimpl    = B.pack "501"
 
   mdpCSndReq :: ServiceName -> Conduit B.ByteString ()
   mdpCSndReq sn = mapM_ C.yield [B.empty, mdpC01, B.pack sn] >> passThrough
@@ -66,10 +71,10 @@ where
                                    " -- expected: Worker 0.1")
 
   mdpWSndRep :: [Identity] -> Conduit B.ByteString ()
-  mdpWSndRep  is = propagateList (hdr is) >> passThrough
-    where hdr is = [B.empty, -- identity delimiter
-                    mdpW01,
-                    xReply] ++ toIs is ++ [B.empty]
+  mdpWSndRep is = streamList hdr >> passThrough
+    where hdr = [B.empty, -- identity delimiter
+                 mdpW01,
+                 xReply] ++ toIs is ++ [B.empty]
  
   mdpWRcvRep :: Conduit o WFrame
   mdpWRcvRep = do
@@ -88,28 +93,10 @@ where
           getRep w   = do is <- envelope
                           return $ WReply w is 
 
-  -- to be done:
-  -- receive either client or worker request
-  {-
-  mdpXRcvReq :: ServiceName -> Conduit o Request
-  mdpXRcvReq sn = do empty 
-                     p <- getChunk
-                     getTheRest p
-    where getTheRest p | p == mdpW01 = mdpWRcvReq
-                       | p == mdpC01 = mdpCRcvReq 
-                       | otherwise   = liftIO (throwIO $ ProtocolExc $
-                                                 "Unknown protocol: " ++ 
-                                                 B.unpack p)
-
-  data Request = CReq Identity B.ByteString
-               | WReq WFrame
-  -}
-
   mdpWBeat :: Conduit B.ByteString ()
-  mdpWBeat = propagateList beat
-    where beat = [B.empty,
-                  mdpW01,
-                  xHeartBeat]
+  mdpWBeat = streamList [B.empty,
+                         mdpW01,
+                         xHeartBeat]
 
 
   mdpWConnect :: ServiceName -> Source
@@ -122,6 +109,8 @@ where
                                mdpW01,
                                xDisc]
 
+  mdpWBrkDisc :: Identity -> Source
+  mdpWBrkDisc i = streamList [i] >> mdpWDisconnect
 
   ------------------------------------------------------------------------
   -- Worker frames
@@ -150,6 +139,24 @@ where
               | t == xRequest   -> return RequestT
               | otherwise       -> liftIO (throwIO $ ProtocolExc $ 
                                      "Unknown Frame: " ++ B.unpack t)
+
+  empty :: Conduit o ()
+  empty = chunk B.empty "Missing Separator"
+
+  chunk :: B.ByteString -> String -> Conduit o ()
+  chunk p e = do
+    mb <- C.await
+    case mb of
+      Nothing -> liftIO (throwIO $ ProtocolExc $ "Incomplete Message: " ++ e) 
+      Just x  -> unless (x == p) $ liftIO (throwIO $ ProtocolExc (e ++ ": " ++ 
+                                                                  show x))
+  getChunk :: Conduit o B.ByteString
+  getChunk = do
+    mb <- C.await
+    case mb of
+      Nothing -> liftIO (throwIO $ ProtocolExc "Incomplete Message")
+      Just x  -> return x
+
 
   identity :: Conduit o Identity
   identity = do

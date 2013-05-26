@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable,RankNTypes #-}
 module Network.Mom.Patterns.Streams.Types
 where
 
@@ -35,27 +35,20 @@ where
   type Body        = [B.ByteString]
 
   type RIO     = C.ResourceT IO
-  type Source  = C.Source RIO B.ByteString -- make it a producer!
-  type Sink    = C.Sink       B.ByteString RIO ()
-
-  type SinkR a = C.Sink       B.ByteString RIO a -- make it a consumer!
+  type Source  = C.Source RIO B.ByteString  
+  type Sink    = C.Sink B.ByteString RIO () 
+  type SinkR r = C.Sink B.ByteString RIO r 
 
   type Conduit o r = C.ConduitM   B.ByteString o RIO r
 
-  streamList :: [B.ByteString] -> Source
+  streamList :: [B.ByteString] -> C.Producer RIO B.ByteString 
   streamList = mapM_ C.yield 
-
-  propagate :: B.ByteString -> Conduit B.ByteString ()
-  propagate = C.yield
-
-  propagateList :: [B.ByteString] -> Conduit B.ByteString ()
-  propagateList ms = mapM_ propagate ms
 
   passThrough :: Conduit B.ByteString ()
   passThrough = do mbX <- C.await
                    case mbX of
                      Nothing -> return ()
-                     Just x  -> C.yield x
+                     Just x  -> C.yield x >> passThrough
 
   drop1 :: Conduit o ()
   drop1 = C.await >>= \_ -> return ()
@@ -64,23 +57,6 @@ where
   dropX 0 = return ()
   dropx i | i < 0     = return ()
           | otherwise = drop1 >> dropX (i-1)
-
-  empty :: Conduit o ()
-  empty = chunk B.empty "Missing Separator"
-
-  chunk :: B.ByteString -> String -> Conduit o ()
-  chunk p e = do
-    mb <- C.await
-    case mb of
-      Nothing -> liftIO (throwIO $ ProtocolExc "Incomplete Message")
-      Just x  -> unless (x == p) $ liftIO (throwIO $ ProtocolExc (e ++ ": " ++ 
-                                                                  show x))
-  getChunk :: Conduit o B.ByteString
-  getChunk = do
-    mb <- C.await
-    case mb of
-      Nothing -> liftIO (throwIO $ ProtocolExc "Incomplete Message")
-      Just x  -> return x
 
   consume :: SinkR [B.ByteString]
   consume = go []

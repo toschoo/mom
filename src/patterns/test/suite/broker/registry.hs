@@ -214,20 +214,18 @@ where
       clean
       mapM_ (\i -> insert i sn) is
       n1 <- size
-      xs <- checkWorker -- free
-      _  <- checkWorker -- busy
+      xs <- checkWorker
       setBack (-10000) is
-      ys <- checkWorker -- free
-      _  <- checkWorker -- busy
+      ys <- checkWorker
       setBack (-10000) is
       zs <- checkWorker
       n2 <- size
       return (xs, ys, zs, n1, n2)
-    assert (null xs                &&
+    assert (null xs                &&    
             ys == take nbCheck is  &&
             zs == take nbCheck (drop nbCheck is) &&
             n1 > n2 &&
-            (n1 < nbCheck || n2 == n1 - nbCheck))
+            (n1 < nbCheck || n2 == n1 - nbCheck)) 
 
   prpGetBurries :: NonEmptyList (NonEmptyList Char) -> Property
   prpGetBurries ns = let is = map B.pack $ nub $ nonemptyString ns
@@ -238,39 +236,70 @@ where
       mapM_ (\i -> insert i sn) is
       n1 <- size
       setBack (-10000) is
-      xs <- checkWorker -- free
-      _  <- checkWorker -- busy
+      xs <- checkWorker
       setBack (-10000) is
-      mapM_ (\_ -> getWorker sn) is
+      mapM_ (\_ -> getWorker sn) [1..nbCheck] 
       setBack (-10000) is
-      _  <- checkWorker -- free
-      ys <- checkWorker -- busy
+      ys <- checkWorker 
       n2 <- size
       return (xs, ys, n1, n2)
-    assert (xs == take nbCheck is  &&
-            ys == take nbCheck (drop nbCheck is) &&
-            n1 > n2 &&
+    assert (xs == take nbCheck is &&
+            ys == take nbCheck (drop (2*nbCheck) is) && 
+            n1 > n2 &&  
+            (n1 < 2*nbCheck || n2 == n1 - 2*nbCheck))
+
+  prpBurryBusy :: NonEmptyList (NonEmptyList Char) -> Property
+  prpBurryBusy ns = let is = map B.pack $ nub $ nonemptyString ns
+                     in monadicIO $ do
+    let sn = B.pack "Test"
+    (xs, n1, n2) <- run $ do 
+      clean
+      mapM_ (\i -> insert i sn) is
+      n1 <- size
+      mapM_ (\_ -> getWorker sn) [1..nbCheck] 
+      setBack (-10000) is
+      xs <- checkWorker
+      n2 <- size
+      return (xs, n1, n2)
+    assert (xs == take nbCheck (drop nbCheck is) && 
+            n1 > n2 &&  
             (n1 < nbCheck || n2 == n1 - nbCheck))
 
+  prpDontBurryEarly :: NonEmptyList (NonEmptyList Char) -> Property
+  prpDontBurryEarly ns = let is = map B.pack $ nub $ nonemptyString ns
+                          in monadicIO $ do
+    let sn = B.pack "Test"
+    (xs, n1, n2) <- run $ do 
+      clean
+      mapM_ (\i -> insert i sn) is
+      n1 <- size
+      mapM_ (\_ -> getWorker sn) [1..nbCheck] 
+      setBack (-10) is
+      xs <- checkWorker
+      n2 <- size
+      return (xs, n1, n2)
+    assert (null xs && n1 == n2)
+
+  {- irrelevant:
+     -- we don't send to busy ones
   prpFreeDead :: NonEmptyList (NonEmptyList Char) -> Property
   prpFreeDead ns = let is = map B.pack $ nub $ nonemptyString ns
                      in monadicIO $ do
     let sn = B.pack "Test"
     (xs, ys) <- run $ do 
       clean
-      mapM_ (\i -> insert i sn) is
-      mapM_ (\_ -> getWorker sn) is
+      mapM_ (\i -> insert i  sn) is
+      mapM_ (\_ -> getWorker sn) $ take nbCheck is
       setBack (-10000) is
-      _  <- checkWorker -- free
-      xs <- checkWorker -- busy
+      xs <- checkWorker
       setBack (-10000) is
       mapM_ (\i -> freeWorker i) is
       setBack (-10000) is
-      ys <- checkWorker -- free
-      _  <- checkWorker -- busy
+      ys <- checkWorker
       return (xs, ys)
-    assert (xs == take nbCheck is  &&
-            ys == take nbCheck is)  
+    assert (xs == take nbCheck (drop nbCheck is)) {-  && 
+            ys == take nbCheck (drop (2*nbCheck) is)) -} 
+  -}
 
   setBack :: Msec -> [B.ByteString] -> IO ()
   setBack ms = mapM_ (\i -> updWorker i setTime) 
@@ -369,10 +398,12 @@ where
                   (deepCheck prpCheckBurries)          ?> 
          runTest "Get   burries the dead"
                   (deepCheck prpGetBurries)            ?> 
-         runTest "Free the dead"
-                  (deepCheck prpFreeDead)              ?> 
+         runTest "Burry Busy"
+                  (deepCheck prpBurryBusy)             ?> 
+         runTest "Don't burry early"
+                  (deepCheck prpDontBurryEarly)        ?> 
          runTest "Stats"
-                  (deepCheck prpStatsPerService)    
+                  (deepCheck prpStatsPerService)   
 
     case r of
       Success {} -> do

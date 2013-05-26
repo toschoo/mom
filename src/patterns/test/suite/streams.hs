@@ -12,6 +12,7 @@ where
   import           Data.Monoid
   import           Data.List (sort)
   import qualified Data.Conduit as C
+  import           Data.Conduit ((=$))
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad (unless)
@@ -74,7 +75,7 @@ where
                       Z.connect s osock 
                       sendAll c (map B.pack ss)
                       (Right . map B.unpack) <$> recvAll s
-    where job s = passAll s ["out"]
+    where job s = passThrough =$ passAll s ["out"]
 
   prpMultiOut :: NonEmptyList String -> Property
   prpMultiOut (NonEmpty ss) = testContext ["out1", "out2", "out4"] $ \ctx ->

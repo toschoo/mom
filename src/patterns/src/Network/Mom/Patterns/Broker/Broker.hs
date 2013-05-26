@@ -12,7 +12,6 @@ where
   import qualified Data.Conduit           as C
   import           Data.Conduit ((=$), ($$))
 
-  import           Control.Concurrent 
   import           Control.Applicative ((<$>))
   import           Control.Monad (when, unless)
   import           Control.Monad.Trans (liftIO)
@@ -20,13 +19,13 @@ where
   import           Control.Exception (SomeException, throwIO,
                                       catch, try, finally)
 
-  withBroker :: Context  -> Service -> String -> String -> 
-                OnError_ -> (Controller -> IO ())       -> IO ()
-  withBroker ctx srv aClients aServers onerr = 
-    withStreams ctx srv 10000
+  withBroker :: Context  -> Service -> Timeout -> String -> String -> 
+                OnError_ -> (Controller -> IO r)        -> IO r
+  withBroker ctx srv tmo aClients aServers onerr ctrl = 
+    withStreams ctx srv tmo
                    [Poll "servers" aServers RouterT Bind [] [],
                     Poll "clients" aClients RouterT Bind [] []]
-                   onTmo onerr handleStream 
+                   onTmo onerr handleStream $ \c -> R.clean >> ctrl c
     where onTmo s = do
             is <- R.checkWorker
             mapM_ (sndHb s) is
@@ -39,22 +38,37 @@ where
   ------------------------------------------------------------------------
   handleStream :: StreamSink
   handleStream s | getSource s == "clients" = recvClient s
-                 | otherwise                = recvWorker s
+                 | getSource s == "servers" = recvWorker s
+                 | otherwise                = return ()
 
   ------------------------------------------------------------------------
   -- Receive stream from client
   ------------------------------------------------------------------------
   recvClient :: StreamSink
-  recvClient s = do
-    (i, sn) <- mdpCRcvReq
-    mbW     <- liftIO $ R.getWorker sn
-    case mbW of
-      Nothing -> noWorker sn
-      Just w  -> let trg = filterStreams s (== "servers")
-                  in mdpWSndReq w [i] =$ passAll s trg
-    where noWorker sn = liftIO $ putStrLn $ 
-                                   "No Worker for service " ++ 
-                                                  BC.unpack sn
+  recvClient s = mdpCRcvReq >>= uncurry go
+    where go i sn | hdr sn == mmiHdr = handleMMI i sn
+                  | otherwise        = handleReq i sn
+          handleReq i sn = do
+            mbW <- liftIO $ R.getWorker sn
+            case mbW of
+              Nothing -> noWorker sn
+              Just w  -> sendRequest w [i] s
+          handleMMI i sn | srvc sn /= mmiSrv = C.yield mmiNimpl =$ 
+                                                 sendReply sn [i] s
+                         | otherwise = do
+            mbX <- C.await
+            case mbX of
+              Nothing -> liftIO (throwIO $ ProtocolExc 
+                                   "No ServiceName in mmi.service request")
+              Just x  -> do
+                m <- bool2MMI <$> liftIO (R.lookupService x)
+                C.yield m =$ sendReply sn [i] s
+          bool2MMI True  = mmiFound
+          bool2MMI False = mmiNotFound
+          hdr            = B.take 4
+          srvc           = B.drop 4
+          noWorker sn    = liftIO (throwIO $ ProtocolExc $
+                                  "No Worker for service " ++ BC.unpack sn)
 
   ------------------------------------------------------------------------
   -- Receive stream from worker 
@@ -63,7 +77,7 @@ where
   recvWorker s = do
     f <- mdpWRcvRep
     case f of
-      WBeat  w    -> liftIO (putStrLn "beat") >> liftIO (R.updWorkerHb w)
+      WBeat  w    -> liftIO (R.updWorkerHb w)
       WReady w sn -> liftIO $ R.insert w sn
       WReply w is -> handleReply w is s 
       WDisc  w    -> liftIO $ R.remove w
@@ -79,5 +93,18 @@ where
       Nothing -> liftIO $ throwIO $ ProtocolExc "Unknown Worker"
       Just sn -> do sendReply sn is s
                     liftIO $ R.freeWorker w
-    where sendReply sn is s = let trg = filterStreams s (== "clients")
-                               in mdpCSndRep sn is =$ passAll s trg
+
+  ------------------------------------------------------------------------
+  -- Send request to worker
+  ------------------------------------------------------------------------
+  sendRequest :: Identity -> [Identity] -> StreamSink
+  sendRequest w is s = let trg = filterStreams s (== "servers")
+                        in mdpWSndReq w is =$ passAll s trg
+
+  ------------------------------------------------------------------------
+  -- Send reply to client
+  ------------------------------------------------------------------------
+  sendReply :: B.ByteString -> [Identity] -> StreamSink
+  sendReply sn is s = let trg = filterStreams s (== "clients")
+                       in mdpCSndRep sn is =$ passAll s trg
+

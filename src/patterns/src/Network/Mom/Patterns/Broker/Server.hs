@@ -1,3 +1,4 @@
+{-# Language RankNTypes #-}
 module Network.Mom.Patterns.Broker.Server
 where
 
@@ -7,21 +8,13 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (catch, try, SomeException, throwIO,
                                       bracket, bracketOnError, finally)
-  import           Control.Concurrent
   import           Data.Conduit (($$), (=$), (=$=))
-  import qualified Data.Conduit          as C
-  import qualified Data.ByteString.Char8 as B
-  import           Data.Char (toLower)
-  import           Data.Map (Map)
-  import qualified Data.Map as Map
-  import qualified System.ZMQ            as Z
 
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams
-  import qualified Network.Mom.Patterns.Basic.Server as S
   import           Network.Mom.Patterns.Broker.Common 
 
-  withServer :: Z.Context            ->
+  withServer :: Context              ->
                 Service              -> 
                 String               ->
                 LinkType             ->
@@ -36,15 +29,16 @@ where
                 onErr
                 job $ \c ->
       finally (send c ["client"] (mdpWConnect srv) >> act c)
-              (putStrLn "disconnect") -- send c S.outStream mdpWDisconnect)
-    where job s = mdpServe s =$ passAll s ["client"]
+              (send c ["client"]  mdpWDisconnect)
+    where job s | getSource s == "client" = mdpServe s =$ passAll s ["client"]
+                | otherwise               = return ()
           mdpServe s = do
             f <- mdpWRcvReq
             case f of
               WRequest is -> serve s =$= mdpWSndRep is
-              WBeat    i  -> mdpWBeat
-              WDisc    i  -> liftIO (throwIO $ ProtocolExc 
+              WBeat    _  -> mdpWBeat
+              WDisc    _  -> liftIO (throwIO $ ProtocolExc 
                                            "Broker disconnects")
-              x           -> liftIO (throwIO $ Ouch 
+              _           -> liftIO (throwIO $ Ouch 
                                        "Unknown frame from Broker!")
                         

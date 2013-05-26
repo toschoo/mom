@@ -2,7 +2,7 @@
 module Registry 
 #ifndef TEST
        (insert, remove, getWorker, freeWorker, getServiceName,
-        clean, size, stat, statPerService)
+        lookupService, clean, size, stat, statPerService)
 #endif
 where
 
@@ -62,7 +62,7 @@ where
   _srv = unsafePerformIO $ newMVar M.empty 
 
   {-# NOINLINE _s #-}
-  _s :: MVar (Seq (B.ByteString, State))
+  _s :: MVar (Seq B.ByteString)
   _s = unsafePerformIO $ newMVar S.empty 
 
   {-# NOINLINE _wrk #-}
@@ -131,6 +131,13 @@ where
       Nothing -> return Nothing
       Just s  -> return $ Just (srvName s)
 
+  lookupService :: B.ByteString -> IO Bool
+  lookupService s = do
+    mbS <- lookupS s
+    case mbS of
+      Nothing -> return False
+      Just  _ -> return True
+
   getWorker :: B.ByteString -> IO (Maybe Identity)
   getWorker s = do
     now <- getCurrentTime
@@ -152,13 +159,14 @@ where
   checkWorker = do
     mbS <- checkService 
     case mbS of
-      Nothing      -> return []
-      Just (s, st) -> do
+      Nothing -> return []
+      Just  s -> do
         now <- getCurrentTime
         burry now s -- remove non-responsive workers
-        is <- withMVar (srvQ s) $ \q ->
-                return $ map fst $ takeIfQ nbCheck st (f now) q
+        is <- withMVar (srvQ s) $ \q -> do
+                return $ map fst $ takeIfQ nbCheck Free (f now) q
         mapM_ (\i -> updWorker i (updSt now)) is
+        -- when (not $ null is) $ putStrLn $ "checkWorker: " ++ show is
         return is
     where f now w = case (testHB now . wrkHB . snd) w of
                       HbSend -> True
@@ -167,43 +175,37 @@ where
                                 hb2 = hb {hbBeat = True}
                              in (i, w{wrkHB = hb2}) 
 
-  checkService :: IO (Maybe (Service, State))
+  checkService :: IO (Maybe Service)
   checkService = do
     mbS <- modifyMVar _s getS
     case mbS of 
       Nothing -> return Nothing
-      Just (s, st)  -> do
+      Just s  -> do
         mbSrv <- lookupS s
         case mbSrv of
-          Nothing  -> rm st >> checkService
-          Just srv -> return $ Just (srv, st)
+          Nothing  -> rm >> checkService
+          Just srv -> return $ Just srv
     where getS s = 
             case S.viewl s of
               EmptyL  -> return (s, Nothing)
-              (x, Free) :< xs -> 
-                 return ((x, Busy) <| xs, Just (x, Free))
-              (x, Busy) :< xs -> 
-                 return (xs |> (x, Free), Just (x, Busy))
-          rmHeadOrTail Free s = 
+              x :< xs -> 
+                return (xs |> x, Just x)
+          rmTail s = 
             case S.viewr s of
               EmptyR  -> return s
               xs :> x -> return xs
-          rmHeadOrTail Busy s = 
-            case S.viewl s of
-              EmptyL  -> return s
-              x :< xs -> return xs
-          rm st = modifyMVar_ _s (rmHeadOrTail st)
+          rm = modifyMVar_ _s rmTail
 
   burry :: UTCTime -> Service -> IO ()
   burry now sn = do
     q <- readMVar $ srvQ sn
-    let f = findDeads now $ qFree q
-    let b = findDeads now $ qBusy q 
+    let f = findDeads [HbDead        ] now $ qFree q
+    let b = findDeads [HbDead, HbSend] now $ qBusy q 
     -- when (not $ null $ f++b) $ print $ map fst $ f++b
     mapM_ remove (map fst $ f++b)
-    where findDeads now = toList . S.takeWhileL (dead now)
-          dead now (_, w) | testHB now (wrkHB w) == HbDead = True
-                          | otherwise                      = False 
+    where findDeads sts now = toList . S.takeWhileL (dead sts now)
+          dead sts now (_, w) | testHB now (wrkHB w) `elem` sts = True
+                              | otherwise                       = False 
 
   clean :: IO ()
   clean = do modifyMVar_ _wrk $ \_ -> return M.empty
@@ -262,7 +264,7 @@ where
   insertS :: B.ByteString -> Service -> IO ()
   insertS s sn = do
     modifyMVar_ _srv $ \t  -> return $ M.insert s sn t
-    modifyMVar_ _s   $ \ss -> return $ ss |> (s, Free)
+    modifyMVar_ _s   $ \ss -> return $ ss |> s
   
   deleteW :: Identity -> IO ()
   deleteW i = modifyMVar_ _wrk $ \t -> return $ M.delete i t
@@ -354,7 +356,7 @@ where
   takeIf n f s = case S.viewl s of
                    EmptyL    -> []
                    (w :< ws) | f w       -> w : takeIf (n-1) f ws
-                             | otherwise ->     takeIf (n-1) f ws
+                             | otherwise ->     takeIf  n    f ws
 
   eq :: Identity -> WrkNode -> Bool
   eq i = (== i) . fst 

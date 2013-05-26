@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, DeriveDataTypeable #-}
+{-# LANGUAGE CPP, DeriveDataTypeable, RankNTypes #-}
 module Network.Mom.Patterns.Streams.Streams
 where
 
@@ -72,7 +72,8 @@ where
                                                       "Can't handle command"
                                                return False -- continue
                                  unless q $ poll m c is ps
-              _            -> do handleStream m c is ss ps
+              _            -> do catch (handleStream m c is ss ps)
+                                       (\e -> onErr Critical e "Can't handle stream")
                                  poll         m c is ps
           handleCmd m c ps = do
             case c of
@@ -104,9 +105,6 @@ where
                                                strmCmd  = c,
                                                strmPoll = ps})) (
                 \e -> onErr Error e "Stream handling failed")
-
-  -- withForward
-  -- withPipeline
 
   getStream :: [Identifier] -> [Z.Poll] -> Maybe (Identifier, Z.Poll)
   getStream _ [] = Nothing

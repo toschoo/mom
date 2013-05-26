@@ -35,17 +35,22 @@ INC  =	-i./src \
 	-i./examples/common
 
 suite:	$(TDIR)/streams \
-	$(TDIR)/broker/registry
+	$(TDIR)/broker/registry \
+	$(TDIR)/broker/broker
 
 run:	
 	$(TDIR)/streams
-	$(TDIR)/broker/registry
+	$(TDIR)/broker/registry 
+	$(TDIR)/broker/broker
 
 $(TDIR)/streams:	$(TDIR)/streams.hs $(TDIR)/Common.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/broker/registry:	$(TDIR)/broker/registry.hs $(TDIR)/Common.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/broker/broker:	$(TDIR)/broker/broker.hs $(TDIR)/Common.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
 
 smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/db2 \
@@ -200,6 +205,7 @@ clean:
 	rm -f $(TDIR)/broker/*.hi
 	rm -f $(TDIR)/broker/*.o
 	rm -f $(TDIR)/broker/registry
+	rm -f $(TDIR)/broker/broker
 	rm -f $(SRCDIR)/*.hi
 	rm -f $(SRCDIR)/*.o
 	rm -f $(SRCDIR)/broker/*.hi
