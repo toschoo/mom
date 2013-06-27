@@ -7,7 +7,7 @@ where
   import qualified Data.ByteString.Char8  as B
   import qualified Data.ByteString        as BB
   import qualified Data.Conduit as C
-  import           Control.Monad (unless, when)
+  import           Control.Monad (unless)
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (throwIO)
   import           Control.Applicative ((<$>))
@@ -156,7 +156,6 @@ where
     case mb of
       Nothing -> liftIO (throwIO $ ProtocolExc "Incomplete Message")
       Just x  -> return x
-
 
   identity :: Conduit o Identity
   identity = do

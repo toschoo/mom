@@ -8,10 +8,8 @@ where
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams
   import           Control.Applicative ((<$>))
-  import           Control.Concurrent
-  import           Control.Monad.Trans (liftIO)
   import           Control.Monad (when)
-  import           Control.Exception (try, SomeException)
+  import           Control.Exception (SomeException)
 
   ------------------------------------------------------------------------
   -- For debugging it's much nicer to work with digits

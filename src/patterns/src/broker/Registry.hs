@@ -7,19 +7,14 @@ module Registry
 where
 
   import           Heartbeat
-  import           Network.Mom.Patterns.Broker.Common
   import           Network.Mom.Patterns.Streams.Types (Identity)
 
   import           Control.Concurrent
   import           Control.Monad (when)
-  import           Control.Exception 
-  import           Control.Applicative ((<$>))
-  import           Prelude hiding (catch)
 
   import           System.IO.Unsafe
 
   import qualified Data.ByteString.Char8 as B
-  import           Data.List (delete, deleteBy, find)
   import           Data.Map   (Map)
   import qualified Data.Map   as   M
   import qualified Data.Sequence as  S
@@ -163,17 +158,16 @@ where
       Just  s -> do
         now <- getCurrentTime
         burry now s -- remove non-responsive workers
-        is <- withMVar (srvQ s) $ \q -> do
-                return $ map fst $ takeIfQ nbCheck Free (f now) q
-        mapM_ (\i -> updWorker i (updSt now)) is
-        -- when (not $ null is) $ putStrLn $ "checkWorker: " ++ show is
+        is <- withMVar (srvQ s) ( 
+                return . map fst . takeIfQ nbCheck Free (f now))
+        mapM_ (`updWorker` updSt) is
         return is
     where f now w = case (testHB now . wrkHB . snd) w of
                       HbSend -> True
                       _      -> False
-          updSt now (i,w) = let hb  = wrkHB w
-                                hb2 = hb {hbBeat = True}
-                             in (i, w{wrkHB = hb2}) 
+          updSt (i,w) = let hb  = wrkHB w
+                            hb2 = hb {hbBeat = True}
+                         in (i, w{wrkHB = hb2}) 
 
   checkService :: IO (Maybe Service)
   checkService = do
@@ -193,7 +187,7 @@ where
           rmTail s = 
             case S.viewr s of
               EmptyR  -> return s
-              xs :> x -> return xs
+              xs :> _ -> return xs
           rm = modifyMVar_ _s rmTail
 
   burry :: UTCTime -> Service -> IO ()
@@ -201,11 +195,10 @@ where
     q <- readMVar $ srvQ sn
     let f = findDeads [HbDead        ] now $ qFree q
     let b = findDeads [HbDead, HbSend] now $ qBusy q 
-    -- when (not $ null $ f++b) $ print $ map fst $ f++b
-    mapM_ remove (map fst $ f++b)
-    where findDeads sts now = toList . S.takeWhileL (dead sts now)
-          dead sts now (_, w) | testHB now (wrkHB w) `elem` sts = True
-                              | otherwise                       = False 
+    mapM_ (remove . fst) (f++b)
+    where findDeads sts nw = toList . S.takeWhileL (dead sts nw)
+          dead sts nw (_, w) | testHB nw (wrkHB w) `elem` sts = True
+                             | otherwise                       = False 
 
   clean :: IO ()
   clean = do modifyMVar_ _wrk $ \_ -> return M.empty
@@ -235,7 +228,7 @@ where
     mbS <- lookupS s
     case mbS of
       Nothing -> return ()
-      Just s  -> do q <- readMVar (srvQ s)
+      Just x  -> do q <- readMVar (srvQ x)
                     putStr "Free: "
                     print $ map fst $ toList $ qFree q
                     putStrLn ""
@@ -290,19 +283,19 @@ where
   insertQ w q = q{qFree = qFree q |> w}
 
   removeQ :: Identity -> Queue -> Queue
-  removeQ i q = (removeWithStateQ i Free . removeWithStateQ i Busy) q 
+  removeQ i = removeWithStateQ i Free . removeWithStateQ i Busy
 
   removeWithStateQ :: Identity -> State -> Queue -> Queue
   removeWithStateQ i s q = 
     case S.viewl t of
       EmptyL    -> q
-      (x :< xs) -> case s of
+      (_ :< xs) -> case s of
                      Free -> q{qFree = h >< xs}
                      Busy -> q{qBusy = h >< xs}
     where (h,t) = getWithStateQ i s q
 
   updateQ :: Identity -> (WrkNode -> WrkNode) -> Queue -> Queue
-  updateQ i f q = (updateWithStateQ i Free f . updateWithStateQ i Busy f) q
+  updateQ i f = updateWithStateQ i Free f . updateWithStateQ i Busy f 
 
   updateWithStateQ :: Identity -> State    -> 
                       (WrkNode -> WrkNode) -> Queue -> Queue
@@ -310,8 +303,8 @@ where
     case S.viewl t of
       EmptyL    -> q
       (x :< xs) -> case s of
-                     Free -> q{qFree = h >< (f x) <| xs}
-                     Busy -> q{qBusy = h >< (f x) <| xs}
+                     Free -> q{qFree = h >< f x <| xs}
+                     Busy -> q{qBusy = h >< f x <| xs}
     where (h,t) = getWithStateQ i s q
 
   setStateQ :: Identity -> State -> (WrkNode -> WrkNode) -> Queue -> Queue
@@ -336,15 +329,15 @@ where
   emptyQ q = S.null (qFree q) && S.null (qBusy q)
 
   firstFreeQ :: Queue -> Maybe WrkNode
-  firstFreeQ q = firstQ (qFree q) q
+  firstFreeQ q = firstQ (qFree q)
 
   firstBusyQ :: Queue -> Maybe WrkNode
-  firstBusyQ q = firstQ (qBusy q) q
+  firstBusyQ q = firstQ (qBusy q)
 
-  firstQ :: Seq WrkNode -> Queue -> Maybe WrkNode
-  firstQ f q = case S.viewl f of
-                 EmptyL    -> Nothing
-                 (w :< ws) -> Just w
+  firstQ :: Seq WrkNode -> Maybe WrkNode
+  firstQ f = case S.viewl f of
+               EmptyL   -> Nothing
+               (w :< _) -> Just w
 
   takeIfQ :: Int -> State -> (WrkNode -> Bool) -> Queue -> [WrkNode]
   takeIfQ n s f q = case s of

@@ -1,7 +1,6 @@
 module Network.Mom.Patterns.Basic.Client
 where
 
-  import           Control.Monad.Trans (liftIO)
   import qualified System.ZMQ            as Z
 
   import           Network.Mom.Patterns.Streams.Types
@@ -23,8 +22,6 @@ where
   request :: Client -> Timeout -> Source -> SinkR (Maybe a) -> IO (Maybe a)
   request c tmo src snk = do
     runSender   (clSock c) src
-    runReceiver (clSock c) tmo snk
-
-  checkReceive :: Client -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
-  checkReceive c tmo = runReceiver (clSock c) tmo
+    if tmo /= 0 then runReceiver (clSock c) tmo snk
+                else return Nothing
 

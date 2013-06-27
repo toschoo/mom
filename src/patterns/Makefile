@@ -35,13 +35,18 @@ INC  =	-i./src \
 	-i./examples/common
 
 suite:	$(TDIR)/streams \
+	$(TDIR)/basic \
 	$(TDIR)/broker/registry \
 	$(TDIR)/broker/broker
 
 run:	
 	$(TDIR)/streams
+	$(TDIR)/basic
 	$(TDIR)/broker/registry 
 	$(TDIR)/broker/broker
+
+$(TDIR)/basic:	$(TDIR)/basic.hs $(TDIR)/Common.hs $(SUBSRC)
+		$(GHC) $(FLGS) $(INC) $@
 
 $(TDIR)/streams:	$(TDIR)/streams.hs $(TDIR)/Common.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -81,7 +86,9 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/queue2 \
 	$(SMOKEDIR)/stream \
 	$(SMOKEDIR)/client1 \
+	$(SMOKEDIR)/client2 \
 	$(SMOKEDIR)/olleh \
+	$(SMOKEDIR)/bounce \
 	$(SMOKEDIR)/broker \
 	$(SMOKEDIR)/bridge 
 
@@ -172,7 +179,13 @@ $(SMOKEDIR)/stream:	$(SMOKEDIR)/stream.hs $(SUBSRC)
 $(SMOKEDIR)/client1:	$(SMOKEDIR)/client1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/client2:	$(SMOKEDIR)/client2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/olleh:	$(SMOKEDIR)/olleh.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/bounce:	$(SMOKEDIR)/bounce.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/pubsub:	$(SMOKEDIR)/pubsub.hs $(SUBSRC)
@@ -202,6 +215,7 @@ clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
 	rm -f $(TDIR)/streams
+	rm -f $(TDIR)/basic
 	rm -f $(TDIR)/broker/*.hi
 	rm -f $(TDIR)/broker/*.o
 	rm -f $(TDIR)/broker/registry
@@ -246,13 +260,16 @@ clean:
 	rm -f $(SMOKEDIR)/queue2
 	rm -f $(SMOKEDIR)/stream
 	rm -f $(SMOKEDIR)/client1
+	rm -f $(SMOKEDIR)/client2
 	rm -f $(SMOKEDIR)/olleh
+	rm -f $(SMOKEDIR)/bounce
 	rm -f $(SMOKEDIR)/conduit
 	rm -f $(SMOKEDIR)/broker
 	rm -f $(SMOKEDIR)/bridge
 	rm -f $(SMOKEDIR)/pipe
 	rm -f $(SMOKEDIR)/pubsub
 	rm -f $(SMOKEDIR)/zmqpubsub
+	rm -f $(SMOKEDIR)/eot
 	rm -f $(SMOKEDIR)/zmqrouter
 	rm -f $(OUTDIR)/*.txt
 

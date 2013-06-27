@@ -11,16 +11,16 @@ where
   import           Test.QuickCheck.Monadic hiding (stop)
   import qualified Data.ByteString.Char8 as B
   import           Data.Time.Clock
-  import           Data.Monoid
   import           Data.List (sort, nub)
+  import           Data.Maybe (fromJust)
   import qualified Data.Conduit as C
+  import qualified Data.Conduit.List as CL
   import           Data.Conduit (($$), ($=), (=$))    
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad (when, unless, forever)
+  import           Control.Monad (when, unless)
   import           Control.Monad.Trans (liftIO)
-  import           Control.Exception (AssertionFailed(..), try,
-                                      throwIO, SomeException)
+  import           Control.Exception (try, throwIO, SomeException)
 
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams
@@ -51,7 +51,7 @@ where
     assert (r == s)
     where rcv = do
             _ <- mdpCRcvReq
-            map B.unpack <$> consume
+            map B.unpack <$> CL.consume
 
   prpCRep :: NonEmptyList String -> Property
   prpCRep (NonEmpty s) = monadicIO $ do
@@ -60,7 +60,7 @@ where
                             mdpCSndRep (B.pack "Test")
                                        [B.pack "xxx"] $$
                             ignoreId          =$
-                            mdpCRcvRep "Test" =$ consume)
+                            mdpCRcvRep "Test" =$ CL.consume)
     assert (r == s)
 
   ignoreId :: Conduit B.ByteString ()
@@ -78,7 +78,7 @@ where
     assert (r == s)
     where rcv = do
             _ <- mdpWRcvReq
-            map B.unpack <$> consume
+            map B.unpack <$> CL.consume
 
   prpWRep :: NonEmptyList String -> Property
   prpWRep (NonEmpty s) = monadicIO $ do
@@ -88,7 +88,7 @@ where
     assert (r == s)
     where rcv = do
             _ <- mdpWRcvRep
-            map B.unpack <$> consume
+            map B.unpack <$> CL.consume
 
   prpMMIReq :: NonEmptyList Char -> Property
   prpMMIReq (NonEmpty s) = monadicIO $ do
@@ -98,7 +98,7 @@ where
     assert (r == s)
     where rcv = do
             _ <- mdpCRcvReq
-            (concat . map B.unpack) <$> consume
+            (concat . map B.unpack) <$> CL.consume
 
   prpMMIRep :: NonEmptyList Char -> Property
   prpMMIRep (NonEmpty s) = monadicIO $ do
@@ -108,7 +108,7 @@ where
                                        [B.pack "xxx"] $$
                             ignoreId   =$
                             mdpCRcvRep (B.unpack $ mmiHdr `B.append` mmiSrv)
-                                       =$ consume)
+                                       =$ CL.consume)
     assert (r == s)
 
   prpMdpBeat :: Property
@@ -210,7 +210,7 @@ where
                    onTmo (showErr "Server") bounce $ \_ -> do
           waitForWorker c
           request c (-1) (streamList $ map B.pack s)
-                         (Just . (map B.unpack) <$> consume)
+                         (Just . (map B.unpack) <$> CL.consume)
 
   prpBeat1 :: Property
   prpBeat1 = testContext (True) $ \ctx ->
@@ -260,6 +260,29 @@ where
               _ -> throwIO $ ProtocolExc "unexpected frame"
           handle _ _ _ _ = return ()
 
+  prpRoundRobin :: Property
+  prpRoundRobin = do
+    -- n <- choose (10,50)::(Gen Int) -- very slow
+    let n = 10 
+    testContext [1..n] $ \ctx ->
+      try $ testBroker ctx $ \_ ->
+        startServers2 ctx n $ do
+          withClient ctx "RR" clsock Connect $ \c -> do
+            threadDelay 10000 -- we have to wait for *all* servers
+            go c n []
+    where go :: Client -> Int -> [Int] -> IO [Int]
+          go c n rr | n <= 0    = return (sort rr)
+                    | otherwise = do
+             r <- (B.unpack . head . fromJust) <$> request c (-1) 
+                        (C.yield $ B.pack "") (Just <$> getSrv)
+             go c (n-1) (read r:rr)
+          getSrv = do
+            mbX <- C.await
+            case mbX of
+              Nothing -> return []
+              Just x  -> return [x]
+          
+
   startServers :: Context -> Int -> [Z.Poll] -> 
                   ([Z.Poll] -> IO r)         -> IO r
   startServers ctx n ss job | n <= 0    = job ss
@@ -268,6 +291,16 @@ where
               Z.connect s srvsock
               C.runResourceT $ mdpWConnect "Test" $$ sndSock s
               startServers ctx (n-1) ((Z.S s Z.In):ss) job
+
+  startServers2 :: Context -> Int -> IO r -> IO r
+  startServers2 ctx n job | n <= 0    = job 
+                          | otherwise = 
+    withServer ctx "RR" srvsock Connect 
+               onTmo (showErr ("Server " ++ show n)) 
+                     (reply n) $ \_ -> startServers2 ctx (n-1) job
+    where reply x _ = do
+            _ <- C.await 
+            C.yield (B.pack $ show x)
 
   handleBrk :: MVar r -> Int -> [Z.Poll] -> 
                (MVar r -> Int -> Z.Poll -> WFrame -> IO ()) -> IO ()
@@ -311,11 +344,6 @@ where
           analyseResult (x1:x2:xs) =
             if x1 > timeAdd x2 1000 then False
                                     else analyseResult (x2:xs)
-            
-
-  -- round robin of servers
-  --  -- make sure server respond in turn (e.g. client receives 1,2,3)
-  --     is a connect message (use a socket instead of a broker!)
   
   sndSock :: Z.Socket o -> Sink
   sndSock s = do
@@ -360,7 +388,7 @@ where
 
   waitForWorker :: Client -> IO ()
   waitForWorker c = do
-    x <- checkService c 10000 -- this timeout is crucial
+    x <- checkService c 5000 -- this timeout is crucial
     unless (isTrue x) $ waitForWorker c
     where isTrue Nothing  = False
           isTrue (Just x) = x
@@ -381,21 +409,21 @@ where
     putStrLn "                 MDP Broker"
     putStrLn "========================================="
     r <- runTest "Client Request"
-                    (deepCheck prpCReq)     ?>
+                    (deepCheck prpCReq)       ?>
          runTest "Client Reply"
-                    (deepCheck prpCRep)     ?>
+                    (deepCheck prpCRep)       ?>
          runTest "Server Request"
-                    (deepCheck prpWReq)     ?>
+                    (deepCheck prpWReq)       ?>
          runTest "Server Reply "
-                    (deepCheck prpWRep)     ?>
+                    (deepCheck prpWRep)       ?>
          runTest "MMI Request"
-                    (deepCheck prpMMIReq)   ?>
+                    (deepCheck prpMMIReq)     ?>
          runTest "MMI Reply"
-                    (deepCheck prpMMIRep)   ?>
+                    (deepCheck prpMMIRep)     ?>
          runTest "HeartBeat"
-                    (deepCheck prpMdpBeat)  ?>
+                    (deepCheck prpMdpBeat)    ?>
          runTest "Connect"
-                    (deepCheck prpConnect)  ?> 
+                    (deepCheck prpConnect)    ?> 
          runTest "DisConnect"
                     (deepCheck prpDisConnect) ?> 
          runTest "Server connects"
@@ -413,7 +441,10 @@ where
          runTest "Pass one passes one"
                     (deepCheck prpPassOne)    ?>   
          runTest "Pass all"
-                    (deepCheck prpPassAll)  
+                    (deepCheck prpPassAll)    ?>
+         runTest "Round Robin"
+                    (deepCheck prpRoundRobin)
+         
     case r of
       Success {} -> do
         putStrLn good

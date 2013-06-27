@@ -1,8 +1,7 @@
 module Network.Mom.Patterns.Basic.Server
 where
 
-  import           Control.Monad.Trans (liftIO)
-  import           Data.Conduit (($$), (=$), (=$=))
+  import           Data.Conduit ((=$))
 
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams
@@ -11,17 +10,17 @@ where
                 Service              -> 
                 String               ->
                 LinkType             ->
-                StreamAction         ->
                 OnError_             ->
                 StreamConduit        ->
                 (Controller -> IO a) -> IO a
-  withServer ctx srv add lt onTmo onErr serve =
+  withServer ctx srv add lt onErr serve =
     withStreams ctx srv (-1) 
-                [Poll "client" add ServerT lt [] []]
-                onTmo
+                [Poll "client" add DealerT lt [] []]
+                igTmo
                 onErr
                 job 
-    where job s = serve s =$ passAll s outStream
+    where job s   = serve s =$ passAll s ["client"]
+          igTmo _ = return ()
 
   withQueue :: Context              ->
                Service              ->
@@ -41,7 +40,4 @@ where
                              | otherwise               = "client"
                    in passAll s [target]
           onTmo _ = return ()
-
-  outStream :: [Identifier]
-  outStream = ["client"]
 

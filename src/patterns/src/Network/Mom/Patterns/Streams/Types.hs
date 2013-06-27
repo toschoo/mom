@@ -2,21 +2,11 @@
 module Network.Mom.Patterns.Streams.Types
 where
 
-  import           Control.Monad.Trans (liftIO)
-  import           Control.Monad (unless, when)
-  import           Control.Applicative ((<$>))
   import           Prelude hiding (catch)
-  import           Control.Exception (Exception, SomeException, 
-                                      bracket, bracketOnError, finally,
-                                      catch, try, throwIO)
-  import           Control.Concurrent
-  import           Data.Conduit (($$), ($=), (=$=))
+  import           Control.Exception (Exception, SomeException) 
   import           Data.Typeable (Typeable)
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
-  import           Data.Char (toLower)
-  import           Data.Map (Map)
-  import qualified Data.Map as Map
   import qualified System.ZMQ            as Z
 
   ------------------------------------------------------------------------
@@ -49,21 +39,6 @@ where
                    case mbX of
                      Nothing -> return ()
                      Just x  -> C.yield x >> passThrough
-
-  drop1 :: Conduit o ()
-  drop1 = C.await >>= \_ -> return ()
-
-  dropX :: Int -> Conduit o ()
-  dropX 0 = return ()
-  dropx i | i < 0     = return ()
-          | otherwise = drop1 >> dropX (i-1)
-
-  consume :: SinkR [B.ByteString]
-  consume = go []
-    where go rs = do mbR <- C.await
-                     case mbR of
-                       Nothing -> return $ reverse rs
-                       Just r  -> go (r:rs)
 
   -------------------------------------------------------------------------
   -- | How to link to an 'AccessPoint'
@@ -126,7 +101,4 @@ where
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception StreamException
-
-
-
 

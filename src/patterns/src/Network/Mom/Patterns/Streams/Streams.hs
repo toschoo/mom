@@ -1,17 +1,28 @@
 {-# LANGUAGE CPP, DeriveDataTypeable, RankNTypes #-}
-module Network.Mom.Patterns.Streams.Streams
+module Network.Mom.Patterns.Streams.Streams (
+         withStreams,
+         runReceiver, runSender,
+         Streamer, 
+         StreamConduit, StreamSink, StreamAction,
+         filterStreams, getSource,
+         stream, part, passAll, pass1, ignoreStream, 
+         Controller, Control, internal,
+         stop, pause, resume, send, receive,
+         AccessType(..), parseAccess,
+         LinkType(..), link, parseLink, 
+         PollEntry(..)
+       )
 where
 
   import           Control.Monad.Trans (liftIO)
-  import           Control.Monad (unless, when)
+  import           Control.Monad (when)
   import           Control.Applicative ((<$>))
   import           Prelude hiding (catch)
-  import           Control.Exception (Exception, SomeException, 
+  import           Control.Exception (SomeException, 
                                       bracket, bracketOnError, finally,
-                                      catch, try, throwIO)
+                                      catch, throwIO)
   import           Control.Concurrent
-  import           Data.Conduit (($$), ($=), (=$=))
-  import           Data.Typeable (Typeable)
+  import           Data.Conduit (($$))
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
   import           Data.Char (toLower)
@@ -19,8 +30,12 @@ where
   import qualified Data.Map as Map
   import qualified System.ZMQ            as Z
 
+  import           Factory
   import           Network.Mom.Patterns.Streams.Types
 
+  ------------------------------------------------------------------------
+  -- | Streams
+  ------------------------------------------------------------------------
   withStreams :: Context      -> 
                  Service      ->
                  Timeout      ->
@@ -40,57 +55,65 @@ where
             (\e -> do onErr Fatal e "Service is going down"
                       throwIO (e::SomeException))
     where startService ready running = do
-            _ <- forkIO $ finally (runStreams ready `catch` 
-                                   \e -> do onErr Fatal e 
+            cmdN <- cmdName sn
+            _    <- forkIO $ finally (runStreams cmdN ready `catch` 
+                                       \e -> do onErr Fatal e 
                                                   "Service is going down"
-                                            throwIO (e::SomeException))
-                                  (putMVar running ())
+                                                throwIO (e::SomeException))
+                                     (putMVar running ())
             Z.withSocket ctx Z.XReq $ \cmd -> do
               _ <- readMVar ready
-              Z.connect cmd (cmdName sn)
+              Z.connect cmd cmdN
               let c = Controller {ctrlCtx  = ctx,
                                   ctrlCmd  = cmd,
                                   ctrlOpts = []}
               finally (ctrl c)
-                      (finally (stop c) -- does not work well on interrupt
+                      (finally (stop c)
                                (takeMVar running))
-          runStreams ready = 
+          runStreams cmdN ready = 
             Z.withSocket ctx Z.XReq $ \cmd -> bracket
-                         (do Z.bind cmd (cmdName sn)
+                         (do Z.bind cmd cmdN
                              let c = Z.S cmd Z.In
                              (m, is, ps) <- mkPoll ctx pes Map.empty [] []
                              return (m, c, is, ps))
                          (\(_, _, _,  ps) -> mapM_ closeS ps)
-                         (\(m, c, is, ps) -> putMVar ready () >> poll m c is ps)
-          poll :: Map Identifier Z.Poll  ->
-                  Z.Poll -> [Identifier] -> [Z.Poll] -> IO ()
-          poll m c is ps = do
-            (x:ss) <- Z.poll (c:ps) tmo
+                         (\(m, c, is, ps) -> do xp <- newMVar PollSt {
+                                                        polMap  = m,
+                                                        polCmd  = c,
+                                                        polIs   = is,
+                                                        polPs   = ps,
+                                                        polTmo  = tmo,
+                                                        polCont = True
+                                                }
+                                                putMVar ready () 
+                                                poll xp)
+
+          ----------------------------------------------------------------
+          -- Poll
+          ----------------------------------------------------------------
+          poll :: PollT ()
+          poll xp = do
+            c <- psCmd xp
+            (_, ps) <- psPolls xp
+
+            (x:ss)   <- Z.poll (c:ps) tmo
             case x of
-              Z.S cmd Z.In -> do q <- handleCmd  m c ps `catch` 
-                                      \e -> do onErr Critical e 
-                                                      "Can't handle command"
-                                               return False -- continue
-                                 unless q $ poll m c is ps
-              _            -> do catch (handleStream m c is ss ps)
-                                       (\e -> onErr Critical e "Can't handle stream")
-                                 poll         m c is ps
-          handleCmd m c ps = do
-            case c of
-              Z.S s _ -> do 
-                x <- B.unpack <$> Z.receive s []
-                case x of
-                  "send" -> cmdSend s Streamer {strmSrc  = Nothing,
-                                                strmIdx  = m,
-                                                strmCmd  = c,
-                                                strmPoll = ps} >> 
-                            return False
-                  "stop" -> cmdStop ps >> return True
-                  "test" -> putStrLn "test received" >> return False
-                  _      -> undefined
-              _ -> throwIO $ Ouch "Ouch! Not a poller in handleCmd!"
-            
-          handleStream m c is ss ps =
+              Z.S _ Z.In -> do catch (handleCmd xp)
+                                     (\e -> do onErr Critical e 
+                                                     "Can't handle command"
+                                               cleanStream c)
+                               q <- psContinue xp
+                               when q $ poll xp
+              _            -> handleStream ss xp >> poll xp
+           
+          ----------------------------------------------------------------
+          -- Handle Streams
+          ----------------------------------------------------------------
+          handleStream :: [Z.Poll] -> PollT () 
+          handleStream ss xp = do
+            m <- psMap xp
+            c <- psCmd xp
+            (is, ps) <- psPolls xp
             case getStream is ss of
               Nothing -> onTmo Streamer {strmSrc  = Nothing, 
                                          strmIdx  = m,
@@ -99,13 +122,67 @@ where
                            \e -> onErr Error e "Timeout Action failed"
               Just (i, p) -> catch (
                 C.runResourceT $ readPoll p $$
-                                   (onStream Streamer {
+                                   onStream Streamer {
                                                strmSrc  = Just (i, p),
                                                strmIdx  = m,
                                                strmCmd  = c,
-                                               strmPoll = ps})) (
-                \e -> onErr Error e "Stream handling failed")
+                                               strmPoll = ps}) (
+                \e -> onErr Error e "Stream handling failed" >> cleanStream p)
 
+          ----------------------------------------------------------------
+          -- Handle Commands
+          ----------------------------------------------------------------
+          handleCmd :: PollT ()
+          handleCmd xp = do
+            m <- psMap xp
+            c <- psCmd xp
+            (_, ps) <- psPolls xp
+            case c of
+              Z.S s _ -> do 
+                x <- B.unpack <$> Z.receive s []
+                case x of
+                  "send" -> cmdSend s Streamer {strmSrc  = Nothing,
+                                                strmIdx  = m,
+                                                strmCmd  = c,
+                                                strmPoll = ps}
+                  "stop" -> cmdStop ps >> setPsContinue False xp
+                  "pause" -> cmdPause s
+                  "resume" -> return () -- ignore
+                  "test" -> putStrLn "test successful"
+                  _      -> undefined
+              _ -> throwIO $ Ouch "Ouch! Not a poller in handleCmd!"
+
+  ------------------------------------------------------------------------
+  -- Simplify parameter passing in streams
+  ------------------------------------------------------------------------
+  data PollState = PollSt {
+                     polMap  :: Map Identifier Z.Poll,
+                     polCmd  :: Z.Poll,
+                     polIs   :: [Identifier],
+                     polPs   :: [Z.Poll],
+                     polTmo  :: Timeout,
+                     polCont :: Bool}
+
+  type PollT r = MVar PollState -> IO r
+
+  psPolls :: PollT ([Identifier], [Z.Poll])
+  psPolls m = withMVar m $ \p -> return (polIs p, polPs p)
+
+  psMap :: PollT (Map Identifier Z.Poll)
+  psMap m = withMVar m (return . polMap)
+
+  psCmd :: PollT Z.Poll
+  psCmd m = withMVar m (return . polCmd)
+
+  psContinue :: PollT Bool
+  psContinue m = withMVar m (return . polCont)
+
+  setPsContinue :: Bool -> PollT ()
+  setPsContinue t m = modifyMVar_ m $ \p -> return p{polCont = t}
+
+  ------------------------------------------------------------------------
+  -- Get first stream with input
+  ------------------------------------------------------------------------
   getStream :: [Identifier] -> [Z.Poll] -> Maybe (Identifier, Z.Poll)
   getStream _ [] = Nothing
   getStream [] _ = Nothing
@@ -113,31 +190,62 @@ where
                               Z.S _ Z.In -> Just (i, p)
                               _          -> getStream is ps
 
+  ------------------------------------------------------------------------
+  -- Receive from poll entry
+  ------------------------------------------------------------------------
   readPoll :: Z.Poll -> Source
   readPoll p = case p of
                  Z.S s _ -> recv s
                  _       -> liftIO $ throwIO $ Ouch "Ouch! No socket in poll"
 
+  ------------------------------------------------------------------------
+  -- Remove all messages from stream
+  ------------------------------------------------------------------------
+  cleanStream :: Z.Poll -> IO ()
+  cleanStream p = case p of
+                    Z.S s _ -> go s
+                    _       -> return ()
+    where go s = do
+            m <- Z.moreToReceive s
+            when m $ Z.receive s [] >>= \_ -> go s
+
+  ------------------------------------------------------------------------
+  -- Traditional receive
+  ------------------------------------------------------------------------
   recv :: Z.Socket a -> Source 
   recv s = liftIO (Z.receive s []) >>= \x -> do
            C.yield x
            m <- liftIO $ Z.moreToReceive s
            when m $ recv s
 
+  ------------------------------------------------------------------------
+  -- Receive with tmo
+  ------------------------------------------------------------------------
   recvTmo :: Z.Socket a -> Z.Timeout -> Source
   recvTmo s tmo =  liftIO (Z.poll [Z.S s Z.In] tmo) >>= \[s'] ->
     case s' of
       Z.S _ Z.In -> recv s 
       _          -> return ()
 
+  ------------------------------------------------------------------------
+  -- | Receiver Sink
+  ------------------------------------------------------------------------
   runReceiver :: Z.Socket a -> Z.Timeout -> SinkR o -> IO o
   runReceiver s tmo snk = C.runResourceT $ recvTmo s tmo $$ snk
 
+  ------------------------------------------------------------------------
+  -- | Sender Source
+  ------------------------------------------------------------------------
   runSender :: Z.Socket a -> Source -> IO ()
   runSender s src = C.runResourceT $ src $$ relay s
 
-  cmdName :: Service -> String
-  cmdName sn = "inproc://_" ++ sn
+  ------------------------------------------------------------------------
+  -- Create cmdName
+  ------------------------------------------------------------------------
+  cmdName :: Service -> IO String
+  cmdName sn = do
+    u <- show <$> mkUniqueId
+    return $ "inproc://_" ++ sn ++ "_" ++ u
             
   ------------------------------------------------------------------------
   -- Creates a socket, binds or links it and sets the socket options
@@ -186,19 +294,41 @@ where
     (\p -> mkPoll ctx ks (Map.insert (pollId k) p m) 
                          (pollId k:is) (p:ps)) 
 
+  ------------------------------------------------------------------------
+  -- Close socket in a poll entry
+  ------------------------------------------------------------------------
   closeS :: Z.Poll -> IO ()
   closeS p = case p of 
                Z.S s _ -> safeClose s
                _       -> return ()
 
+  ------------------------------------------------------------------------
+  -- safely close a socket 
+  ------------------------------------------------------------------------
   safeClose :: Z.Socket a -> IO ()
   safeClose s = catch (Z.close s)
                       (\e -> let _ = (e::SomeException)
                               in return ())
 
+  ------------------------------------------------------------------------
+  -- handle stop command
+  ------------------------------------------------------------------------
   cmdStop :: [Z.Poll] -> IO ()
   cmdStop = mapM_ closeS 
 
+  ------------------------------------------------------------------------
+  -- handle pause command
+  ------------------------------------------------------------------------
+  cmdPause :: Z.Socket a -> IO ()
+  cmdPause s = do
+    x <- B.unpack <$> Z.receive s []
+    case x of
+      "resume" -> return ()
+      _        -> cmdPause s
+
+  ------------------------------------------------------------------------
+  -- handle send command
+  ------------------------------------------------------------------------
   cmdSend :: Z.Socket a -> Streamer -> IO ()
   cmdSend cmd s = do
     ok <- Z.moreToReceive cmd
@@ -206,6 +336,9 @@ where
                   C.runResourceT $ recv cmd $$ passAll s ds
           else throwIO $ ProtocolExc "Abrupt end of send command"
 
+  ------------------------------------------------------------------------
+  -- get destination to send to
+  ------------------------------------------------------------------------
   getDest :: Z.Socket a -> [Identifier] -> IO [Identifier]
   getDest cmd is = do
     i <- B.unpack <$> Z.receive cmd []
@@ -215,44 +348,38 @@ where
                       if ok then getDest cmd (i:is)
                             else throwIO $ ProtocolExc 
                                    "Incomplete identifier list"
-                      
-  data More = More | NoMore
 
-  more :: More -> Bool
-  more More = True
-  more _    = False
-
+  ------------------------------------------------------------------------
+  -- relay stream to a socket
+  ------------------------------------------------------------------------
   relay :: Z.Socket a -> Sink
   relay s = do
     mbX <- C.await
     case mbX of
       Nothing -> return ()
-      Just x  -> do
-        mbN <- C.await
-        case mbN of
-          Nothing -> liftIO (Z.send s x [])
-          Just n  -> liftIO (Z.send s x [Z.SndMore]) >> go n
+      Just x  -> go x
      where go x = do
              mbN <- C.await 
              case mbN of
                Nothing -> liftIO (Z.send s x [])
                Just n  -> liftIO (Z.send s x [Z.SndMore]) >> go n
   
-  multiSend :: [(Identifier, Z.Poll)] -> B.ByteString -> More -> IO ()
-  multiSend ps m t = go ps
-    where go [] = return ()
-          go ((i,p):pp) = do 
-            ei_ <- try $ sndPoll p
-            case ei_ of
-              Left e -> throwIO (e::SomeException)
-              _      -> go pp
+  ------------------------------------------------------------------------
+  -- send one message to many streams
+  ------------------------------------------------------------------------
+  multiSend :: [(Identifier, Z.Poll)] -> B.ByteString -> [Z.Flag] -> IO ()
+  multiSend ps m os = go ps
+    where go []         = return ()
+          go ((_,p):pp) = sndPoll p >> go pp
           sndPoll p = case p of
-                        Z.S s _ -> Z.send s m flg
+                        Z.S s _ -> Z.send s m os
                         _       -> throwIO $ Ouch "Ouch! Not a Poll!"
-          flg  = if more t then [Z.SndMore] else []  
 
+  ------------------------------------------------------------------------
+  -- Find sockets corresponding to identifiers
+  ------------------------------------------------------------------------
   idsToSocks :: Streamer -> [Identifier] -> Either String [(Identifier, Z.Poll)]
-  idsToSocks s ds = getSocks ds
+  idsToSocks s = getSocks 
     where getSock i | i == internal = Right $ strmCmd s
                     | otherwise     =
             case Map.lookup i (strmIdx s) of
@@ -277,19 +404,40 @@ where
                      strmCmd  :: Z.Poll,
                      strmPoll :: [Z.Poll]}
 
+  ------------------------------------------------------------------------
+  -- | Conduit with Streamer
+  ------------------------------------------------------------------------
   type StreamConduit = Streamer -> Conduit B.ByteString ()
+
+  ------------------------------------------------------------------------
+  -- | Sink with Streamer
+  ------------------------------------------------------------------------
   type StreamSink    = Streamer -> Sink
+
+  ------------------------------------------------------------------------
+  -- | IO Action with Streamer (Timeout)
+  ------------------------------------------------------------------------
   type StreamAction  = Streamer -> IO ()
 
+  ------------------------------------------------------------------------
+  -- | Get current source
+  ------------------------------------------------------------------------
   getSource :: Streamer -> Identifier
   getSource s = case strmSrc s of
                   Nothing    -> ""
                   Just (i,_) -> i
 
+  ------------------------------------------------------------------------
+  -- | Filter subset of streams; usually you want to filter
+  --   a subset of streams to relay an incoming stream.
+  ------------------------------------------------------------------------
   filterStreams :: Streamer -> (Identifier -> Bool) -> [Identifier]
   filterStreams s p = map fst $ Map.toList $ 
                                 Map.filterWithKey (\k _ -> p k) $ strmIdx s
 
+  ------------------------------------------------------------------------
+  -- | Pass all segments of an incoming stream to a list of outgoing streams
+  ------------------------------------------------------------------------
   passAll :: Streamer -> [Identifier] -> Sink
   passAll s ds = 
     case idsToSocks s ds of 
@@ -297,17 +445,16 @@ where
       Right ss -> do mbI <- C.await -- C.awaitForever $ \i -> do
                      case mbI of
                        Nothing -> return ()
-                       Just i  -> do
-                         mbN <- C.await 
-                         case mbN of
-                           Nothing -> liftIO (multiSend ss i NoMore)
-                           Just n  -> liftIO (multiSend ss i   More) >> go ss n
-    where go ss n = do 
-            mbI <- C.await
-            case mbI of
-              Nothing -> liftIO (multiSend ss n NoMore)
-              Just i  -> liftIO (multiSend ss n   More) >> go ss i
+                       Just i  -> go ss i
+    where go ss i = do 
+            mbN <- C.await
+            case mbN of
+              Nothing -> liftIO (multiSend ss i [])
+              Just n  -> liftIO (multiSend ss i [Z.SndMore]) >> go ss n
 
+  ------------------------------------------------------------------------
+  -- | Pass one segment and ignore the remainder of the stream
+  ------------------------------------------------------------------------
   pass1 :: Streamer -> [Identifier] -> Sink
   pass1 s ds = 
     case idsToSocks s ds of
@@ -316,79 +463,109 @@ where
         mbX <- C.await 
         case mbX of
           Nothing -> return ()
-          Just x  -> liftIO (multiSend ss x NoMore) >> ignoreStream
+          Just x  -> liftIO (multiSend ss x []) >> ignoreStream
 
-  passPart :: Streamer -> [Identifier] -> Sink
-  passPart s ds = 
-    case idsToSocks s ds of
-      Left  e  -> liftIO $ throwIO $ ProtocolExc e 
-      Right ss -> go ss
-    where go ss = C.awaitForever $ \i -> liftIO $ multiSend ss i More
-
+  ------------------------------------------------------------------------
+  -- | Ignore an incoming stream
+  ------------------------------------------------------------------------
   ignoreStream :: Sink
   ignoreStream = do mb <- C.await
                     case mb of 
                       Nothing -> return ()
                       Just _  -> ignoreStream
 
+  ------------------------------------------------------------------------
+  -- | Send the segments to a list of outgoing streams
+  --   without terminating the stream
+  ------------------------------------------------------------------------
   part :: Streamer -> [Identifier] -> [B.ByteString] -> Sink
   part s ds ms = 
     case idsToSocks s ds of
       Left  e  -> liftIO $ throwIO $ ProtocolExc e
       Right ss -> go ss
-    where go ss = liftIO $ mapM_ (\x -> multiSend ss x More) ms
+    where go ss = liftIO $ mapM_ (\x -> multiSend ss x [Z.SndMore]) ms
 
+  ------------------------------------------------------------------------
+  -- | Send the segments to a list of outgoing streams
+  --   terminating the stream
+  ------------------------------------------------------------------------
   stream :: Streamer -> [Identifier] -> [B.ByteString] -> Sink
   stream s ds ms = 
     case idsToSocks s ds of
       Left e   -> liftIO $ throwIO $ ProtocolExc e 
       Right ss -> go ms ss
     where go [] _      = return ()
-          go [x] ss    = liftIO (multiSend ss x NoMore)
-          go (x:xs) ss = liftIO (multiSend ss x More) >> go xs ss
+          go [x] ss    = liftIO (multiSend ss x [])
+          go (x:xs) ss = liftIO (multiSend ss x [Z.SndMore]) >> go xs ss
 
   ------------------------------------------------------------------------
-  -- Controller
+  -- | The internal stream represented by the 'Controller'
   ------------------------------------------------------------------------
   internal :: String
   internal = "_internal" 
 
+  ------------------------------------------------------------------------
+  -- | Controller
+  ------------------------------------------------------------------------
   data Controller = Controller {
                       ctrlCtx  :: Context,
                       ctrlCmd  :: Z.Socket Z.XReq,
                       ctrlOpts :: [Z.SocketOption]}
 
+  ------------------------------------------------------------------------
+  -- | Control Action
+  ------------------------------------------------------------------------
   type Control a = Controller -> IO a
 
+  ------------------------------------------------------------------------
+  -- Get the socket from a controller and send a string to it
+  ------------------------------------------------------------------------
+  sndCmd :: String -> Controller -> IO ()
+  sndCmd cmd ctrl = let s = ctrlCmd ctrl
+                     in Z.send s (B.pack cmd) []
+
+  ------------------------------------------------------------------------
+  -- | Stop streams
+  ------------------------------------------------------------------------
   stop :: Controller -> IO ()
-  stop c =
-    let s = ctrlCmd c
-     in Z.send s (B.pack "stop") []
+  stop = sndCmd "stop"
 
-  start :: Controller -> IO ()
-  start c = return ()
-
+  ------------------------------------------------------------------------
+  -- | Pause streams
+  ------------------------------------------------------------------------
   pause :: Controller -> IO ()
-  pause c = return () 
+  pause = sndCmd "pause"
 
+  ------------------------------------------------------------------------
+  -- | Resume streams
+  ------------------------------------------------------------------------
   resume :: Controller -> IO ()
-  resume c = return ()
+  resume = sndCmd "resume"
 
-  addStream :: Controller -> IO ()
-  addStream c = return ()
+  {- ????
+  ignore :: Controller -> [Identifier] -> IO ()
+  ignore c is = return ()
 
-  remove :: Controller -> IO ()
-  remove c = return ()
+  attend :: Controller -> [Identifier] -> IO ()
+  attend c is = return ()
 
-  ignore :: Controller -> IO ()
-  ignore c = return ()
+  rmStream :: Identifier -> [Identifier] -> [Z.Poll] -> ([Identifier], [Z.Poll])
+  rmStream _ [] ps = ([], [])
+  rmStream _ is [] = ([], [])
+  rmStream x (i:is) (p:ps) | x == i    = (is, ps)
+                           | otherwise = (i : rmStream is, p : rmStream ps)
 
-  attend :: Controller -> IO ()
-  attend c = return ()
-  
-  changeTmo :: Controller -> IO ()
-  changeTmo c = return ()
+  -}
 
+  ------------------------------------------------------------------------
+  -- | Receive a stream through the controller
+  ------------------------------------------------------------------------
+  receive :: Controller -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
+  receive c tmo snk = C.runResourceT $ recvTmo (ctrlCmd c) tmo $$ snk
+
+  ------------------------------------------------------------------------
+  -- | Send a stream through the controller
+  ------------------------------------------------------------------------
   send :: Controller -> [Identifier] -> Source -> IO ()
   send c is src = 
     let s = ctrlCmd c
@@ -398,9 +575,6 @@ where
     where sendIds s  = do mapM_ (sendId s) is
                           Z.send s B.empty [Z.SndMore]
           sendId s i = Z.send s (B.pack i) [Z.SndMore]
-
-  receive :: Controller -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
-  receive c tmo snk = C.runResourceT $ recvTmo (ctrlCmd c) tmo $$ snk
 
   ------------------------------------------------------------------------
   -- | Defines the type of a 'PollEntry';
@@ -452,7 +626,25 @@ where
     deriving (Eq, Show, Read)
 
   ------------------------------------------------------------------------
-  -- | A poll entry describes how to handle an 'AccessPoint'
+  -- | Safely read 'AccessType';
+  --   ignores the case of the input string
+  --   (/e.g./ \"servert\" -> 'ServerT')
+  ------------------------------------------------------------------------
+  parseAccess :: String -> Maybe AccessType
+  parseAccess s = case map toLower s of
+                    "servert" -> Just ServerT    
+                    "clientt" -> Just ClientT
+                    "routert" -> Just RouterT 
+                    "dealert" -> Just DealerT 
+                    "pubt"    -> Just PubT    
+                    "subt"    -> Just SubT    
+                    "pipet"   -> Just PipeT
+                    "pullt"   -> Just PullT
+                    "peert"   -> Just PeerT
+                    _         -> Nothing
+
+  ------------------------------------------------------------------------
+  -- | A poll entry describes how to handle how to access a stream
   ------------------------------------------------------------------------
   data PollEntry = Poll {
                      pollId   :: Identifier,
@@ -486,7 +678,7 @@ where
                   _         -> Nothing
 
   -------------------------------------------------------------------------
-  -- binds or connects to the address
+  -- | Binds or connects a socket to an address
   -------------------------------------------------------------------------
   link :: LinkType -> Z.Socket a -> String -> [Z.SocketOption] -> IO ()
   link t s add os = do setSockOs s os
@@ -513,12 +705,6 @@ where
                                        threadDelay 1000
                                        trycon sock add (i-1))
 
-  ------------------------------------------------------------------------
-  -- either with the arguments flipped 
-  ------------------------------------------------------------------------
-  ifLeft :: Either a b -> (a -> c) -> (b -> c) -> c
-  ifLeft e l r = either l r e
- 
   -------------------------------------------------------------------------
   -- Sets Socket Options
   -------------------------------------------------------------------------

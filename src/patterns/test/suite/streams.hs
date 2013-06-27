@@ -3,22 +3,17 @@ where
 
   import           Common
   import           System.Exit
-  import           System.Timeout
   import qualified System.ZMQ as Z
   import           Test.QuickCheck
-  import           Test.QuickCheck.Monadic
   import qualified Data.ByteString.Char8 as B
-  import           Data.Time.Clock
-  import           Data.Monoid
   import           Data.List (sort)
   import qualified Data.Conduit as C
-  import           Data.Conduit ((=$))
+  import qualified Data.Conduit.List as CL
+  import           Data.Conduit (($=), ($$), (=$))
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad (unless)
   import           Control.Monad.Trans (liftIO)
-  import           Control.Exception (AssertionFailed(..), 
-                                      throwIO, SomeException)
+  import           Control.Exception (try, throwIO, SomeException)
 
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams
@@ -35,6 +30,26 @@ where
   osock5 = "inproc://_out5"
   osock6 = "inproc://_out6"
 
+  prpStreamList :: NonEmptyList String -> Property
+  prpStreamList (NonEmpty s) = testContext s $ \_ -> 
+    try $ map B.unpack <$> C.runResourceT (
+          streamList (map B.pack s) $$ CL.consume)
+
+  prpPassThrough1_ :: NonEmptyList String -> Property
+  prpPassThrough1_ (NonEmpty s) = testContext s $ \_ -> 
+    try $ map B.unpack <$> C.runResourceT (
+          streamList (map B.pack s) $= passThrough $$ CL.consume)
+
+  prpPassThrough_1 :: NonEmptyList String -> Property
+  prpPassThrough_1 (NonEmpty s) = testContext s $ \_ -> 
+    try $ map B.unpack <$> C.runResourceT (
+          streamList (map B.pack s) $$ passThrough =$ CL.consume)
+
+  prpPassThrough2 :: NonEmptyList String -> Property
+  prpPassThrough2 (NonEmpty s) = testContext s $ \_ -> 
+    try $ map B.unpack <$> C.runResourceT (
+          streamList (map B.pack s) $= passThrough $$ passThrough =$ CL.consume)
+
   prpPassOne1 :: NonEmptyList Char -> Property
   prpPassOne1 (NonEmpty s) = testContext s $ \ctx -> 
     withStreams ctx "passOne1" (-1) 
@@ -47,7 +62,7 @@ where
                       Z.connect srv osock 
                       Z.send c (B.pack s) []
                       (Right . B.unpack) <$> Z.receive srv []
-    where job s = pass1 s ["out"]
+    where job x = pass1 x ["out"]
 
   prpPassOne :: NonEmptyList String -> Property
   prpPassOne (NonEmpty ss) = testContext [head ss] $ \ctx -> 
@@ -104,7 +119,7 @@ where
                         Right . sort <$> readMVar m
     where job s = passAll s ["out1", "out2", "out4"]
           tester m s = liftIO (modifyMVar_ m $ \l -> 
-                                   return $ (getSource s:l))
+                                   return (getSource s:l))
                        >> ignoreStream
 
   prpRecvControl :: NonEmptyList String -> Property
@@ -116,12 +131,12 @@ where
                   Z.withSocket ctx Z.Req $ \c -> do
                     Z.connect c isock 
                     sendAll c (map B.pack ss)
-                    mbR <- receive r 10000 (Just <$> consume)
+                    mbR <- receive r 10000 (Just <$> CL.consume)
                     case mbR of 
                       Nothing -> throwIO $ ProtocolExc "Nothing received"
                       Just  x -> return $ Right $ map B.unpack x
     where job s = passAll s [internal]
-
+ 
   prpSendControl :: NonEmptyList String -> Property
   prpSendControl (NonEmpty ss) = testContext ss $ \ctx -> 
     withStreams ctx "passAll" (-1) 
@@ -159,19 +174,19 @@ where
   prpPushPull :: NonEmptyList String -> Property
   prpPushPull (NonEmpty ss) = testContext ss $ \ctx -> 
     Z.withSocket ctx Z.Push $ \p ->
-      Z.withSocket ctx Z.Pull $ \s -> do
+      Z.withSocket ctx Z.Pull $ \s -> 
         testStreams ctx ss PullT PipeT p s
 
   prpPeerPeer :: NonEmptyList String -> Property
   prpPeerPeer (NonEmpty ss) = testContext ss $ \ctx -> 
     Z.withSocket ctx Z.Pair $ \p ->
-      Z.withSocket ctx Z.Pair $ \s -> do
+      Z.withSocket ctx Z.Pair $ \s -> 
         testStreams ctx ss PeerT PeerT p s
 
   prpDealerDealer :: NonEmptyList String -> Property
   prpDealerDealer (NonEmpty ss) = testContext ss $ \ctx -> 
     Z.withSocket ctx Z.Dealer $ \p ->
-      Z.withSocket ctx Z.Dealer $ \s -> do
+      Z.withSocket ctx Z.Dealer $ \s -> 
         testStreams ctx ss DealerT DealerT p s
 
   -- pass with
@@ -186,12 +201,27 @@ where
   -- resume streams
   -- pause 1 stream
   -- resume 1 stream
-  -- add stream
   -- remove stream
   -- change timeout
   -- stop streams
-  
-  
+
+  {-
+  prpAddStream :: NonEmptyList String -> Property
+  prpAddStream (NonEmpty ss) = testContext ss $ \ctx ->
+    try $ withStreams ctx "Test" (-1) 
+                [Poll "in"  isock ServerT Bind [] []]
+                ignoreTmo onErr job $ \x -> 
+      Z.withSocket ctx Z.Req $ \c ->
+        Z.withSocket ctx Z.Rep $ \s -> do
+          Z.connect c isock
+          Z.bind    s osock
+          addStream x "out" osock ClientT Connect [] []
+          sendAll c (map B.pack ss) 
+          (map B.unpack) <$> recvAll s 
+    where job s = let trgs = filterStreams s (/= "in")
+                   in passAll s trgs
+  -}
+          
   checkAll :: IO ()
   checkAll = do
     let good = "OK. All Tests passed."
@@ -200,27 +230,32 @@ where
     putStrLn "       Patterns Library Test Suite"
     putStrLn "                 Streams"
     putStrLn "========================================="
-    r <- runTest "Pass one passes one"
+    r <- runTest "Stream list"
+                  (deepCheck prpStreamList)        ?>
+         runTest "passThrough1_"
+                  (deepCheck prpPassThrough1_)     ?>
+         runTest "passThrough_1"
+                  (deepCheck prpPassThrough_1)     ?>
+         runTest "passThrough2"
+                  (deepCheck prpPassThrough2)      ?> 
+         runTest "Pass one passes one"
                   (deepCheck prpPassOne1)          ?>
          runTest "Pass one passes one with many"
                   (deepCheck prpPassOne)           ?>
          runTest "Pass all passes all"
                   (deepCheck prpPassAll)           ?>
          runTest "Pass to exactly all out streams"
-                  (deepCheck prpMultiOut)          ?>          
-         runTest "Receive through control"
-                  (deepCheck prpRecvControl)       ?>
-         runTest "Send    through control"
-                  (deepCheck prpSendControl)       ?>
+                  (deepCheck prpMultiOut)          ?> 
          runTest "Pub-Sub"
                   (deepCheck prpPubSub)            ?>
          runTest "Push-Pull"
                   (deepCheck prpPushPull)          ?>
          runTest "Peer-Peer"
-                  (deepCheck prpPeerPeer)          ?>
-         runTest "Dealer-Dealer"
-                  (deepCheck prpDealerDealer)
-
+                  (deepCheck prpPeerPeer)          ?> 
+         runTest "Receive through Control"
+                  (deepCheck prpRecvControl)       ?>
+         runTest "Send through Control"
+                  (deepCheck prpSendControl) 
 
          {-
          runTest "Timeout" (oneCheck prp_onTmo)      ?>

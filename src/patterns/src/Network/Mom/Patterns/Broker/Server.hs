@@ -3,12 +3,9 @@ module Network.Mom.Patterns.Broker.Server
 where
 
   import           Control.Monad.Trans (liftIO)
-  import           Control.Monad (unless, when)
-  import           Control.Applicative ((<$>))
   import           Prelude hiding (catch)
-  import           Control.Exception (catch, try, SomeException, throwIO,
-                                      bracket, bracketOnError, finally)
-  import           Data.Conduit (($$), (=$), (=$=))
+  import           Control.Exception (throwIO, finally)
+  import           Data.Conduit ((=$), (=$=))
 
   import           Network.Mom.Patterns.Streams.Types
   import           Network.Mom.Patterns.Streams.Streams

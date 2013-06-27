@@ -3,34 +3,26 @@ where
 
   import           Common
   import           System.Exit
-  import           System.Timeout
-  import           System.IO (stdout, hFlush)
-  import qualified System.ZMQ as Z
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
 
   import           Registry  -- <--- SUT
   import           Heartbeat -- <--- SUT
 
-  import           Data.List (nub, delete, sort)
+  import           Data.List (nub, delete)
   import qualified Data.ByteString.Char8 as B
-  import           Data.Time.Clock
-  import           Data.Either
   import           Data.Maybe
   import qualified Data.Sequence as S
   import           Data.Foldable (toList)
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Control.Monad
-  import           Control.Monad.Trans (liftIO)
-  import           Control.Exception (throwIO, AssertionFailed(..), SomeException)
 
   prpInsertFreeQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertFreeQ ns = let is = nub $ nonemptyString ns
                        in monadicIO $ do
     mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    f <- run $ modifyMVar mq $ \q -> do
+    ws <- run $ mapM (makeW mq 0) is
+    f  <- run $ modifyMVar mq $ \q -> do
            let q' = mapQ ws q insertQ
            returnFree q'
     assert (f == nub is)
@@ -39,8 +31,8 @@ where
   prpRemoveAllQ ns = let is = nub $ nonemptyString ns 
                       in monadicIO $ do
     mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    f <- run $ modifyMVar mq $ \q -> do
+    ws <- run $ mapM (makeW mq 0) is
+    f  <- run $ modifyMVar mq $ \q -> do
            let q1 = mapQ ws q  insertQ
            let q2 = mapQ ws q1 (removeQ . fst)
            returnFree q2
@@ -49,9 +41,9 @@ where
   prpRemoveQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpRemoveQ ns = let is = nub $ nonemptyString ns 
                    in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    ix <- pick $ choose (0, (length is) - 1)
+    mq <- run  $ newMVar $ Q S.empty S.empty
+    ws <- run  $ mapM (makeW mq 0) is
+    ix <- pick $ choose (0, length is - 1)
     f <- run $ modifyMVar mq $ \q -> do
            let q1 = mapQ ws q insertQ
            let w  = B.pack $ is!!ix
@@ -63,10 +55,10 @@ where
   prpSetStateFree2FreeQ ns = let is = nub $ nonemptyString ns
                               in monadicIO $ do
     mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
+    ws <- run $ mapM (makeW mq 0) is
     f <- run $ modifyMVar mq $ \q -> do
             let q1 = mapQ ws q insertQ
-            let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Free id q)
+            let q2 = mapQ ws q1 (\w k -> setStateQ (fst w) Free id k)
             returnFree q2
     assert (f == is)
 
@@ -74,18 +66,18 @@ where
   prpSetStateFree2BusyQ ns = let is = nub $ nonemptyString ns
                               in monadicIO $ do
     mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
+    ws <- run $ mapM (makeW mq 0) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
-                      let q2 = mapQ ws q1 (\w q -> setStateQ (fst w) Busy id q)
+                      let q2 = mapQ ws q1 (\w k -> setStateQ (fst w) Busy id k)
                       returnBoth q2
     assert (null f && b == is)
 
   prpSetStateBusy2FreeQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpSetStateBusy2FreeQ ns = let is = nub $ nonemptyString ns
                               in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
+    mq     <- run $ newMVar $ Q S.empty S.empty
+    ws     <- run $ mapM (makeW mq 0) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
                       let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
@@ -96,8 +88,8 @@ where
   prpSetStateBusy2BusyQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpSetStateBusy2BusyQ ns = let is = nub $ nonemptyString ns
                               in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
+    mq     <- run $ newMVar $ Q S.empty S.empty
+    ws     <- run $ mapM (makeW mq 0) is
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
                       let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
@@ -109,7 +101,7 @@ where
   prpSetState1Free2BusyQ ns = let is = nub $ nonemptyString ns
                               in monadicIO $ do
     mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
+    ws <- run $ mapM (makeW mq 0) is
     ix <- pick $ choose (0, length is - 1)
     (f, b) <- run $ modifyMVar mq $ \q -> do
                       let w  = B.pack $ is!!ix
@@ -121,9 +113,8 @@ where
   prpFirstFreeQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpFirstFreeQ ns = let is = nub $ nonemptyString ns
                       in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    ix <- pick $ choose (0, length is - 1)
+    mq <- run  $ newMVar $ Q S.empty S.empty
+    ws <- run  $ mapM (makeW mq 0) is
     (f, _, w) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
                       let w  = firstFreeQ q1
@@ -135,9 +126,8 @@ where
   prpFirstBusyQ :: NonEmptyList (NonEmptyList Char) -> Property
   prpFirstBusyQ ns = let is = nub $ nonemptyString ns
                       in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    ix <- pick $ choose (0, length is - 1)
+    mq <- run  $ newMVar $ Q S.empty S.empty
+    ws <- run  $ mapM (makeW mq 0) is
     (_, b, w) <- run $ modifyMVar mq $ \q -> do
                       let q1 = mapQ ws q insertQ
                       let q2 = mapQ ws q1 (\w qx -> setStateQ (fst w) Busy id qx)
@@ -149,7 +139,7 @@ where
 
   prpInsertOne :: NonEmptyList Char -> Property
   prpInsertOne (NonEmpty is) = monadicIO $ do
-    run $ clean
+    run clean
     run $ insert (B.pack is) (B.pack "Test")
     mbW <- run $ getWorker   (B.pack "Test") 
     case mbW of
@@ -159,7 +149,7 @@ where
   prpInsertSize :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertSize ns = let is = nub $ nonemptyString ns
                      in monadicIO $ do
-    run $ clean
+    run clean
     run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
     n <- run size
     assert (n == length is) 
@@ -167,7 +157,7 @@ where
   prpInsertAll :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertAll ns = let is = nub $ nonemptyString ns
                      in monadicIO $ do
-    run $ clean
+    run clean
     run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
     ws <- run $ (map B.unpack . catMaybes) <$> 
                 mapM (\_ -> getWorker $ B.pack "Test") is
@@ -176,7 +166,7 @@ where
   prpStatsPerService :: NonEmptyList (NonEmptyList Char) -> Property
   prpStatsPerService ns = let is = nub $ nonemptyString ns
                            in monadicIO $ do
-    run $ clean
+    run clean
     run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
     n <- pick $ choose (1, length is)
     _ <- run  $ mapM (\_ -> getWorker $ B.pack "Test") [1..n]
@@ -191,9 +181,9 @@ where
   prpNextHB ns = let is = nub $ nonemptyString ns
                   in monadicIO $ do
     let sn = B.pack "Test"
-    run $ clean
+    run clean
     run $ mapM_ (\i -> insert (B.pack i) sn) is
-    xs <- run $ checkWorker
+    xs <- run checkWorker
     assert (null xs)
 
   prpCheckSnd :: NonEmptyList (NonEmptyList Char) -> Property
@@ -201,9 +191,9 @@ where
                     in monadicIO $ do
     let sn = B.pack "Test"
     run $ do clean
-             mapM_ (\i -> insert i sn) is
+             mapM_ (`insert` sn) is
              setBack (-10000) is
-    xs <- run $ checkWorker
+    xs <- run checkWorker
     assert (xs == take nbCheck is)
 
   prpCheckBurries :: NonEmptyList (NonEmptyList Char) -> Property
@@ -212,7 +202,7 @@ where
     let sn = B.pack "Test"
     (xs, ys, zs, n1 , n2) <- run $ do 
       clean
-      mapM_ (\i -> insert i sn) is
+      mapM_ (`insert` sn) is
       n1 <- size
       xs <- checkWorker
       setBack (-10000) is
@@ -233,7 +223,7 @@ where
     let sn = B.pack "Test"
     (xs, ys, n1, n2) <- run $ do 
       clean
-      mapM_ (\i -> insert i sn) is
+      mapM_ (`insert` sn) is
       n1 <- size
       setBack (-10000) is
       xs <- checkWorker
@@ -254,7 +244,7 @@ where
     let sn = B.pack "Test"
     (xs, n1, n2) <- run $ do 
       clean
-      mapM_ (\i -> insert i sn) is
+      mapM_ (`insert` sn) is
       n1 <- size
       mapM_ (\_ -> getWorker sn) [1..nbCheck] 
       setBack (-10000) is
@@ -271,7 +261,7 @@ where
     let sn = B.pack "Test"
     (xs, n1, n2) <- run $ do 
       clean
-      mapM_ (\i -> insert i sn) is
+      mapM_ (`insert` sn) is
       n1 <- size
       mapM_ (\_ -> getWorker sn) [1..nbCheck] 
       setBack (-10) is
@@ -302,7 +292,7 @@ where
   -}
 
   setBack :: Msec -> [B.ByteString] -> IO ()
-  setBack ms = mapM_ (\i -> updWorker i setTime) 
+  setBack ms = mapM_ (`updWorker` setTime) 
     where setTime (i, w) = 
             let hb  = wrkHB w 
                 hb2 = hb {hbNextHB = timeAdd (hbNextHB hb) ms}
@@ -320,17 +310,8 @@ where
 
   returnBothMore :: Queue -> a -> 
                     IO (Queue, ([String], [String], a))
-  returnBothMore q w = do (q, (f,b)) <- returnBoth q
-                          return (q, (f,b,w))
-
-  testQ :: NonEmptyList (NonEmptyList Char) -> Bool ->
-           ([String] -> Queue -> IO (Queue, [String]))  -> Property
-  testQ ns assertion act = let is = nub $ nonemptyString ns 
-                            in monadicIO $ do
-    mq <- run $ newMVar $ Q S.empty S.empty
-    let ws = map (makeW mq) is
-    r <- run $ modifyMVar mq (act is)
-    assert assertion
+  returnBothMore q w = do (q', (f,b)) <- returnBoth q
+                          return (q', (f,b,w))
 
   nonemptyString :: NonEmptyList (NonEmptyList Char) -> [String]
   nonemptyString (NonEmpty ns) = map (\(NonEmpty c) -> c) ns
@@ -339,8 +320,8 @@ where
   mapQ []     q _ = q
   mapQ (w:ws) q f = mapQ ws (f w q) f
 
-  makeW2 :: MVar Queue -> Msec -> String -> IO WrkNode
-  makeW2 mq ms s = do
+  makeW :: MVar Queue -> Msec -> String -> IO WrkNode
+  makeW mq ms s = do
      hb <- newHeartbeat	ms
      let i = B.pack s
      return (i, Worker {
@@ -348,13 +329,6 @@ where
                   wrkState = Free,
                   wrkHB    = hb,
                   wrkQ     = mq})
-
-  makeW :: MVar Queue -> String -> WrkNode
-  makeW mq s = let i = B.pack s
-                in (i, Worker {
-                         wrkId    = i,
-                         wrkState = Free,
-                         wrkQ     = mq})
 
   checkAll :: IO ()
   checkAll = do

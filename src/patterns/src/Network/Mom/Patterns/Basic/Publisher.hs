@@ -1,19 +1,8 @@
 module Network.Mom.Patterns.Basic.Publisher
 where
 
-  import           Control.Monad.Trans (liftIO)
-  import           Control.Monad (unless, when)
-  import           Control.Applicative ((<$>))
-  import           Prelude hiding (catch)
-  import           Control.Exception (catch, try, SomeException, throwIO,
-                                      bracket, bracketOnError, finally)
-  import           Control.Concurrent
-  import           Data.Conduit (($$), ($=), (=$=))
-  import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
   import           Data.List (intercalate)
-  import           Data.Map (Map)
-  import qualified Data.Map as Map
   import qualified System.ZMQ            as Z
 
   import           Network.Mom.Patterns.Streams.Types
@@ -27,7 +16,7 @@ where
              (Pub -> IO a) -> IO a
   withPub ctx add lt act = 
     Z.withSocket ctx Z.Pub $ \s -> 
-      link lt s add [] >> (act $ Pub s)
+      link lt s add [] >> act (Pub s)
 
   issue :: Pub -> [Service] -> Source -> IO ()
   issue p topics src = runSender (pubSock p) pubSrc

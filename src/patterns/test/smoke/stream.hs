@@ -9,7 +9,7 @@ where
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
   
-  import           Network.Mom.Patterns.Stream 
+  import           Network.Mom.Patterns.Streams.Streams 
   import qualified System.ZMQ as Z
 
   main :: IO ()

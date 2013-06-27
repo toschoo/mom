@@ -7,7 +7,6 @@ where
   import qualified Data.ByteString.Char8  as B
 
   import           Control.Monad.Trans (liftIO)
-  import           Control.Applicative ((<$>))
   import           Control.Exception   (throwIO)
   import           Data.Conduit (($=), (=$))
   import qualified Data.Conduit          as C

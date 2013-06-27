@@ -13,11 +13,10 @@ where
   import           Data.Conduit ((=$), ($$))
 
   import           Control.Applicative ((<$>))
-  import           Control.Monad (when, unless)
   import           Control.Monad.Trans (liftIO)
   import           Prelude hiding (catch)
-  import           Control.Exception (SomeException, throwIO,
-                                      catch, try, finally)
+  import           Control.Exception (throwIO)
+                                      
 
   withBroker :: Context  -> Service -> Timeout -> String -> String -> 
                 OnError_ -> (Controller -> IO r)        -> IO r

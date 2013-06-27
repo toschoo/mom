@@ -20,7 +20,7 @@ where
   newHeartbeat :: Msec -> IO Heartbeat
   newHeartbeat period = do
     now <- getCurrentTime
-    return $ Heart {
+    return Heart {
                hbNextHB = timeAdd now (tolerance * period),
                hbPeriod = period,
                hbBeat   = False}
