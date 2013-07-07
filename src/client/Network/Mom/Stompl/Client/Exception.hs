@@ -1,4 +1,4 @@
-{-# OPTIONS -fglasgow-exts #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module     : Network/Mom/Stompl/Client/Exception.hs

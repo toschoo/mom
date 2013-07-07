@@ -1,4 +1,3 @@
-{-# OPTIONS -fglasgow-exts -fno-cse #-}
 module State (
          msgContent, numeric, ms,
          Connection(..),
@@ -329,7 +328,7 @@ where
   rmRecFromTx r t = t {txRecs = delete r $ txRecs t}
 
   checkReceiptTx :: Receipt -> Transaction -> Bool
-  checkReceiptTx r = not . (elem r) . txRecs 
+  checkReceiptTx r = notElem r . txRecs 
 
   txPendingAck :: Transaction -> Bool
   txPendingAck t = txAbrtAck t && not (null $ txAcks t)

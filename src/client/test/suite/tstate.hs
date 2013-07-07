@@ -576,7 +576,7 @@ where
   applyTest r f = do
     r' <- r
     case r' of
-      Success _ -> f
+      Success{} -> f
       x         -> return x
 
   infixr ?>
@@ -621,7 +621,7 @@ where
          deepCheck prp_addRecTx       ?>
          deepCheck prp_addRmRecTx     
     case r of
-      Success _ -> do
+      Success{} -> do
         putStrLn good
         exitSuccess
       _ -> do

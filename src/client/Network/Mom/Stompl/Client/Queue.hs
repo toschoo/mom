@@ -406,13 +406,13 @@ where
           whenListening cid = bracket (forkIO $ listen cid) killThread
           whenBeating cid _ = bracket 
             (if period c > 0 
-               then Just <$> (forkIO $ heartBeat cid $ period c)
+               then Just <$> forkIO (heartBeat cid $ period c)
                else return Nothing)
             (\b -> when (isThrd b) (killThread $ thrd b))
             (\_ -> do r  <- act cid
                       c' <- getCon cid
                       -- wait for receipt on disconnect ----
-                      if (conWait c' <= 0) then return r
+                      if conWait c' <= 0 then return r
                         else do
                           rc <- mkUniqueRecc 
                           _  <- P.disconnect c (show rc)

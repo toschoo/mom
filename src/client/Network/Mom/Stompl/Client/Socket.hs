@@ -21,7 +21,8 @@ where
   import           Control.Exception (throwIO, finally, SomeException)
   import qualified Control.Exception as Ex (try)
 
-  import qualified Data.Attoparsec as A (Result(..), feed, parse)
+  import qualified Data.Attoparsec.ByteString as A (
+                                   Result, IResult(..), feed, parse)
 
   type Result = A.Result F.Frame
 
@@ -87,7 +88,7 @@ where
     tryConnect p adds
 
   tryConnect :: S.PortNumber -> [S.AddrInfo] -> IO S.Socket
-  tryConnect _ [] = throwIO $ SocketException $ 
+  tryConnect _ [] = throwIO $ SocketException 
                               "Give up: no more address info!"
   tryConnect p (i:is) = 
     case i of
