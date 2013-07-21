@@ -1,17 +1,10 @@
 module Main 
 where
 
-  import           Control.Monad.Trans
-  import           Control.Monad (forever)
-  import           Control.Concurrent
-  import           Control.Applicative ((<$>))
-  import           Data.Conduit (($$), ($=), (=$=))
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
-  
   import           Network.Mom.Patterns.Basic.Client
-  import           Network.Mom.Patterns.Streams.Types
-  import qualified System.ZMQ as Z
+  import           Network.Mom.Patterns.Types
 
   main :: IO ()
   main = withContext 1 $ \ctx -> 

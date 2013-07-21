@@ -8,8 +8,9 @@ OUTDIR = ./test/out
 SUTDIR = src/Network/Mom
 SRCDIR = src
 
-SUBSRC = $(SUTDIR)/Patterns/Streams/Streams.hs \
- 	 $(SUTDIR)/Patterns/Streams/Types.hs \
+SUBSRC = $(SUTDIR)/Patterns/Streams.hs \
+ 	 $(SUTDIR)/Patterns/Types.hs \
+	 $(SUTDIR)/Patterns/Basic.hs \
  	 $(SUTDIR)/Patterns/Basic/Client.hs \
  	 $(SUTDIR)/Patterns/Basic/Server.hs \
 	 $(SUTDIR)/Patterns/Basic/Publisher.hs \
@@ -17,6 +18,7 @@ SUBSRC = $(SUTDIR)/Patterns/Streams/Streams.hs \
 	 $(SUTDIR)/Patterns/Basic/Pusher.hs \
 	 $(SUTDIR)/Patterns/Basic/Puller.hs \
 	 $(SUTDIR)/Patterns/Broker/Common.hs \
+	 $(SUTDIR)/Patterns/Broker.hs \
 	 $(SUTDIR)/Patterns/Broker/Broker.hs \
 	 $(SUTDIR)/Patterns/Broker/Client.hs \
 	 $(SUTDIR)/Patterns/Broker/Server.hs \

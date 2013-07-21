@@ -7,15 +7,17 @@ COMDIR = ../test/common
 tests = $(TDIR)/tparser \
         $(TDIR)/tframe 
 
-SUTDIR = Network/Mom/Stompl/Client
+SUTDIR = Network/Mom/Stompl
 
 CLIENT = Client
 
-SUBSRC = $(SUTDIR)/Socket.hs \
-         $(SUTDIR)/Protocol.hs \
-         $(SUTDIR)/Factory.hs \
-         $(SUTDIR)/State.hs \
-         $(SUTDIR)/Queue.hs 
+SUBSRC = $(SUTDIR)/Client/Socket.hs \
+         $(SUTDIR)/Client/Protocol.hs \
+         $(SUTDIR)/Client/Factory.hs \
+         $(SUTDIR)/Client/State.hs \
+         $(SUTDIR)/Client/Queue.hs \
+         $(SUTDIR)/Client/Streams.hs \
+         $(SUTDIR)/Client/Basic.hs 
 
 GHC = ghc
 FLGS = -DTEST -Wall --make
@@ -55,6 +57,15 @@ $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/conduit1:	$(SMOKEDIR)/conduit1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/cl1:	$(SMOKEDIR)/cl1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/contx1:	$(SMOKEDIR)/contx1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 suite:	$(TDIR)/tprotocol \
@@ -102,13 +113,16 @@ clean:
 	rm -f $(SMOKEDIR)/sendforever
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/frost
+	rm -f $(SMOKEDIR)/cl1
+	rm -f $(SMOKEDIR)/conduit1
+	rm -f $(SMOKEDIR)/contx1
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
 
 dist-clean:	clean
 		cabal clean
-		rm -f $(SUTDIR)/*.hi
-		rm -f $(SUTDIR)/*.o
+		rm -f $(SUTDIR)/Client/*.hi
+		rm -f $(SUTDIR)/Client/*.o
 		rm -f test/bin/*.o
 		rm -f test/bin/*.hi
 

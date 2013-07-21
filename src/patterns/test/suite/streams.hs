@@ -15,8 +15,8 @@ where
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (try, throwIO, SomeException)
 
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
 
 
   isock,osock :: String
@@ -77,6 +77,39 @@ where
                       sendAll c (map B.pack ss)
                       (Right . map B.unpack) <$> recvAll s
     where job s = pass1 s ["out"]
+
+  prpPassN :: (Digit, NonEmptyList String) -> Property
+  prpPassN (Digit i, NonEmpty ss) = testContext (take i ss) $ \ctx ->
+    withStreams ctx "passOne" (-1) 
+                [Poll "in"  isock ServerT Bind [] [],
+                 Poll "out" osock ClientT Bind [] []]
+                ignoreTmo onErr job $ \_ -> 
+                  Z.withSocket ctx Z.Req $ \c -> do
+                    Z.connect c isock 
+                    Z.withSocket ctx Z.Rep $ \s -> do
+                      Z.connect s osock 
+                      sendAll c (map B.pack ss)
+                      (Right . map B.unpack) <$> recvAll s
+    where job s = passN s ["out"] i
+
+  prpPassWhile :: NonEmptyList String -> Property
+  prpPassWhile (NonEmpty ss) = 
+    testContext (takeWhile (not . null) lst) $ \ctx ->
+      withStreams ctx "passOne" (-1) 
+                [Poll "in"  isock ServerT Bind [] [],
+                 Poll "out" osock ClientT Bind [] []]
+                ignoreTmo onErr job $ \_ -> 
+                  Z.withSocket ctx Z.Req $ \c -> do
+                    Z.connect c isock 
+                    Z.withSocket ctx Z.Rep $ \s -> do
+                      Z.connect s osock 
+                      sendAll c (map B.pack lst)
+                      (Right . map B.unpack) <$> recvAll s
+    where job s = passWhile s ["out"] cond
+          cond  = not . B.null
+          lst   = case dropWhile null ss of
+                    [] -> ["xxx"] -- send at least one!
+                    xx -> xx
 
   prpPassAll :: NonEmptyList String -> Property
   prpPassAll (NonEmpty ss) = testContext ss $ \ctx -> 
@@ -240,6 +273,10 @@ where
                   (deepCheck prpPassThrough2)      ?> 
          runTest "Pass one passes one"
                   (deepCheck prpPassOne1)          ?>
+         runTest "Pass n passes n"
+                  (deepCheck prpPassN)             ?> 
+         runTest "PassWhile is takeWhile"
+                  (deepCheck prpPassWhile)         ?>
          runTest "Pass one passes one with many"
                   (deepCheck prpPassOne)           ?>
          runTest "Pass all passes all"

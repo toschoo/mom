@@ -36,6 +36,7 @@ module Network.Mom.Stompl.Client.Queue (
                    InBound, OutBound, 
                    readQ, 
                    writeQ, writeQWith,
+                   writeAdHoc, writeAdHocWith,
                    -- * Messages
                    P.Message, 
                    msgContent, P.msgRaw, 
@@ -46,9 +47,10 @@ module Network.Mom.Stompl.Client.Queue (
                    waitReceipt,
                    -- * Transactions
                    -- $stomp_trans
+                   Tx,
                    withTransaction,
                    withTransaction_,
-                   Topt(..), abort,
+                   Topt(..), beginTx, commit, abort, abortTx,
                    -- * Acknowledgments
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
@@ -188,17 +190,17 @@ where
   {- $stomp_receipts
 
      Receipts are identifiers unique during the life time
-     of an application that can be added to all kinds of
+     of an application; receipts can be added to all kinds of
      messages sent to the broker.
-     The broker uses receipts to acknowledge received messages.
-     Receipts are, hence, useful to make a session more reliable.
+     The broker, in its turn, uses receipts to acknowledge received messages.
+     Receipts, hence, are useful to make a session more reliable.
      When the broker has confirmed the receipt of a frame sent to it,
      the client application can be sure that it has arrived.
      What kind of additional guarantees are made,
      /e.g./ that the frame is saved to disk or has already been sent
-     to the subscribers, depends on the broker.
+     to the subscriber(s), depends on the broker.
 
-     Receipts are usually handled internally by the library.
+     Receipts are handled internally by the library.
      The application, however, decides where receipts should
      be requested, /i.e./ on subcribing to a queue,
      on sending a message, on sending /acks/ and on
@@ -206,10 +208,12 @@ where
      On sending messages, 
      receipt handling can be made explict.
      The function 'writeQWith'
-     adds a receipt to the message
+     requests a receipt to the message
      and returns it to the caller.
      The application can then, later,
      explicitly wait for the receipt, using 'waitReceipt'.
+     Otherwise, receipt handling remains
+     inivisible in the application code.
   -}
 
   {- $stomp_trans
@@ -481,10 +485,13 @@ where
   data Qopt = 
             -- | A queue created with 'OWithReceipt' will request a receipt
             --   on all interactions with the broker.
-            --   The handling of receipts may be transparent to applications or
-            --   may be made visible by using 'writeQWith'.
-            --   Note that the option has effect right from the beginning, /i.e./
-            --   a 'Reader' created with 'OWithReceipt' will 
+            --   The handling of receipts is usually transparent to applications, 
+            --   but, in the case of sending message, may be made visible 
+            --   by using 'writeQWith' instead of 'writeQ'.
+            --   'writeQWith' return the receipt identifier
+            --   and the application can later invoke 'waitReceipt'
+            --   to wait for the broker confirming this receipt.
+            --   Note that a 'Reader' created with 'OWithReceipt' will 
             --   issue a request for receipt when subscribing to a Stomp queue.
             OWithReceipt 
             -- | A queue created with 'OWaitReceipt' will wait for the receipt
@@ -497,14 +504,14 @@ where
             --   the thread to preempt until the receipt is confirmed.
             --
             --   On writing a message, this is not always the preferred
-            --   method. You may want to fire and forget - for a while,
-            --   before you check that your message has actually been 
-            --   handled by the broker. In this case, you will create the
+            --   method. You may want to fire and forget - and check 
+            --   for the confirmation of the receipt only later.
+            --   In this case, you will create the
             --   'Writer' with 'OWithReceipt' only and, later, after having
             --   sent a message with 'writeQWith', wait for the receipt using
             --   'waitReceipt'. Note that 'OWaitReceipt' without 'OWithReceipt'
             --   has no meaning with 'writeQ' and 'writeQWith'. 
-            --   If you want to send a receipt
+            --   If you want to request a receipt with a message
             --   and wait for the broker to confirm it, you have to use 
             --   both options.
             --
@@ -525,8 +532,9 @@ where
             --   For more details, see 'F.AckMode'.
             | OMode F.AckMode  
             -- | Expression often used by Ren&#x00e9; Artois.
-            --   What he tries to say is: If 'OMode' is either
-            --   'F.Client' or 'F.ClientIndi', send an acknowledgment
+            --   Furthermore, if 'OMode' is either
+            --   'F.Client' or 'F.ClientIndi', then 
+            --   this option forces 'readQ' to send an acknowledgment
             --   automatically when a message has been read from the queue. 
             | OAck
             -- | A queue created with 'OForceTx' will throw 
@@ -712,7 +720,7 @@ where
     withReader cid qn dst os hs conv act >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
-  -- Creating a SendQ is plain an simple.
+  -- Creating a SendQ is plain and simple.
   ------------------------------------------------------------------------
   newSendQ :: Con -> String -> String -> [Qopt] -> 
               OutBound a -> IO (Writer a)
@@ -865,6 +873,10 @@ where
   writeQ q mime hs x =
     writeQWith q mime hs x >>= (\_ -> return ())
 
+  writeAdHoc :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO ()
+  writeAdHoc q dest mime hs x =
+    writeGeneric q dest mime hs x >>= (\_ -> return ())
+
   ------------------------------------------------------------------------
   -- | This is a variant of 'writeQ' 
   --   that is particularly useful for queues 
@@ -884,7 +896,15 @@ where
   --   > r <- writeQWith q nullType [] "hello world!"
   ------------------------------------------------------------------------
   writeQWith :: Writer a -> Mime.Type -> [F.Header] -> a -> IO Receipt
-  writeQWith q mime hs x = do
+  writeQWith q mime hs x = 
+    writeGeneric q (wDest q) mime hs x 
+
+  writeAdHocWith :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeAdHocWith q dest mime hs x = 
+    writeGeneric q dest mime hs x 
+ 
+  writeGeneric :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeGeneric q dest mime hs x = do
     c <- getCon (wCon q)
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
@@ -902,7 +922,7 @@ where
             let conv = wTo q
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
-            let m = P.mkMessage P.NoMsg NoSub (wDest q) 
+            let m = P.mkMessage P.NoMsg NoSub dest
                                 mime (B.length s) tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
@@ -990,7 +1010,7 @@ where
   ------------------------------------------------------------------------
   -- | Variant of 'withTransaction' that does not return anything.
   ------------------------------------------------------------------------
-  withTransaction_ :: Con -> [Topt] -> (Con -> IO ()) -> IO ()
+  withTransaction_ :: Con -> [Topt] -> (Tx -> IO ()) -> IO ()
   withTransaction_ cid os op = do
     _ <- withTransaction cid os op
     return ()
@@ -1035,7 +1055,7 @@ where
   --
   --   Note that 'try' is used to catch any 'StomplException'.
   ------------------------------------------------------------------------
-  withTransaction :: Con -> [Topt] -> (Con -> IO a) -> IO a
+  withTransaction :: Con -> [Topt] -> (Tx -> IO a) -> IO a
   withTransaction cid os op = do
     tx <- mkUniqueTxId
     let t = mkTrn tx os
@@ -1045,20 +1065,20 @@ where
              "Not connected (" ++ show cid ++ ")"
       else finally (do addTx t cid
                        startTx cid c t 
-                       x <- op cid
+                       x <- op tx
                        updTxState tx cid TxEnded
                        return x)
                    -- if an exception is raised in terminate
                    -- we at least will remove the transaction
                    -- from our state and then reraise 
-                   (terminateTx tx cid `onException` rmThisTx tx cid)
+                   (terminateTx cid tx `onException` rmThisTx tx cid)
   
   ------------------------------------------------------------------------
   -- | Waits for the 'Receipt' to be confirmed by the broker.
   --   Since the thread will preempt, the call should be protected
   --   with /timeout/, /e.g./:
   --
-  --   > mb_ <- waitReceipt c r
+  --   > mb_ <- timeout tmo $ waitReceipt c r
   --   > case mb_ of
   --   >  Nothing -> -- error handling
   --   >  Just _  -> do -- ...
@@ -1074,6 +1094,30 @@ where
               threadDelay $ ms 1
               waitForMe 
 
+  beginTx :: Con -> [Topt] -> IO Tx
+  beginTx cid os = do
+    tx <- mkUniqueTxId
+    c  <- getCon cid
+    let t = mkTrn tx os
+    if not $ P.connected (conCon c)
+      then throwIO $ ConnectException $
+             "Not connected (" ++ show cid ++ ")"
+      else onException (do addTx t cid
+                           startTx cid c t
+                           return tx)
+                       (rmThisTx tx cid)
+
+  commit :: Con -> Tx -> IO ()
+  commit cid tx = do
+    updTxState tx cid TxEnded
+    terminateTx cid tx
+
+  ------------------------------------------------------------------------
+  -- | Aborts the transaction immediately by raising. 
+  ------------------------------------------------------------------------
+  abortTx :: Con -> Tx -> IO ()
+  abortTx cid tx = terminateTx cid tx
+
   ------------------------------------------------------------------------
   -- | Aborts the transaction immediately by raising 'AppException'.
   --   The string passed in to 'abort' will be added to the 
@@ -1087,13 +1131,14 @@ where
   -- Terminate the transaction appropriately
   -- either committing or aborting
   ------------------------------------------------------------------------
-  terminateTx :: Tx -> Con -> IO ()
-  terminateTx tx cid = do
+  terminateTx :: Con -> Tx -> IO ()
+  terminateTx cid tx = do
     c   <- getCon cid
     mbT <- getTx tx c
     case mbT of
-      Nothing -> throwIO $ OuchException $ 
-                   "Transaction disappeared: " ++ show tx
+      Nothing -> putStrLn "Transaction terminated!" -- return ()
+                 -- throwIO $ OuchException $ 
+                 --  "Transaction disappeared: " ++ show tx
       Just t | txState t /= TxEnded -> endTx False cid c tx t
              | txReceipts t || txPendingAck t -> do 
                 ok <- waitTx tx cid $ txTmo t

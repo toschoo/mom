@@ -22,8 +22,8 @@ where
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (try, throwIO, SomeException)
 
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
   import           Network.Mom.Patterns.Broker.Common
   import           Network.Mom.Patterns.Broker.Client
   import           Network.Mom.Patterns.Broker.Server 
@@ -55,7 +55,7 @@ where
 
   prpCRep :: NonEmptyList String -> Property
   prpCRep (NonEmpty s) = monadicIO $ do
-    r <- (map B.unpack) <$> run (
+    r <- map B.unpack <$> run (
            C.runResourceT $ streamList (map B.pack s) $= 
                             mdpCSndRep (B.pack "Test")
                                        [B.pack "xxx"] $$
@@ -98,11 +98,11 @@ where
     assert (r == s)
     where rcv = do
             _ <- mdpCRcvReq
-            (concat . map B.unpack) <$> CL.consume
+            concatMap B.unpack <$> CL.consume
 
   prpMMIRep :: NonEmptyList Char -> Property
   prpMMIRep (NonEmpty s) = monadicIO $ do
-    [r] <- (map B.unpack) <$> run (
+    [r] <- map B.unpack <$> run (
              C.runResourceT $ streamList [B.pack s] $= 
                             mdpCSndRep (mmiHdr `B.append` mmiSrv)
                                        [B.pack "xxx"] $$
@@ -137,7 +137,7 @@ where
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
       withServer ctx s srvsock Connect 
-                     onTmo (showErr "Server") bounce $ \_ -> do
+                     (showErr "Server") bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
         case f of
@@ -145,12 +145,12 @@ where
           _           -> return Nothing
 
   prpBrkDisc :: Property
-  prpBrkDisc = testContext (True) $ \ctx ->
+  prpBrkDisc = testContext True $ \ctx ->
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
       exc <- newEmptyMVar
       withServer ctx "Test" srvsock Connect 
-                      onTmo (pubErr exc) bounce $ \_ -> do
+                      (pubErr exc) bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
         case f of
@@ -163,11 +163,11 @@ where
           _          -> throwIO $ ProtocolExc "Server not ready!"
 
   prpSrvDisc :: Property
-  prpSrvDisc = testContext (True) $ \ctx ->
+  prpSrvDisc = testContext True $ \ctx ->
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
       ok <- withServer ctx "Test" srvsock Connect 
-                       onTmo (showErr "Server") bounce $ \_ -> do
+                       (showErr "Server") bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
         case f of
@@ -194,7 +194,7 @@ where
     try $ testBroker ctx $ \_ -> 
       withClient ctx "TestService" clsock Connect $ \c ->
         withServer ctx "TestService" srvsock Connect 
-                        onTmo (showErr "Server") bounce $ \_ -> do
+                        (showErr "Server") bounce $ \_ -> do
           waitForWorker c
           request c (-1) (C.yield $ B.pack s)
                          (do mbX <- C.await
@@ -207,13 +207,13 @@ where
     try $ testBroker ctx $ \_ -> 
       withClient ctx "TestService" clsock Connect $ \c -> 
         withServer ctx "TestService" srvsock Connect 
-                   onTmo (showErr "Server") bounce $ \_ -> do
+                   (showErr "Server") bounce $ \_ -> do
           waitForWorker c
           request c (-1) (streamList $ map B.pack s)
-                         (Just . (map B.unpack) <$> CL.consume)
+                         (Just . map B.unpack <$> CL.consume)
 
   prpBeat1 :: Property
-  prpBeat1 = testContext (True) $ \ctx ->
+  prpBeat1 = testContext True $ \ctx ->
     try $ testBroker ctx $ \_ ->
       Z.withSocket ctx Z.XReq $ \srv -> do
         Z.connect srv srvsock
@@ -241,9 +241,9 @@ where
 
   prpBeatN :: Property
   prpBeatN = do
-    let r = (10::Int)
+    let r = 10::Int
     n <- choose (10,50)::(Gen Int)
-    testContext (True) $ \ctx ->
+    testContext True $ \ctx ->
       try $ testBroker ctx $ \_ -> 
         startServers ctx n [] $ \pp -> do
           v  <- newMVar []
@@ -266,7 +266,7 @@ where
     let n = 10 
     testContext [1..n] $ \ctx ->
       try $ testBroker ctx $ \_ ->
-        startServers2 ctx n $ do
+        startServers2 ctx n $ 
           withClient ctx "RR" clsock Connect $ \c -> do
             threadDelay 10000 -- we have to wait for *all* servers
             go c n []
@@ -290,22 +290,23 @@ where
             Z.withSocket ctx Z.XReq $ \s -> do
               Z.connect s srvsock
               C.runResourceT $ mdpWConnect "Test" $$ sndSock s
-              startServers ctx (n-1) ((Z.S s Z.In):ss) job
+              startServers ctx (n-1) (Z.S s Z.In:ss) job
 
   startServers2 :: Context -> Int -> IO r -> IO r
   startServers2 ctx n job | n <= 0    = job 
                           | otherwise = 
     withServer ctx "RR" srvsock Connect 
-               onTmo (showErr ("Server " ++ show n)) 
-                     (reply n) $ \_ -> startServers2 ctx (n-1) job
-    where reply x _ = do
+               (showErr ("Server " ++ show n)) 
+                     (reply n) $ \_ -> 
+                 startServers2 ctx (n-1) job
+    where reply x = do
             _ <- C.await 
             C.yield (B.pack $ show x)
 
   handleBrk :: MVar r -> Int -> [Z.Poll] -> 
                (MVar r -> Int -> Z.Poll -> WFrame -> IO ()) -> IO ()
   handleBrk _ _ [] _ = return ()
-  handleBrk v n ((Z.S s Z.In):ss) hndl = do
+  handleBrk v n (Z.S s Z.In:ss) hndl = do
             x <- recvAll s
             f <- C.runResourceT $ streamList x $= sndId $$ mdpWRcvRep
             hndl v n (Z.S s Z.In) f
@@ -328,17 +329,16 @@ where
   extract k xs = [snd x | x <- xs, fst x == k]
 
   partitionBeats :: [(Int, b)] -> [Int] -> [[b]]
-  partitionBeats bs = map (\k -> extract k bs) 
+  partitionBeats bs = map (`extract` bs) 
 
   evaluate :: Int -> [(Int, UTCTime)] -> Bool
   evaluate i us = 
     let ks = getKeys us
-     in if length ks == i 
-          then analyseResults $ partitionBeats us ks
-          else False
+     in (length ks == i) && 
+        analyseResults (partitionBeats us ks)
 
   analyseResults :: [[UTCTime]] -> Bool
-  analyseResults us = and (map analyseResult us)
+  analyseResults = all analyseResult 
     where analyseResult []  = True
           analyseResult [_] = True
           analyseResult (x1:x2:xs) =
@@ -357,7 +357,7 @@ where
               Nothing -> liftIO (Z.send s x [])
               Just n  -> liftIO (Z.send s x [Z.SndMore]) >> go n
 
-  testWith :: Eq a => a	-> (IO (Either SomeException a)) -> Property
+  testWith :: Eq a => a	-> IO (Either SomeException a) -> Property
   testWith ss action = monadicIO $ do
     ei <- run action
     case ei of
@@ -365,7 +365,7 @@ where
       Right x -> assert (x == ss)
 
   testBroker :: Context -> (Controller -> IO r) -> IO r
-  testBroker ctx = withBroker ctx "Test" (10000) clsock srvsock (showErr "Broker")
+  testBroker ctx = withBroker ctx "Test" 10000 clsock srvsock (showErr "Broker")
 
   igerr :: OnError_
   igerr _ _ _ = return ()
@@ -383,8 +383,8 @@ where
   onTmo :: StreamAction
   onTmo _ = return ()
 
-  bounce :: StreamConduit
-  bounce _ = passThrough 
+  bounce :: Conduit_
+  bounce = passThrough 
 
   waitForWorker :: Client -> IO ()
   waitForWorker c = do

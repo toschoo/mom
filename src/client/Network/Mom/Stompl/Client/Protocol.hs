@@ -382,7 +382,7 @@ where
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
     Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
-                     (msgType msg) (msgLen msg) hs 
+                     (msgType msg) (msgLen msg) hs -- escape headers! 
                      (msgRaw  msg) 
 
   mkAckF :: Bool -> Message a -> String -> [F.Header] -> Either String F.Frame

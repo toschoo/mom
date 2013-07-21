@@ -222,7 +222,7 @@ where
       Just _  -> return Pass
 
   ------------------------------------------------------------------------
-  -- Create a Writer without otpions
+  -- Create a Writer without options
   ------------------------------------------------------------------------
   -- Shall create the writer
   -- Shall not preempt

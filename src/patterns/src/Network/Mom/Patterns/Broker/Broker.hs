@@ -1,8 +1,18 @@
-module Network.Mom.Patterns.Broker.Broker
+-------------------------------------------------------------------------------
+-- |
+-- Module     : Network/Mom/Patterns/Broker/Broker.hs
+-- Copyright  : (c) Tobias Schoofs
+-- License    : LGPL 
+-- Stability  : experimental
+-- Portability: non-portable
+-- 
+-- Majordomo Broker
+-------------------------------------------------------------------------------
+module Network.Mom.Patterns.Broker.Broker (withBroker)
 where
 
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
   import           Network.Mom.Patterns.Broker.Common
 
   import qualified Registry as R
@@ -16,8 +26,27 @@ where
   import           Control.Monad.Trans (liftIO)
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO)
-                                      
 
+  ------------------------------------------------------------------------
+  -- | Start a broker as a background process
+  -- 
+  --   * 'Context'   - The zeromq context
+  --  
+  --   * 'Service'   - Service name -
+  --                   the service name is for debugging only,
+  --                   there is no relation whatsoever
+  --                   to services clients request.
+  --
+  --   * 'Timeout'   - The heartbeat interval
+  --
+  --   * 'String'    - The address clients connect to
+  --
+  --   * 'String'    - The address servers connect to
+  --
+  --   * 'OnError_'  - Error handler
+  --  
+  --   * 'Control' a - Control action
+  ------------------------------------------------------------------------
   withBroker :: Context  -> Service -> Timeout -> String -> String -> 
                 OnError_ -> (Controller -> IO r)        -> IO r
   withBroker ctx srv tmo aClients aServers onerr ctrl = 

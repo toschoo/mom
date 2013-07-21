@@ -14,15 +14,11 @@ where
   import           Control.Monad.Trans (liftIO)
   import           Control.Exception (try, throwIO)
 
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
-  import qualified Network.Mom.Patterns.Streams.Streams as S (stop)
-  import           Network.Mom.Patterns.Basic.Client
-  import           Network.Mom.Patterns.Basic.Server
-  import           Network.Mom.Patterns.Basic.Publisher
-  import           Network.Mom.Patterns.Basic.Subscriber
-  import           Network.Mom.Patterns.Basic.Pusher
-  import           Network.Mom.Patterns.Basic.Puller
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
+  import qualified Network.Mom.Patterns.Streams as S (stop)
+
+  import           Network.Mom.Patterns.Basic
   import           Heartbeat
 
 
@@ -236,8 +232,8 @@ where
                    putMVar m ()
                    recvAll s >>= sendAll s
 
-  bounce :: StreamConduit
-  bounce _ = passThrough 
+  bounce :: Conduit B.ByteString ()
+  bounce = passThrough 
 
   igerr :: OnError_
   igerr _ _ _ = return ()

@@ -5,8 +5,8 @@ where
   import qualified Data.ByteString as B
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
   import           Control.Applicative ((<$>))
   import           Control.Monad (when)
   import           Control.Exception (SomeException)
@@ -21,7 +21,7 @@ where
     show (Digit d) = show d
 
   instance Arbitrary Digit where
-    arbitrary = Digit <$> elements [0..9]
+    arbitrary = Digit <$> elements [1..9]
 
   ------------------------------------------------------------------------
   -- Ease working with either
@@ -40,7 +40,10 @@ where
     case ei of
       Left  e -> run (print e) >> assert False
       Right x -> do when (x /= ss) $ run (do putStrLn "differs: "
-                                             print x)
+                                             putStr $ show x 
+                                             putStr " - "
+                                             putStr $ show ss 
+                                             putStrLn "")
                     assert (x == ss)
       
   ------------------------------------------------------------------------------

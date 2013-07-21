@@ -4,12 +4,10 @@ where
   import           Control.Monad.Trans
   import           Control.Monad (forever)
   import           Control.Concurrent
-  import           Control.Applicative ((<$>))
-  import           Data.Conduit (($$), ($=), (=$=))
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
   
-  import           Network.Mom.Patterns.Streams.Streams 
+  import           Network.Mom.Patterns.Streams 
   import qualified System.ZMQ as Z
 
   main :: IO ()
@@ -17,12 +15,11 @@ where
            ready <- newEmptyMVar
            _ <- forkIO (ping ctx ready)
            _ <- forkIO (pong ctx ready)
-           forever $ 
-             threadDelay 100000
+           forever $ threadDelay 100000
 
   ping :: Z.Context -> MVar () -> IO ()
   ping ctx ready = withStreams ctx "pong" (-1)
-                         [Poll "ping" "inproc://ping" Peer Bind [] []]
+                         [Poll "ping" "inproc://ping" PeerT Bind [] []]
                          (\_ -> return ())
                          (\_ _ _ -> return ())
                          pinger $ \c -> do
@@ -37,11 +34,10 @@ where
   pong ctx ready = do 
     _ <- takeMVar ready
     withStreams ctx "ping" (-1)
-                [Poll "pong" "inproc://ping" Peer Connect [] []]
+                [Poll "pong" "inproc://ping" PeerT Connect [] []]
                 (\_ -> return ())
                 (\_ _ _ -> return ())
-                pinger $ \_ -> do
-      forever $ threadDelay 100000
+                pinger $ \_ -> forever $ threadDelay 100000
 
   pinger :: StreamSink
   pinger s = C.awaitForever $ \i -> 
