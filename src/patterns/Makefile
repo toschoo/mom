@@ -280,6 +280,8 @@ clean:
 	rm -f $(SMOKEDIR)/bounce
 	rm -f $(SMOKEDIR)/conduit
 	rm -f $(SMOKEDIR)/broker
+	rm -f $(SMOKEDIR)/mdbroker
+	rm -f $(SMOKEDIR)/mdbounce
 	rm -f $(SMOKEDIR)/bridge
 	rm -f $(SMOKEDIR)/pipe
 	rm -f $(SMOKEDIR)/pubsub
