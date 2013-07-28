@@ -50,9 +50,9 @@ where
      /i.e./ it does not contain an application.
      Instead, it provides /API/s that can be used
      to build brokers, even within the same process
-     as clients and workers.
+     as clients and workers. 
 
-     This module provides a convenience reexport of the three modules,
+     The present module provides a convenience reexport of the three modules,
      making up the majordomo pattern: server, client and broker.
   -}
 
@@ -77,8 +77,14 @@ where
   {- $broker
      The broker module contains the broker code.
      The broker is implemented by means of streams,
-     very similar to servers or queues.
+     very similar to servers and clients.
      The functionality provided by the broker module
      can be used to implement a standalone broker
      or an in-process broker linked with its clients and servers.
+     Note, however, 
+     that brokers must not share the same process
+     with other brokers, since, internally,
+     the broker module uses a global registry,
+     which would be shared among all brokers 
+     in the same process as well. 
   -}

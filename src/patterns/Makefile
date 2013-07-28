@@ -89,8 +89,11 @@ smoke:	$(SMOKEDIR)/db \
 	$(SMOKEDIR)/stream \
 	$(SMOKEDIR)/client1 \
 	$(SMOKEDIR)/client2 \
+	$(SMOKEDIR)/mdclient1 \
 	$(SMOKEDIR)/olleh \
 	$(SMOKEDIR)/bounce \
+	$(SMOKEDIR)/mdbounce \
+	$(SMOKEDIR)/mdbroker \
 	$(SMOKEDIR)/broker \
 	$(SMOKEDIR)/bridge 
 
@@ -184,10 +187,16 @@ $(SMOKEDIR)/client1:	$(SMOKEDIR)/client1.hs $(SUBSRC)
 $(SMOKEDIR)/client2:	$(SMOKEDIR)/client2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/mdclient1:	$(SMOKEDIR)/mdclient1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/olleh:	$(SMOKEDIR)/olleh.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/bounce:	$(SMOKEDIR)/bounce.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/mdbounce:	$(SMOKEDIR)/mdbounce.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/pubsub:	$(SMOKEDIR)/pubsub.hs $(SUBSRC)
@@ -197,6 +206,9 @@ $(SMOKEDIR)/pipe:	$(SMOKEDIR)/pipe.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/broker:	$(SMOKEDIR)/broker.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/mdbroker:	$(SMOKEDIR)/mdbroker.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/bridge:	$(SMOKEDIR)/bridge.hs $(SUBSRC)
@@ -263,6 +275,7 @@ clean:
 	rm -f $(SMOKEDIR)/stream
 	rm -f $(SMOKEDIR)/client1
 	rm -f $(SMOKEDIR)/client2
+	rm -f $(SMOKEDIR)/mdclient1
 	rm -f $(SMOKEDIR)/olleh
 	rm -f $(SMOKEDIR)/bounce
 	rm -f $(SMOKEDIR)/conduit

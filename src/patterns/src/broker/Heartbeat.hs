@@ -11,31 +11,36 @@
 module Heartbeat
 where
 
+  import Network.Mom.Patterns.Types (Msec)
+
   import Data.Time.Clock
+  import Control.Concurrent.MVar
 
+  -------------------------------------------------------------------------
+  -- Tolerance for foreign heartbeat -
+  -- Period until disconnect = tolerance * heartbeat period
+  -------------------------------------------------------------------------
   tolerance :: Int
-  tolerance = 5
+  tolerance = 10
 
-  -- Milliseconds
-  type Msec = Int
+  -------------------------------------------------------------------------
+  -- Helper 
+  -------------------------------------------------------------------------
+  hbPeriodReached :: MVar UTCTime -> Msec -> IO Bool
+  hbPeriodReached m tmo = modifyMVar m $ \t -> do
+                            now <- getCurrentTime
+                            if t `timeAdd` tmo <= now
+                              then return (now `timeAdd` tmo, True )
+                              else return (                t, False)
 
   ------------------------------------------------------------------------
   -- Heartbeat descriptor
   ------------------------------------------------------------------------
   data Heartbeat = Heart {
-                     hbNextHB     :: UTCTime,
-                     hbPeriod     :: Msec,
-                     hbBeat       :: Bool
+                     hbNextMe     :: UTCTime,
+                     hbNextHe     :: UTCTime,
+                     hbPeriod     :: Msec
                    }
-
-  ------------------------------------------------------------------------
-  -- HbState:
-  --   OK  : Heartbeat sent and response received
-  --   Send: Heartbeat to be sent and nothing yet received
-  --   Dead: Heartbeat sent and nothing received after tolerance
-  ------------------------------------------------------------------------
-  data HbState = HbOK | HbSend | HbDead
-    deriving (Eq, Show)
 
   ------------------------------------------------------------------------
   -- Create a new heartbeat descriptor
@@ -44,47 +49,31 @@ where
   newHeartbeat period = do
     now <- getCurrentTime
     return Heart {
-               hbNextHB = timeAdd now (tolerance * period),
-               hbPeriod = period,
-               hbBeat   = False}
+               hbNextHe = timeAdd now (tolerance * period),
+               hbNextMe = timeAdd now period,
+               hbPeriod = period}
 
   ------------------------------------------------------------------------
-  -- Update a heartbeat descriptor
+  -- Update heartbeat descriptor
+  -- - my next heartbeat
+  -- - his next heartbeat
   ------------------------------------------------------------------------
-  updAction :: UTCTime -> Heartbeat -> Heartbeat
-  updAction now hb = hb {hbNextHB     = moveNext now hb,
-                         hbBeat       = False}
+  updMe :: UTCTime -> Heartbeat -> Heartbeat
+  updMe now hb = hb {hbNextMe = now `timeAdd` (hbPeriod hb)}
+
+  updHim :: UTCTime -> Heartbeat -> Heartbeat
+  updHim now hb = hb {hbNextHe = timeAdd now $ tolerance * (hbPeriod hb)}
 
   ------------------------------------------------------------------------
-  -- Check heartbeat descriptor:
-  --    if next heartbeat still in the future: ok
-  --       otherwise if state is "beat sent" : dead
-  --                 otherwise: send heartbeat now
-  --                                 "beat sent" (we expect the caller
-  --                                              to send a hb *now*)
-  --                                 move next heartbeat
+  -- Check me, him
   ------------------------------------------------------------------------
-  checkHB :: UTCTime -> Heartbeat -> (HbState, Heartbeat)
-  checkHB now hb | now <= hbNextHB hb = (HbOK, hb)
-                 | hbBeat hb          = (HbDead, hb)
-                 | otherwise          = (HbSend, hb {
-                                           hbNextHB = moveNext now hb,
-                                           hbBeat   = True})
+  checkMe :: UTCTime -> Heartbeat -> Bool
+  checkMe now hb | now <= hbNextMe hb = False
+                 | otherwise          = True
 
-  ------------------------------------------------------------------------
-  -- Test heartbeat according to the same logic as check,
-  -- but without updating it
-  ------------------------------------------------------------------------
-  testHB :: UTCTime -> Heartbeat -> HbState
-  testHB now hb | now <= hbNextHB hb = HbOK
-                | hbBeat hb          = HbDead
-                | otherwise          = HbSend
-
-  ------------------------------------------------------------------------
-  -- Add tolerance * period
-  ------------------------------------------------------------------------
-  moveNext :: UTCTime -> Heartbeat -> UTCTime
-  moveNext t hb = timeAdd t (tolerance * hbPeriod hb)
+  alive :: UTCTime -> Heartbeat -> Bool
+  alive now hb | now <= hbNextHe hb = True
+               | otherwise          = False
 
   -----------------------------------------------------------------------
   -- Adding period to time

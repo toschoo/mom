@@ -136,7 +136,7 @@ where
   prpReady (NonEmpty s) = testContext (Just s) $ \ctx ->
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
-      withServer ctx s srvsock Connect 
+      withServer ctx s testHb srvsock 
                      (showErr "Server") bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
@@ -149,7 +149,7 @@ where
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
       exc <- newEmptyMVar
-      withServer ctx "Test" srvsock Connect 
+      withServer ctx "Test" testHb srvsock 
                       (pubErr exc) bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
@@ -166,7 +166,7 @@ where
   prpSrvDisc = testContext True $ \ctx ->
     try $ Z.withSocket ctx Z.XRep $ \b -> do
       Z.bind b srvsock
-      ok <- withServer ctx "Test" srvsock Connect 
+      ok <- withServer ctx "Test" testHb srvsock 
                        (showErr "Server") bounce $ \_ -> do
         rs <- recvAll b
         f  <- C.runResourceT $ streamList rs $$ mdpWRcvRep
@@ -193,8 +193,8 @@ where
   prpPassOne (NonEmpty s) = testContext (Just s) $ \ctx -> 
     try $ testBroker ctx $ \_ -> 
       withClient ctx "TestService" clsock Connect $ \c ->
-        withServer ctx "TestService" srvsock Connect 
-                        (showErr "Server") bounce $ \_ -> do
+        withServer ctx "TestService" testHb srvsock 
+                        (raise "Server") bounce $ \_ -> do
           waitForWorker c
           request c (-1) (C.yield $ B.pack s)
                          (do mbX <- C.await
@@ -206,7 +206,7 @@ where
   prpPassAll (NonEmpty s) = testContext (Just s) $ \ctx ->
     try $ testBroker ctx $ \_ -> 
       withClient ctx "TestService" clsock Connect $ \c -> 
-        withServer ctx "TestService" srvsock Connect 
+        withServer ctx "TestService" testHb srvsock 
                    (showErr "Server") bounce $ \_ -> do
           waitForWorker c
           request c (-1) (streamList $ map B.pack s)
@@ -219,21 +219,21 @@ where
         Z.connect srv srvsock
         C.runResourceT $ mdpWConnect "Test" $$ sndSock srv
         putStr "Beat" >> hFlush stdout
-        beat srv (10::Int)
+        beat srv (300::Int)
     where beat srv i | i <= 0    = putStrLn "" >> return True
                      | otherwise = do
             once <- getCurrentTime
             mbB  <- timeout 1000000 $ recvAll srv
             putStr "." >> hFlush stdout
             case mbB of
-              Nothing -> return False
+              Nothing -> putStrLn "Nothing" >> return False
               Just bs -> do
                 f  <- C.runResourceT $ streamList bs $= sndId $$ mdpWRcvRep
                 case f of
                   WBeat _ -> do
                     now <- getCurrentTime
                     if now > timeAdd once 1000
-                      then return False
+                      then putStrLn "more than 1000" >> return False
                       else do
                         C.runResourceT $ streamList [] $= mdpWBeat $$ sndSock srv
                         beat srv (i-1)
@@ -260,6 +260,40 @@ where
               _ -> throwIO $ ProtocolExc "unexpected frame"
           handle _ _ _ _ = return ()
 
+  -- server beats
+  prpServerBeats :: Property
+  prpServerBeats = testContext True $ \ctx ->
+    try $ Z.withSocket ctx Z.XReq $ \brk -> do
+        Z.bind brk srvsock
+        withServer ctx "Test" testHb srvsock 
+                   (raise "Server") bounce $ \_ -> do
+          mbR  <- timeout 1000000 $ recvAll brk
+          case mbR of
+            Nothing  -> putStrLn "Server not ready" >> return False
+            Just r   -> do
+              f  <- C.runResourceT $ streamList r $= sndId $$ mdpWRcvRep
+              case f of
+                WReady _ _ -> beat brk (300::Int)
+                _          -> return False
+    where beat brk i | i <= 0    = putStrLn "" >> return True
+                     | otherwise = do
+            once <- getCurrentTime
+            mbB  <- timeout 1000000 $ recvAll brk
+            putStr "." >> hFlush stdout
+            case mbB of
+              Nothing -> putStrLn "Nothing" >> return False
+              Just b -> do
+                f  <- C.runResourceT $ streamList b $= sndId $$ mdpWRcvRep
+                case f of
+                  WBeat _ -> do
+                    now <- getCurrentTime
+                    if now > timeAdd once 1000
+                      then putStrLn "more than 1000" >> return False
+                      else do
+                        C.runResourceT $ streamList [] $= mdpWBeat $$ sndSock brk
+                        beat brk (i-1)
+                  _         -> return False
+
   prpRoundRobin :: Property
   prpRoundRobin = do
     -- n <- choose (10,50)::(Gen Int) -- very slow
@@ -268,7 +302,7 @@ where
       try $ testBroker ctx $ \_ ->
         startServers2 ctx n $ 
           withClient ctx "RR" clsock Connect $ \c -> do
-            threadDelay 10000 -- we have to wait for *all* servers
+            threadDelay 1000 -- we have to wait for *all* servers
             go c n []
     where go :: Client -> Int -> [Int] -> IO [Int]
           go c n rr | n <= 0    = return (sort rr)
@@ -295,9 +329,9 @@ where
   startServers2 :: Context -> Int -> IO r -> IO r
   startServers2 ctx n job | n <= 0    = job 
                           | otherwise = 
-    withServer ctx "RR" srvsock Connect 
+    withServer ctx "RR" testHb srvsock 
                (showErr ("Server " ++ show n)) 
-                     (reply n) $ \_ -> 
+               (reply n) $ \_ -> 
                  startServers2 ctx (n-1) job
     where reply x = do
             _ <- C.await 
@@ -365,7 +399,8 @@ where
       Right x -> assert (x == ss)
 
   testBroker :: Context -> (Controller -> IO r) -> IO r
-  testBroker ctx = withBroker ctx "Test" 10000 clsock srvsock (showErr "Broker")
+  testBroker ctx = withBroker ctx "Test" testHb
+                              clsock srvsock (showErr "Broker")
 
   igerr :: OnError_
   igerr _ _ _ = return ()
@@ -399,6 +434,9 @@ where
     when (isTrue x) $ waitForWorker c
     where isTrue Nothing  = False
           isTrue (Just x) = x
+
+  testHb :: Msec
+  testHb = 10
   
   checkAll :: IO ()
   checkAll = do
@@ -432,10 +470,12 @@ where
                     (deepCheck prpBrkDisc)    ?> 
          runTest "Server disconnects"
                     (deepCheck prpSrvDisc)    ?> 
-         runTest "One Server beats"
+         runTest "Broker beats 1"
                     (oneCheck prpBeat1)       ?> 
-         runTest "n servers beat"
+         runTest "Broker beats n "
                     (oneCheck prpBeatN)       ?> 
+         runTest "Server beats"
+                    (oneCheck prpServerBeats) ?> 
          runTest "Check Service"
                     (deepCheck prpCheckSrv)   ?> 
          runTest "Pass one passes one"
@@ -443,7 +483,7 @@ where
          runTest "Pass all"
                     (deepCheck prpPassAll)    ?>
          runTest "Round Robin"
-                    (deepCheck prpRoundRobin)
+                    (deepCheck prpRoundRobin) 
          
     case r of
       Success {} -> do

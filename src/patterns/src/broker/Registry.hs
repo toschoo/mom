@@ -15,23 +15,24 @@ module Registry
         checkWorker, getWorker, freeWorker, 
         getServiceName,
         updWorkerHb, lookupService, 
-        clean, 
+        clean, setHbPeriod, 
         size, stat, statPerService,
         printQ, getQ)
 #endif
 where
 
   import           Heartbeat
-  import           Network.Mom.Patterns.Types (Identity)
+  import           Network.Mom.Patterns.Types (Msec, Identity)
 
   import           Control.Concurrent
   import           Control.Monad (when)
+  import           Control.Applicative ((<$>))
 
   import           System.IO.Unsafe
 
   import qualified Data.ByteString.Char8 as B
   import           Data.Map   (Map)
-  import qualified Data.Map   as   M
+  import qualified Data.Map   as   M -- filter, keys
   import qualified Data.Sequence as  S
   import           Data.Sequence (Seq, (|>), (<|), (><), ViewL(..), ViewR(..)) 
   import           Data.Foldable (toList)
@@ -60,33 +61,30 @@ where
   -- since the actual heartbeat is decided by a parameter --
   -- Nevertheless, the value should be configurable!
   ------------------------------------------------------------------------
-  commonHb :: Msec
-  commonHb = 100
-
-  ------------------------------------------------------------------------
-  -- How many worker to check at a time
-  -- 10 seems reasonable number:
-  -- it is fast to send 10 heartbeat message 
-  --   (during which client requests have to wait)
-  -- and with 10 checked workers per service,
-  --     we can be confident that client request get processed
-  -- Nevertheless, this value should be configurable!
-  ------------------------------------------------------------------------
-  nbCheck :: Int
-  nbCheck = 10
+  {-# NOINLINE _hb #-}
+  _hb :: MVar Msec
+  _hb = unsafePerformIO $ newMVar 2000 -- default: 2 seconds
 
   -------------------------------------------------------------------------
-  -- Update heartbeat of a worker
+  -- Set common heartbeat period
   -------------------------------------------------------------------------
-  updHb :: UTCTime -> WrkNode -> WrkNode
-  updHb t (i, w) = (i, w {wrkHB = updAction t $ wrkHB w})
+  setHbPeriod :: Msec -> IO ()
+  setHbPeriod hb = modifyMVar_ _hb $ \_ -> return hb
+
+  -------------------------------------------------------------------------
+  -- Update worker's heartbeat according to second order function
+  -------------------------------------------------------------------------
+  updHb :: (UTCTime -> Heartbeat -> Heartbeat) -> 
+            UTCTime -> WrkNode -> WrkNode
+  updHb upd t (i, w) = (i, w {wrkHB = upd t $ wrkHB w})
 
   ------------------------------------------------------------------------
   -- A Worker Node is an Identity paired with a worker (lookup)
   -- A Worker Tree is a map of identities and services,
   -- where service is a queue of free and busy workers;
   -- the worker tree, hence, does not point directly to the worker,
-  -- but to the queue where the worker can be found
+  -- but to the queue where the worker can be found:
+  --
   -- tree
   --  |
   --  ----> (i,srv)
@@ -178,14 +176,15 @@ where
 
   -------------------------------------------------------------------------
   -- Free a worker that has been busy
+  -- updating his heatbeat
   -------------------------------------------------------------------------
   freeWorker :: Identity -> IO ()
   freeWorker i = getCurrentTime >>= \now ->
-                   freeWorkerWithUpd i (updHb now)
+                   freeWorkerWithUpd i (updHb updHim now)
 
   -------------------------------------------------------------------------
   -- Free a worker that has been busy
-  -- updating heartbeat (because we have some feedback from it)
+  -- updating heartbeat (because we apparently have feedback )
   -------------------------------------------------------------------------
   freeWorkerWithUpd :: Identity -> (WrkNode -> WrkNode) -> IO ()
   freeWorkerWithUpd i upd = do
@@ -198,7 +197,7 @@ where
   -- Update heartbeat
   -------------------------------------------------------------------------
   updWorkerHb :: Identity -> IO ()
-  updWorkerHb i = getCurrentTime >>= \now -> updWorker i (updHb now)
+  updWorkerHb i = getCurrentTime >>= \now -> updWorker i (updHb updHim now)
 
   -------------------------------------------------------------------------
   -- Generic worker update
@@ -245,39 +244,39 @@ where
     case mbS of
       Nothing -> return Nothing
       Just sn -> do
-        burry now sn -- remove non-responsive workers
+        bury now sn -- remove non-responsive workers
         modifyMVar (srvQ sn) $ \q ->
           case firstFreeQ q of
             Just (i,_) ->
-              return (setStateQ i Busy (updHb now) q, Just i)
+              return (setStateQ i Busy (updHb updMe now) q, Just i)
             Nothing    -> 
               case firstBusyQ q of
                 Nothing    -> return (q, Nothing)
-                Just (i,_) -> return (q, Just i)
+                Just (i,_) -> return (
+                      setStateQ i Busy (updHb updMe now) q, Just i)
           
   -------------------------------------------------------------------------
   -- Remove non-responsive workers
-  -- and heartbeat those that have been inactive for a long time
-  -- long time = commonHb * tolerance (see above)
+  -- and heartbeat those that have been inactive 
+  --     for at least one heartbeat period
   -------------------------------------------------------------------------
   checkWorker :: IO [Identity]
   checkWorker = do
-    mbS <- checkService 
-    case mbS of
-      Nothing -> return []
-      Just  s -> do
-        now <- getCurrentTime
-        burry now s -- remove non-responsive workers
-        is <- withMVar (srvQ s) ( 
-                return . map fst . takeIfQ nbCheck Free (f now))
-        mapM_ (`updWorker` updSt) is
-        return is
-    where f now w = case (testHB now . wrkHB . snd) w of
-                      HbSend -> True
-                      _      -> False
-          updSt (i,w) = let hb  = wrkHB w
-                            hb2 = hb {hbBeat = True}
-                         in (i, w{wrkHB = hb2}) 
+    now <- getCurrentTime
+    checkService >>= \mbS -> case mbS of
+                               Nothing -> return ()
+                               Just s  -> bury now s
+    concat <$> withMVar _srv (mapM (getWorkers now) . M.elems)
+
+    where getWorkers now s = do
+            is <- withMVar (srvQ s) ( 
+                    return . map fst . takeIfQ Free tst)
+            mapM_ (`updWorker` updSt) is
+            return is
+
+            where updSt (i,w) = let hb  = updMe now $ wrkHB w
+                                 in (i, w{wrkHB = hb}) 
+                  tst = checkMe now . wrkHB . snd
 
   -------------------------------------------------------------------------
   -- Get next service to check
@@ -322,15 +321,12 @@ where
   -- since the busy worker had received a job
   --       this counts as a heartbeat already sent
   -------------------------------------------------------------------------
-  burry :: UTCTime -> Service -> IO ()
-  burry now sn = do
+  bury :: UTCTime -> Service -> IO ()
+  bury now sn = do
     q <- readMVar $ srvQ sn
-    let f = findDeads [HbDead        ] now $ qFree q
-    let b = findDeads [HbDead, HbSend] now $ qBusy q 
-    mapM_ (remove . fst) (f++b)
-    where findDeads sts nw = toList . S.takeWhileL (dead sts nw)
-          dead sts nw (_, w) | testHB nw (wrkHB w) `elem` sts = True
-                             | otherwise                      = False 
+    mapM_ (remove . fst) $ findDeads $ qFree q
+    mapM_ (remove . fst) $ findDeads $ qBusy q
+    where findDeads = filter (not . alive now . wrkHB . snd) . toList
 
   -------------------------------------------------------------------------
   -- Clean up global variables
@@ -396,7 +392,7 @@ where
   -------------------------------------------------------------------------
   initW :: Identity -> Service -> IO ()
   initW i sn = modifyMVar_ (srvQ sn) $ \q -> do
-                 hb <- newHeartbeat commonHb
+                 hb <- withMVar _hb newHeartbeat 
                  let w = Worker {
                            wrkId    = i,
                            wrkState = Free,
@@ -567,20 +563,19 @@ where
   -------------------------------------------------------------------------
   -- Take n that fulfil f with state s
   -------------------------------------------------------------------------
-  takeIfQ :: Int -> State -> (WrkNode -> Bool) -> Queue -> [WrkNode]
-  takeIfQ n s f q = case s of
-                      Free -> takeIf n f $ qFree q
-                      Busy -> takeIf n f $ qBusy q
+  takeIfQ :: State -> (WrkNode -> Bool) -> Queue -> [WrkNode]
+  takeIfQ s f q = case s of
+                      Free -> takeIf f $ qFree q
+                      Busy -> takeIf f $ qBusy q
 
   -------------------------------------------------------------------------
   -- Take n that fulfil f from Seq
   -------------------------------------------------------------------------
-  takeIf :: Int -> (WrkNode -> Bool) -> Seq WrkNode -> [WrkNode]
-  takeIf 0 _ _ = []
-  takeIf n f s = case S.viewl s of
-                   EmptyL    -> []
-                   (w :< ws) | f w       -> w : takeIf (n-1) f ws
-                             | otherwise ->     takeIf  n    f ws
+  takeIf :: (WrkNode -> Bool) -> Seq WrkNode -> [WrkNode]
+  takeIf f s = case S.viewl s of
+                 EmptyL    -> []
+                 (w :< ws) | f w       -> w : takeIf f ws
+                           | otherwise ->     takeIf f ws
 
   eq :: Identity -> WrkNode -> Bool
   eq i = (== i) . fst 

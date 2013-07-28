@@ -484,7 +484,7 @@ where
     where getSock i | i == internal = Right $ strmCmd s
                     | otherwise     =
             case Map.lookup i (strmIdx s) of
-              Nothing -> Left $ "Unknown identifier" ++ i 
+              Nothing -> Left $ "Unknown identifier " ++ i 
               Just p  -> Right p
           getSocks []     = Right []
           getSocks (i:is) = 

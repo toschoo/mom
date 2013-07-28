@@ -19,7 +19,7 @@ where
   import qualified Network.Mom.Patterns.Streams as S (stop)
 
   import           Network.Mom.Patterns.Basic
-  import           Heartbeat
+  import           Heartbeat -- for time arithmetic
 
 
   isock,osock :: String
