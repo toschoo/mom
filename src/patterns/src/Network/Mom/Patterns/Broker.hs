@@ -26,12 +26,18 @@ module Network.Mom.Patterns.Broker (
          -- * Majordomo \'Broker\'
          -- $broker
 
-         module Network.Mom.Patterns.Broker.Broker)
+         module Network.Mom.Patterns.Broker.Broker,
+
+         -- * Majordomo common definitions
+         -- $common
+
+         module Network.Mom.Patterns.Broker.Common)
 where
 
   import Network.Mom.Patterns.Broker.Server
   import Network.Mom.Patterns.Broker.Client
   import Network.Mom.Patterns.Broker.Broker
+  import Network.Mom.Patterns.Broker.Common
 
   {- $majordomo
      The Majordomo pattern
@@ -54,6 +60,8 @@ where
 
      The present module provides a convenience reexport of the three modules,
      making up the majordomo pattern: server, client and broker.
+     There is also a \"common\" module with definitions relevant
+     for all three parties. 
   -}
 
   {- $worker
@@ -61,8 +69,6 @@ where
      Majordomo servers look like ordinary servers,
      but use a different protocol for communicating 
      with the broker intervening between clients and servers.
-     The code provided to a majordomo server, however,
-     is exactly the same as the code provided to an ordinary server.
   -}
 
   {- $client
@@ -87,4 +93,10 @@ where
      the broker module uses a global registry,
      which would be shared among all brokers 
      in the same process as well. 
+  -}
+
+  {- $common
+     The \"common\" module contains 
+     protocol building blocks and
+     MDP-specific exceptions.
   -}

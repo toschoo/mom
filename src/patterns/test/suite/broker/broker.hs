@@ -159,8 +159,8 @@ where
             mbE <- timeout 10000 $ takeMVar exc
             case mbE of
               Nothing -> return False
-              Just e  -> return (e == "ProtocolExc \"Broker disconnects\"") -- not very elegant
-          _          -> throwIO $ ProtocolExc "Server not ready!"
+              Just e  -> return (e == "BrokerExc \"Broker disconnects\"") 
+          _           -> throwIO $ ProtocolExc "Server not ready!"
 
   prpSrvDisc :: Property
   prpSrvDisc = testContext True $ \ctx ->
@@ -211,6 +211,16 @@ where
           waitForWorker c
           request c (-1) (streamList $ map B.pack s)
                          (Just . map B.unpack <$> CL.consume)
+
+  prpOneBrkOnly :: Property
+  prpOneBrkOnly = testContext True $ \ctx ->
+    try $ testBroker ctx $ \_ -> do
+      ei <- try $ testBroker ctx $ \_ -> return ()
+      case ei of
+         Left e -> case e of
+                     SingleBrokerExc _ -> return True
+                     _                 -> return False
+         _      -> return False
 
   prpBeat1 :: Property
   prpBeat1 = testContext True $ \ctx ->
@@ -423,7 +433,7 @@ where
 
   waitForWorker :: Client -> IO ()
   waitForWorker c = do
-    x <- checkService c 5000 -- this timeout is crucial
+    x <- checkService c 10000
     unless (isTrue x) $ waitForWorker c
     where isTrue Nothing  = False
           isTrue (Just x) = x
@@ -470,6 +480,8 @@ where
                     (deepCheck prpBrkDisc)    ?> 
          runTest "Server disconnects"
                     (deepCheck prpSrvDisc)    ?> 
+         runTest "Only one broker per process"
+                    (deepCheck prpOneBrkOnly) ?> 
          runTest "Broker beats 1"
                     (oneCheck prpBeat1)       ?> 
          runTest "Broker beats n "

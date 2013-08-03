@@ -80,14 +80,14 @@ where
           mmiResponse = do
             mbX <- C.await
             case mbX of
-              Nothing -> return Nothing
+              Nothing -> liftIO (putStrLn "Timeout!") >> return Nothing
               Just x  | x == mmiFound    -> return $ Just True
                       | x == mmiNotFound -> return $ Just False
                       | x == mmiNimpl    -> liftIO (throwIO $
-                          ProtocolExc "MMI Service Request not available")
+                          MMIExc "MMI Service Request not available")
                       | otherwise        -> liftIO (throwIO $
-                          ProtocolExc $ "Unexpected response code "  ++
-                                        "from mmi.service request: " ++
+                          MMIExc $ "Unexpected response code "  ++
+                                   "from mmi.service request: " ++
                                         B.unpack x)
                         
   ------------------------------------------------------------------------

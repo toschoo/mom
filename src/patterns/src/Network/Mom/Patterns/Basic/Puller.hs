@@ -59,7 +59,7 @@ where
   -- | A pipeline extends the capacity of the 
   --   pusher-puller chain;
   --   a pipeline connects to a pusher
-  --   and provides an access point to a set of puller.
+  --   and provides an access point to a set of pullers.
   --  
   --   * 'Context'            - The zeromq context
   --   

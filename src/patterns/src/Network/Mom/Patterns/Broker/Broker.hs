@@ -8,7 +8,7 @@
 -- 
 -- Majordomo Broker
 -------------------------------------------------------------------------------
-module Network.Mom.Patterns.Broker.Broker (withBroker, Msec)
+module Network.Mom.Patterns.Broker.Broker (withBroker)
 where
 
   import           Network.Mom.Patterns.Types
@@ -28,8 +28,10 @@ where
   import           Control.Monad.Trans (liftIO)
   import           Control.Monad       (when)
   import           Prelude hiding (catch)
-  import           Control.Exception (throwIO)
+  import           Control.Exception (throwIO, finally)
   import           Control.Concurrent.MVar
+
+  import           System.IO.Unsafe
 
   ------------------------------------------------------------------------
   -- | Start a broker as a background process
@@ -39,9 +41,9 @@ where
   --   * 'Service'   - Service name -
   --                   the service name is for debugging only,
   --                   there is no relation whatsoever
-  --                   to services clients request.
+  --                   to the service of the Majordomo Protocol.
   --
-  --   * 'Timeout'   - The heartbeat interval in milliseconds,
+  --   * 'Msec'      - The heartbeat interval in milliseconds,
   --                   which should be equal 
   --                   for all workers and the broker 
   --
@@ -56,16 +58,18 @@ where
   withBroker :: Context  -> Service -> Msec -> String -> String -> 
                 OnError_ -> (Controller -> IO r)                -> IO r
   withBroker ctx srv tmo aClients aServers onerr ctrl | tmo <= 0  = 
-    throwIO $ ProtocolExc "Heartbeat is mandatory"
-                                                      | otherwise = do
-    R.setHbPeriod tmo
-    t <- getCurrentTime
-    m <- newMVar t
-    withStreams ctx srv (1000 * fromIntegral tmo)
-                [Poll "servers" aServers RouterT Bind [] [],
-                Poll "clients" aClients RouterT Bind [] []]
-                (handleTmo    m tmo) onerr 
-                (handleStream m tmo) $ \c -> R.clean >> ctrl c
+    throwIO $ MDPExc "Heartbeat is mandatory"
+                                                      | otherwise = 
+    lockBroker $ \_ -> do
+      R.clean
+      R.setHbPeriod tmo
+      t <- getCurrentTime
+      m <- newMVar t
+      withStreams ctx srv (1000 * fromIntegral tmo)
+                  [Poll "servers" aServers RouterT Bind [] [],
+                  Poll "clients" aClients RouterT Bind [] []]
+                  (handleTmo    m tmo) onerr 
+                  (handleStream m tmo) ctrl 
 
   -- handle heartbeat -------------------------------------------------------
   handleTmo :: MVar UTCTime -> Msec -> Streamer -> IO ()
@@ -103,7 +107,7 @@ where
                          | otherwise = do
             mbX <- C.await
             case mbX of
-              Nothing -> liftIO (throwIO $ ProtocolExc 
+              Nothing -> liftIO (throwIO $ MMIExc 
                                    "No ServiceName in mmi.service request")
               Just x  -> do
                 m <- bool2MMI <$> liftIO (R.lookupService x)
@@ -112,7 +116,7 @@ where
           bool2MMI False = mmiNotFound
           hdr            = B.take 4
           srvc           = B.drop 4
-          noWorker sn    = liftIO (throwIO $ ProtocolExc $
+          noWorker sn    = liftIO (throwIO $ BrokerExc $
                                   "No Worker for service " ++ BC.unpack sn)
 
   ------------------------------------------------------------------------
@@ -135,20 +139,34 @@ where
   handleReply w is s = do
     mbS <- liftIO $ R.getServiceName w
     case mbS of
-      Nothing -> liftIO (throwIO $ ProtocolExc "Unknown Worker")
+      Nothing -> liftIO (throwIO $ ServerExc "Unknown Worker")
       Just sn -> sendReply sn is s >> liftIO (R.freeWorker w)
 
   ------------------------------------------------------------------------
   -- Send request to worker
   ------------------------------------------------------------------------
   sendRequest :: Identity -> [Identity] -> StreamSink
-  sendRequest w is s = let trg = filterStreams s (== "servers")
-                        in mdpWSndReq w is =$ passAll s trg
+  sendRequest w is s = mdpWSndReq w is =$ passAll s ["servers"]
 
   ------------------------------------------------------------------------
   -- Send reply to client
   ------------------------------------------------------------------------
   sendReply :: B.ByteString -> [Identity] -> StreamSink
-  sendReply sn is s = let trg = filterStreams s (== "clients")
-                       in mdpCSndRep sn is =$ passAll s trg
+  sendReply sn is s = mdpCSndRep sn is =$ passAll s ["clients"]
+
+  ------------------------------------------------------------------------
+  -- Mechanism to exclude two brokers 
+  -- from running in the same process
+  ------------------------------------------------------------------------
+  {-# NOINLINE _brk #-}
+  _brk :: MVar () 
+  _brk = unsafePerformIO $ newMVar ()
+
+  lockBroker :: (() -> IO b) -> IO b
+  lockBroker act = do
+    mb_ <- tryTakeMVar _brk -- withMVar _brk 
+    case mb_ of
+      Nothing -> throwIO $ SingleBrokerExc "Another broker is running!"
+      Just _  -> finally (act ()) (putMVar _brk ())
+
 

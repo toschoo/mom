@@ -20,11 +20,6 @@ where
   import qualified System.ZMQ            as Z
 
   ------------------------------------------------------------------------
-  -- Milliseconds name 
-  ------------------------------------------------------------------------
-  type Msec = Int
-
-  ------------------------------------------------------------------------
   -- * Conduits
   ------------------------------------------------------------------------
   -- | The IO Resource transformer.
@@ -65,7 +60,7 @@ where
   ------------------------------------------------------------------------
   -------------------------------------------------------------------------
   -- | A /zeromq/ 'AccessPoint'
-  --   can be bound or connected to the address.
+  --   can be bound or connected to its address.
   --   Only one peer can bind the address,
   --   all other parties have to connect.
   -------------------------------------------------------------------------
@@ -126,7 +121,7 @@ where
               -- | IO error
               | IOExc       String
               -- | Protocol error
-              | ProtocolExc String
+              | ProtocolExc String 
               -- | Application-defined error
               | AppExc      String
               -- | Internal error, indicating a code error in library
@@ -152,7 +147,12 @@ where
   --   needed for complex patterns (/e.g./ broker)
   type Body        = [B.ByteString]
 
-  -- | Reexport from zeromq
+  ------------------------------------------------------------------------
+  -- | Milliseconds 
+  ------------------------------------------------------------------------
+  type Msec = Int
+
+  -- | Reexport from zeromq (timeout in microseconds)
   type Timeout    = Z.Timeout
   -- | Reexport from zeromq
   type Context    = Z.Context

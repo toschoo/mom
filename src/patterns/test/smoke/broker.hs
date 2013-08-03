@@ -11,8 +11,8 @@ where
   import qualified Data.Conduit          as C
   import qualified Data.ByteString.Char8 as B
   
-  import           Network.Mom.Patterns.Streams.Types
-  import           Network.Mom.Patterns.Streams.Streams
+  import           Network.Mom.Patterns.Types
+  import           Network.Mom.Patterns.Streams
   import           Network.Mom.Patterns.Broker.Broker
   import           Network.Mom.Patterns.Broker.Client
   import           Network.Mom.Patterns.Broker.Server
@@ -23,7 +23,7 @@ where
   
   main :: IO ()
   main = withContext 1 $ \ctx -> catch
-           (withBroker ctx "test" 100000 cl srv onErr $ \c -> do
+           (withBroker ctx "test" 1000 cl srv onErr $ \c -> do
               startServer ctx srv
               threadDelay 10000
               startClient ctx cl
@@ -34,7 +34,7 @@ where
   startClient ctx a = forkIO go >>= \_ -> return ()
     where go = catch 
             (withClient ctx "olleh" a Connect $ \c -> forever $ do
-               mbOK <- checkService c (-1)
+               mbOK <- checkService c (1000)
                case mbOK of
                  Nothing -> throwIO $ AppExc $ 
                                "Nothing received from mmi.service"
@@ -55,8 +55,8 @@ where
   startServer :: Context -> String -> IO ()
   startServer ctx a = forkIO go >>= \_ -> return ()
     where go = catch
-            (withServer ctx "olleh" a Connect onTmo onErr
-                 (\_ -> C.awaitForever (C.yield . B.reverse)) $ \_ ->
+            (withServer ctx "olleh" 1000 a onErr
+                 (C.awaitForever (C.yield . B.reverse)) $ \_ ->
                    forever (threadDelay 1000000))
             (\e -> putStrLn $ "Server: " ++ show (e::SomeException))
 

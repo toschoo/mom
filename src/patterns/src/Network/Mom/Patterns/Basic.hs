@@ -67,12 +67,12 @@ where
      Subscribers do not need to request data explicitly,
      they receive the newest updates when available,
      once they have subscribed to the topic.
-     Usually, many subscribers connect to a publisher.
+     Usually, many subscribers connect to one publisher.
   -}
 
   {- $pipe
      Pushers and pullers form a pipeline
-     to send work packages downstreams;
+     to send work packages downstream;
      pushers can only send data,
      which represent the work to be done,
      pullers can only receive data.

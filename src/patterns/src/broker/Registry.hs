@@ -56,10 +56,8 @@ where
 
   ------------------------------------------------------------------------
   -- Base for Heartbeat calculation:
-  -- heartbeat is expected common * tolerance
-  -- The value is not too important,
-  -- since the actual heartbeat is decided by a parameter --
-  -- Nevertheless, the value should be configurable!
+  -- expected heartbeat is _hb * tolerance,
+  -- heartbeat to be sent is _hb 
   ------------------------------------------------------------------------
   {-# NOINLINE _hb #-}
   _hb :: MVar Msec
@@ -72,7 +70,7 @@ where
   setHbPeriod hb = modifyMVar_ _hb $ \_ -> return hb
 
   -------------------------------------------------------------------------
-  -- Update worker's heartbeat according to second order function
+  -- Update worker's heartbeat descriptor according to function
   -------------------------------------------------------------------------
   updHb :: (UTCTime -> Heartbeat -> Heartbeat) -> 
             UTCTime -> WrkNode -> WrkNode
@@ -120,9 +118,9 @@ where
   _srv = unsafePerformIO $ newMVar M.empty 
 
   -------------------------------------------------------------------------
-  -- A sequence of services, used for heartbeating:
-  -- we beat the first commonHb workers of the first service,
-  -- then we set the service to the end of the sequence
+  -- A sequence of services, used for removing unresponsive workers:
+  -- We clean up one service at a time, so there are not too long
+  -- work intervals due to clean-up.
   -------------------------------------------------------------------------
   {-# NOINLINE _s #-}
   _s :: MVar (Seq B.ByteString)
@@ -309,17 +307,6 @@ where
 
   -------------------------------------------------------------------------
   -- Remove unresponsive workers
-  -- a worker is unresponsive if
-  --   free and dead
-  --   busy and (dead or sent)
-  -- where dead means that
-  --            we had already sent a heartbeat
-  --            and had no response last time we checked
-  --       send means that
-  --            it is time to send a heartbeat
-  -- The two cases are hence equivalent,
-  -- since the busy worker had received a job
-  --       this counts as a heartbeat already sent
   -------------------------------------------------------------------------
   bury :: UTCTime -> Service -> IO ()
   bury now sn = do

@@ -46,7 +46,7 @@ module Network.Mom.Patterns (
 
           module Network.Mom.Patterns.Basic,
 
-          -- * Advanced Pattern
+          -- * Advanced Patterns
           -- $advanced
 
           )
@@ -147,10 +147,10 @@ where
        can receive messages only from a publisher;
 
      * a pusher cannot receive messages and
-       can send message only to a pipe;
+       can send message only to a puller;
 
      * a puller cannot send messages and
-       can receive messages only from a pipe;
+       can receive messages only from a pusher;
 
      Note that the /peer-to-peer/ pattern
      defined in /zeromq/ 

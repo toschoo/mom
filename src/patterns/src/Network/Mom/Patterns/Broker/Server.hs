@@ -57,7 +57,7 @@ where
                 Conduit_    ->
                 (Control a) -> IO a
   withServer ctx srv tmo add onErr serve act | tmo <= 0  =
-    throwIO $ ProtocolExc "Heartbeat is mandatory"
+    throwIO $ MDPExc "Heartbeat is mandatory"
                                              | otherwise = do
     t <- getCurrentTime
     m <- newMVar t                             -- my  heartbeat 
@@ -80,7 +80,7 @@ where
               WRequest is -> liftIO (updBeat h) >>
                              serve =$= mdpWSndRep is =$ passAll s ["client"]
               WBeat    _  -> liftIO (updBeat h)
-              WDisc    _  -> liftIO (throwIO $ ProtocolExc 
+              WDisc    _  -> liftIO (throwIO $ BrokerExc 
                                            "Broker disconnects")
               _           -> liftIO (throwIO $ Ouch 
                                    "Unknown frame from Broker!")
@@ -97,7 +97,7 @@ where
   handleTmo :: MVar UTCTime -> MVar UTCTime -> Msec -> Streamer -> IO ()
   handleTmo m h tmo s = do hbPeriodReached m tmo >>= \x -> when x sndHb
                            hbDelay               >>= \x -> when x $ throwIO $
-                                                     ProtocolExc $ "Missing heartbeat"
+                                                     BrokerExc $ "Missing heartbeat"
     where sndHb   = C.runResourceT $ 
                       streamList [B.empty, mdpW01, xHeartBeat] $$  
                       passAll s ["client"]

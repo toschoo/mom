@@ -24,7 +24,7 @@ where
   tolerance = 10
 
   -------------------------------------------------------------------------
-  -- Helper 
+  -- Helper to check for expiration of a period 
   -------------------------------------------------------------------------
   hbPeriodReached :: MVar UTCTime -> Msec -> IO Bool
   hbPeriodReached m tmo = modifyMVar m $ \t -> do
@@ -56,11 +56,13 @@ where
   ------------------------------------------------------------------------
   -- Update heartbeat descriptor
   -- - my next heartbeat
-  -- - his next heartbeat
   ------------------------------------------------------------------------
   updMe :: UTCTime -> Heartbeat -> Heartbeat
   updMe now hb = hb {hbNextMe = now `timeAdd` (hbPeriod hb)}
 
+  ------------------------------------------------------------------------
+  -- - his next heartbeat
+  ------------------------------------------------------------------------
   updHim :: UTCTime -> Heartbeat -> Heartbeat
   updHim now hb = hb {hbNextHe = timeAdd now $ tolerance * (hbPeriod hb)}
 

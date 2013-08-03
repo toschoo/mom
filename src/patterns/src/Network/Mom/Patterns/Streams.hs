@@ -26,7 +26,7 @@ module Network.Mom.Patterns.Streams (
          StreamConduit, StreamSink, StreamAction,
          filterStreams, getSource,
 
-         -- * StreamerSinks
+         -- * StreamSinks
          -- $sinks
 
          stream, part, 
@@ -65,11 +65,11 @@ where
   import           Network.Mom.Patterns.Types
 
   {- $procStreams
-     This module provides a functions to automate stream processing,
+     This module provides functions to automate stream processing,
      in particular the function 'withStreams' that starts 
-     a background action polling on a set of streams
-     and manipulates streams using application-defined callbacks
-     passed in as higher-order functions.
+     a background action polling on a set of streams.
+     The function uses uses application-defined callbacks
+     to manipulate streams.
 
      The functions 'runReceiver' and 'runSender' are intended mainly
      for testing. They send or receive respectively streams, 
@@ -78,7 +78,7 @@ where
   ------------------------------------------------------------------------
   -- | Starts polling on a set of streams.
   --   The actual polling will be run in another thread.
-  --   The current thread continues in the action passed in.
+  --   The current thread continues with the action passed in.
   --   When this action terminates, the streamer stops polling.
   --
   --   Parameters:
@@ -100,7 +100,7 @@ where
   --                   When input is available,
   --                   it is directed to the 'StreamSink'.
   --
-  --   * 'StreamSink' - Invoked when timeout expires.
+  --   * 'StreamAction' - Invoked when timeout expires.
   --
   --   * 'OnError_' - Error handler
   -- 
@@ -109,9 +109,8 @@ where
   --                    the outgoing stream 
   --                    (using one of the terminating sinks
   --                     described below).
-  --                    The zeromq library won't send
-  --                    the stream if it is not properly
-  --                    terminated, resulting in a socket error.
+  --                    Not terminating the stream properly
+  --                    will result in a zeromq socket error.
   -- 
   --   * 'Control' a - The action to invoke,
   --                   when the streamer has been started;
@@ -185,7 +184,7 @@ where
             c <- psCmd xp
             (_, ps) <- psPolls xp
 
-            (x:ss)   <- Z.poll (c:ps) tmo
+            (x:ss)  <- Z.poll (c:ps) tmo
             case x of
               Z.S _ Z.In -> do catch (handleCmd xp)
                                      (\e -> do onErr Critical e 
@@ -310,11 +309,11 @@ where
   ------------------------------------------------------------------------
   -- Receive with tmo
   ------------------------------------------------------------------------
-  recvTmo :: Z.Socket a -> Z.Timeout -> Source
-  recvTmo s tmo =  liftIO (Z.poll [Z.S s Z.In] tmo) >>= \[s'] ->
-    case s' of
-      Z.S _ Z.In -> recv s 
-      _          -> return ()
+  waitForRecv :: Z.Socket a -> Z.Timeout -> IO (Maybe (Z.Socket a))
+  waitForRecv s tmo = Z.poll [Z.S s Z.In] tmo >>= \[s'] ->
+                        case s' of
+                          Z.S _ Z.In -> return $ Just s
+                          _          -> return Nothing
 
   ------------------------------------------------------------------------
   -- | Receiver Sink: 
@@ -327,10 +326,15 @@ where
   --     /< 0/ - listens eternally,
   --     /0/ - returns immediately,
   --     /> 0/ - timeout in microseconds;
-  --     when the timeout expires, the stream terminates.
+  --     when the timeout expires, the stream terminates
+  --      and the return value is Nothing.
   ------------------------------------------------------------------------
-  runReceiver :: Z.Socket a -> Timeout -> SinkR o -> IO o
-  runReceiver s tmo snk = C.runResourceT $ recvTmo s tmo $$ snk
+  runReceiver :: Z.Socket a -> Timeout -> SinkR (Maybe o) -> IO (Maybe o)
+  runReceiver s tmo snk = do
+    mb_ <- waitForRecv s tmo
+    case mb_ of
+      Nothing -> return Nothing
+      Just  _ -> C.runResourceT $ recv s $$ snk
 
   ------------------------------------------------------------------------
   -- | Sender Source:
@@ -497,7 +501,7 @@ where
        
   {- $streamer
      A streamer represents the current state of the streaming device
-     started wy means of 'withStreams'. It is passed in to 
+     started by means of 'withStreams'. It is passed in to 
      application-defined callbacks, namely the timeout action 
      ('StreamAction') and the 'Sink' ('StreamSink').
 
@@ -542,6 +546,13 @@ where
   ------------------------------------------------------------------------
   -- | Filter subset of streams; usually you want to filter
   --   a subset of streams to which to relay an incoming stream.
+  --   Note that the result is just a list of stream identifiers,
+  --   which of course could be used directly in the first place.
+  --   A meaningful use of filterstreams would be, for instance:
+  --
+  --   > let targets = filterStreams s (/= getSource s)
+  --
+  --   Where all streams but the source are selected.
   ------------------------------------------------------------------------
   filterStreams :: Streamer -> (Identifier -> Bool) -> [Identifier]
   filterStreams s p = map fst $ Map.toList $ 
@@ -560,6 +571,8 @@ where
      require some care in designing zeromq sinks.
      The sink must ensure to mark the last segment sent 
      (see 'Z.SndMore').
+     Also, the incoming stream should be exhausted 
+     to avoid message segements lingering around in the pipe.
 
      Applications can construct new sinks by either
      calling a building block in the their own sink code, /e.g./:
@@ -576,7 +589,7 @@ where
      a more complex sink, /e.g./:
 
      > example :: StreamSink
-     > example s is = passThrough =$ passAll s is
+     > example s is = sourceList headers =$ passAll s is
   -}
 
   ------------------------------------------------------------------------
@@ -701,13 +714,20 @@ where
      streams through the controler.
      To relay streams to the controller
      (/i.e./ directly to application code) the 'internal' stream,
-     which is identified by the string "_internal"
+     which is identified by the string \"_internal\"
      can be used.
   -}
   ------------------------------------------------------------------------
-  -- | The internal stream represented by the 'Controller'
+  -- | The internal stream that represents the 'Controller'.
+  --   StreamSinks can write to this stream, /e.g./:
+  --
+  --   > passAll s [internal]
+  --
+  --   And the streamer may also receive from this stream, /e.g./:
+  --
+  --   > if getSource s == internal
   ------------------------------------------------------------------------
-  internal :: String
+  internal :: Identifier
   internal = "_internal" 
 
   ------------------------------------------------------------------------
@@ -753,7 +773,11 @@ where
   --   that was sink\'d to the target 'internal'.
   ------------------------------------------------------------------------
   receive :: Controller -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
-  receive c tmo snk = C.runResourceT $ recvTmo (ctrlCmd c) tmo $$ snk
+  receive c tmo snk = do
+    mb_ <- waitForRecv (ctrlCmd c) tmo
+    case mb_ of 
+      Nothing -> return Nothing
+      Just _  -> C.runResourceT $ recv (ctrlCmd c) $$ snk
 
   ------------------------------------------------------------------------
   -- | Send a stream through the controller
@@ -793,49 +817,37 @@ where
 
   ------------------------------------------------------------------------
   -- | Defines the type of a 'PollEntry';
-  --   the names of the constructors are similar to ZMQ socket types
-  --   but with some differences to keep the terminology in line
-  --   with basic patterns.
-  --   The leading \"X\" stands for \"Access\" 
-  --   (not for \"eXtended\" as in XRep and XReq).
+  --   the names of the constructors are similar 
+  --   to the corresponding ZMQ socket types.
   ------------------------------------------------------------------------
   data AccessType = 
          -- | Represents a server and expects connections from clients;
-         --   should be used with 'Bind';
          --   corresponds to ZMQ Socket Type 'Z.Rep'
          ServerT    
          -- | Represents a client and connects to a server;
-         --   should be used with 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.Req'
          | ClientT
          -- | Represents a load balancer, 
          --   expecting connections from clients;
-         --   may be used with 'Bind' or 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.XRep'
          | RouterT 
          -- | Represents a router
          --   expecting connections from servers;
-         --   may be used with 'Bind' or 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.XReq'
          | DealerT 
          -- | Represents a publisher;
-         --   should be used with 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.Pub'
          | PubT    
          -- | Represents a subscriber;
-         --   should be used with 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.Sub'
          | SubT    
          -- | Represents a Pipe;
-         --   should be used with 'Bind';
          --   corresponds to ZMQ Socket Type 'Z.Push'
          | PipeT
          -- | Represents a Puller;
-         --   should be used with 'Connect';
          --   corresponds to ZMQ Socket Type 'Z.Pull'
          | PullT
          -- | Represents a Peer;
-         --   corresponding peers must use complementing 'LinkType';
          --   corresponds to ZMQ Socket Type 'Z.Pair'
          | PeerT   
     deriving (Eq, Show, Read)
@@ -911,7 +923,7 @@ where
   setSockOs s = mapM_ (Z.setOption s)
 
   {- $example
-     The following code implements a ping pong
+     The following code implements a ping pong communication
      using two streamers.
      The code is somewhat simplistic;
      it does not use timeout,
@@ -919,6 +931,10 @@ where
      does not provide means for clean shutdown.
      It focuses instead on demonstrating the core of
      the streamer functionality.
+     
+     For more examples on how to use streams,
+     you may want to refer to the MDP Broker code in
+     Network.Mom.Patterns.Broker.Broker.
 
     > import           Control.Monad.Trans
     > import           Control.Monad (forever)

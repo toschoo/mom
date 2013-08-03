@@ -9,7 +9,7 @@
 -- Client side of Client/Server
 -------------------------------------------------------------------------------
 module Network.Mom.Patterns.Basic.Client (
-         Client, withClient, request)
+         Client, clService, withClient, request)
 where
 
   import qualified System.ZMQ            as Z
