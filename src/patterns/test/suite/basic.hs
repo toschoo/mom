@@ -40,25 +40,16 @@ where
         request c (-1) (streamList (map B.pack ss)) 
                        ((Just . map B.unpack) <$> CL.consume)
 
-  {-
-  prpClCheckReq :: NonEmptyList String -> Property
-  prpClCheckReq (NonEmpty ss) = testContext (Just ss) $ \ctx -> do
+  prpClCheckResult :: NonEmptyList String -> Property
+  prpClCheckResult (NonEmpty ss) = testContext (Just ss) $ \ctx -> do
       socktask ctx
       try $ withClient ctx "Test" isock Connect $ \c -> do
-        _ <- request c 0 (streamList (map B.pack ss)) 
-                         ((Just . map B.unpack) <$> CL.consume)
-        checkReceive c (-1) ((Just . map B.unpack) <$> CL.consume)
-
-  prpClAsync :: NonEmptyList String -> Property
-  prpClAsync (NonEmpty ss) = 
-      testContext (Just ss) $ \ctx -> do
-        socktask ctx
-        try $ withClient ctx "Test" isock Connect $ \c -> req c ss
-    where req c xs = do 
-            _ <- request c 0 (streamList $ map B.pack xs)
-                             (Just <$> CL.consume)
-            checkReceive c (-1) ((Just . map B.unpack) <$> CL.consume)
-  -}
+        mbR1 <- request c 0 (streamList (map B.pack ss)) 
+                            ((Just . map B.unpack) <$> CL.consume)
+        case mbR1 of
+          Just _  -> throwIO $ ProtocolExc "No result expected!"
+          Nothing -> 
+            checkResult c (-1) ((Just . map B.unpack) <$> CL.consume)
 
   prpClTmo :: Property
   prpClTmo = testContext True $ \ctx -> 
@@ -261,6 +252,8 @@ where
     putStrLn "========================================="
     r <- runTest "Client Request at once"
                   (deepCheck prpClReqAtOnce)     ?>
+         runTest "Client checkResult"
+                  (deepCheck prpClCheckResult)   ?>
          runTest "Client Timeout"
                   (deepCheck prpClTmo)           ?>
          runTest "Server stops"

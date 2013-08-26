@@ -212,15 +212,19 @@ where
           request c (-1) (streamList $ map B.pack s)
                          (Just . map B.unpack <$> CL.consume)
 
-  prpOneBrkOnly :: Property
-  prpOneBrkOnly = testContext True $ \ctx ->
-    try $ testBroker ctx $ \_ -> do
-      ei <- try $ testBroker ctx $ \_ -> return ()
-      case ei of
-         Left e -> case e of
-                     SingleBrokerExc _ -> return True
-                     _                 -> return False
-         _      -> return False
+  prpCheckResult :: NonEmptyList String -> Property
+  prpCheckResult (NonEmpty s) = testContext (Just s) $ \ctx ->
+    try $ testBroker ctx $ \_ -> 
+      withClient ctx "TestService" clsock Connect $ \c -> 
+        withServer ctx "TestService" testHb srvsock 
+                   (showErr "Server") bounce $ \_ -> do
+          waitForWorker c
+          mbR1 <- request c 0 (streamList $ map B.pack s)
+                              (Just . map B.unpack <$> CL.consume)
+          case mbR1 of
+            Just _  -> throwIO $ ProtocolExc "Unexpected result..."
+            Nothing -> checkResult c (-1) 
+                         (Just . map B.unpack <$> CL.consume)
 
   prpBeat1 :: Property
   prpBeat1 = testContext True $ \ctx ->
@@ -480,8 +484,6 @@ where
                     (deepCheck prpBrkDisc)    ?> 
          runTest "Server disconnects"
                     (deepCheck prpSrvDisc)    ?> 
-         runTest "Only one broker per process"
-                    (deepCheck prpOneBrkOnly) ?> 
          runTest "Broker beats 1"
                     (oneCheck prpBeat1)       ?> 
          runTest "Broker beats n "
@@ -494,6 +496,8 @@ where
                     (deepCheck prpPassOne)    ?>   
          runTest "Pass all"
                     (deepCheck prpPassAll)    ?>
+         runTest "Check Result"
+                    (deepCheck prpCheckResult) ?>
          runTest "Round Robin"
                     (deepCheck prpRoundRobin) 
          

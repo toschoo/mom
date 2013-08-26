@@ -207,7 +207,7 @@ where
 
      Advanced communication patterns use
      message exchange protocols and other means,
-     even brokers, to make communication reliably and scalable.
+     even brokers, to make communication reliable and scalable.
 
      The 'patterns' library aims to provide
      advanced topics as libraries that can be used 

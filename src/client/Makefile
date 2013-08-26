@@ -33,7 +33,8 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/sendforever \
         $(SMOKEDIR)/sendjp \
         $(SMOKEDIR)/frost \
-        $(SMOKEDIR)/ping 
+        $(SMOKEDIR)/ping \
+        $(SMOKEDIR)/demo1
 
 $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -59,6 +60,9 @@ $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/demo1:	$(SMOKEDIR)/demo1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/conduit1:	$(SMOKEDIR)/conduit1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
@@ -74,6 +78,7 @@ suite:	$(TDIR)/tprotocol \
         $(TDIR)/tdialogs
 
 run:	$(suite)
+	$(TDIR)/responder &
 	$(TDIR)/tprotocol
 	$(TDIR)/tstate
 	$(TDIR)/tdialogs 61613
@@ -112,6 +117,7 @@ clean:
 	rm -f $(SMOKEDIR)/sendjp
 	rm -f $(SMOKEDIR)/sendforever
 	rm -f $(SMOKEDIR)/ping
+	rm -f $(SMOKEDIR)/demo1
 	rm -f $(SMOKEDIR)/frost
 	rm -f $(SMOKEDIR)/cl1
 	rm -f $(SMOKEDIR)/conduit1

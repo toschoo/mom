@@ -11,7 +11,8 @@
 -------------------------------------------------------------------------------
 module Registry 
 #ifndef TEST
-       (insert, remove, 
+       (Registry, newReg,
+        insert, remove, 
         checkWorker, getWorker, freeWorker, 
         getServiceName,
         updWorkerHb, lookupService, 
@@ -25,10 +26,7 @@ where
   import           Network.Mom.Patterns.Types (Msec, Identity)
 
   import           Control.Concurrent
-  import           Control.Monad (when)
   import           Control.Applicative ((<$>))
-
-  import           System.IO.Unsafe
 
   import qualified Data.ByteString.Char8 as B
   import           Data.Map   (Map)
@@ -37,6 +35,33 @@ where
   import           Data.Sequence (Seq, (|>), (<|), (><), ViewL(..), ViewR(..)) 
   import           Data.Foldable (toList)
   import           Data.Time.Clock
+                 
+  ------------------------------------------------------------------------
+  -- Registry 
+  ------------------------------------------------------------------------
+  type Registry = MVar Reg
+  data Reg      = NewReg {
+                     rgHb  :: Msec,
+                     rgSrv :: SrvTree,
+                     rgWrk :: WrkTree,
+                     rgS   :: Seq B.ByteString
+                  }
+
+  newReg :: Msec -> IO Registry
+  newReg ms = newMVar NewReg {
+                    rgHb  = ms,
+                    rgSrv = M.empty,
+                    rgWrk = M.empty,
+                    rgS   = S.empty}
+
+  modifyReg :: Registry -> (Reg -> IO (Reg, r)) -> IO r
+  modifyReg = modifyMVar 
+
+  modifyReg_ :: Registry -> (Reg -> IO Reg) -> IO ()
+  modifyReg_ = modifyMVar_ 
+
+  withReg :: Registry -> (Reg -> IO r) -> IO r
+  withReg = withMVar 
 
   ------------------------------------------------------------------------
   -- Worker may be free or busy
@@ -49,25 +74,16 @@ where
   ------------------------------------------------------------------------
   data Worker = Worker {
                   wrkId    :: Identity,
-                  wrkState :: State,
                   wrkHB    :: Heartbeat,
                   wrkQ     :: MVar Queue
                 }
 
-  ------------------------------------------------------------------------
-  -- Base for Heartbeat calculation:
-  -- expected heartbeat is _hb * tolerance,
-  -- heartbeat to be sent is _hb 
-  ------------------------------------------------------------------------
-  {-# NOINLINE _hb #-}
-  _hb :: MVar Msec
-  _hb = unsafePerformIO $ newMVar 2000 -- default: 2 seconds
-
   -------------------------------------------------------------------------
   -- Set common heartbeat period
   -------------------------------------------------------------------------
-  setHbPeriod :: Msec -> IO ()
-  setHbPeriod hb = modifyMVar_ _hb $ \_ -> return hb
+  setHbPeriod :: Registry -> Msec -> IO ()
+  setHbPeriod r hb = modifyReg_ r $ \reg -> 
+                       return reg{rgHb = hb}
 
   -------------------------------------------------------------------------
   -- Update worker's heartbeat descriptor according to function
@@ -79,7 +95,7 @@ where
   ------------------------------------------------------------------------
   -- A Worker Node is an Identity paired with a worker (lookup)
   -- A Worker Tree is a map of identities and services,
-  -- where service is a queue of free and busy workers;
+  -- where a service is basically a queue of free and busy workers;
   -- the worker tree, hence, does not point directly to the worker,
   -- but to the queue where the worker can be found:
   --
@@ -111,119 +127,95 @@ where
   type SrvTree = Map B.ByteString Service
 
   -------------------------------------------------------------------------
-  -- service tree
-  -------------------------------------------------------------------------
-  {-# NOINLINE _srv #-}
-  _srv :: MVar SrvTree
-  _srv = unsafePerformIO $ newMVar M.empty 
-
-  -------------------------------------------------------------------------
-  -- A sequence of services, used for removing unresponsive workers:
-  -- We clean up one service at a time, so there are not too long
-  -- work intervals due to clean-up.
-  -------------------------------------------------------------------------
-  {-# NOINLINE _s #-}
-  _s :: MVar (Seq B.ByteString)
-  _s = unsafePerformIO $ newMVar S.empty 
-
-  -------------------------------------------------------------------------
-  -- worker tree
-  -------------------------------------------------------------------------
-  {-# NOINLINE _wrk #-}
-  _wrk :: MVar WrkTree
-  _wrk = unsafePerformIO $ newMVar M.empty 
-
-  -------------------------------------------------------------------------
   -- Register new worker for service
   -------------------------------------------------------------------------
-  insert :: Identity -> B.ByteString -> IO ()
-  insert i s = do
-    mbW <- lookupW i
-    case mbW of
-      Just _  -> return () -- identity already known
+  insert :: Registry -> Identity -> B.ByteString -> IO ()
+  insert r i s = modifyReg_ r $ \reg -> 
+    case M.lookup i (rgWrk reg) of
+      Just _  -> return reg -- identity already known
       Nothing -> do
-        sn <- lookupS s >>= getSn
-        initW   i sn
-        insertW i sn
-    where getSn mbS = 
-            case mbS of
-              Just sn -> return sn
-              Nothing -> do
-                 q <- newMVar $ Q S.empty S.empty
-                 let sn = Service {
-                            srvName = s,
-                            srvQ    = q}
-                 insertS s sn
-                 return sn
+        (reg2, sn) <- case M.lookup s (rgSrv reg) of
+                        Just x  -> return (reg, x) -- service exists
+                        Nothing -> do              -- new service
+                          q <- newMVar $ Q S.empty S.empty
+                          let x  = Service {
+                                    srvName = s,
+                                    srvQ    = q}
+                          return (reg {rgSrv = M.insert s x (rgSrv reg),
+                                       rgS   = rgS reg |> s}, x)
+        hb <- newHeartbeat (rgHb reg2)
+        initW  i hb sn                  -- add worker to service queue
+        return reg2 {rgWrk =            -- insert worker into wrk tree
+          M.insert i sn $ rgWrk reg2}
 
   -------------------------------------------------------------------------
   -- Remove worker 
   -------------------------------------------------------------------------
-  remove :: Identity -> IO ()
-  remove i = do
-    mbW <- lookupW i
-    case mbW of
-      Nothing -> return ()
+  remove :: Registry -> Identity -> IO ()
+  remove r i = modifyReg_ r $ \reg -> 
+    case M.lookup i (rgWrk reg) of
+      Nothing -> return reg                        -- worker does not exist
       Just sn -> do
-        deleteW i
-        e <- modifyMVar (srvQ sn) $ \q -> 
+        let reg2 = reg {rgWrk = M.delete i (rgWrk reg)} -- delete from tree
+        e <- modifyMVar (srvQ sn) $ \q ->               -- remove from queue
                let q' = removeQ i q
                    e  = emptyQ q'
                 in return (q', e)
-        when e $ deleteS (srvName sn)
+        if e then return reg2{rgSrv =                -- remove empty service
+                    M.delete (srvName sn) (rgSrv reg2)}
+             else return reg2
 
   -------------------------------------------------------------------------
   -- Free a worker that has been busy
   -- updating his heatbeat
   -------------------------------------------------------------------------
-  freeWorker :: Identity -> IO ()
-  freeWorker i = getCurrentTime >>= \now ->
-                   freeWorkerWithUpd i (updHb updHim now)
+  freeWorker :: Registry -> Identity -> IO ()
+  freeWorker r i = getCurrentTime >>= \now ->
+                     freeWorkerWithUpd r i (updHb updHim now)
 
   -------------------------------------------------------------------------
   -- Free a worker that has been busy
   -- updating heartbeat (because we apparently have feedback )
   -------------------------------------------------------------------------
-  freeWorkerWithUpd :: Identity -> (WrkNode -> WrkNode) -> IO ()
-  freeWorkerWithUpd i upd = do
-    mbW <- lookupW i
-    case mbW of
-      Nothing -> return () -- silent error
-      Just sn -> modifyMVar_ (srvQ sn) $ \q -> return $ setStateQ i Free upd q 
+  freeWorkerWithUpd :: Registry -> Identity -> (WrkNode -> WrkNode) -> IO ()
+  freeWorkerWithUpd r i upd = withReg r $ \reg -> 
+    case M.lookup i (rgWrk reg) of
+      Nothing -> return ()                       -- worker does not exist
+      Just sn -> modifyMVar_ (srvQ sn) $ \q -> 
+                   return $ setStateQ i Free upd q -- set free and upd hb 
 
   -------------------------------------------------------------------------
   -- Update heartbeat
   -------------------------------------------------------------------------
-  updWorkerHb :: Identity -> IO ()
-  updWorkerHb i = getCurrentTime >>= \now -> updWorker i (updHb updHim now)
+  updWorkerHb :: Registry -> Identity -> IO ()
+  updWorkerHb r i = getCurrentTime >>= \now -> 
+                      updWorker r i (updHb updHim now)
 
   -------------------------------------------------------------------------
   -- Generic worker update
   -------------------------------------------------------------------------
-  updWorker :: Identity -> (WrkNode -> WrkNode) -> IO ()
-  updWorker i f = do
-    mbW <- lookupW i
-    case mbW of
-      Nothing -> return ()
+  updWorker :: Registry -> Identity -> (WrkNode -> WrkNode) -> IO ()
+  updWorker r i f = withReg r $ \reg ->
+    case M.lookup i (rgWrk reg) of
+      Nothing -> return ()        -- worker does not exist
       Just sn -> modifyMVar_ (srvQ sn) $ \q -> 
-                   return $ updateQ i f q
+                   return $ updateQ i f q -- update worker
 
   -------------------------------------------------------------------------
   -- Get service by worker identity
   -------------------------------------------------------------------------
-  getServiceName :: Identity -> IO (Maybe B.ByteString)
-  getServiceName i = do
-    mbW <- lookupW i
-    case mbW of
+  getServiceName :: Registry -> Identity -> IO (Maybe B.ByteString)
+  getServiceName r i = withReg r $ \reg -> 
+    case M.lookup i (rgWrk reg) of
       Nothing -> return Nothing
       Just s  -> return $ Just (srvName s)
 
   -------------------------------------------------------------------------
   -- Check whether service exists
   -------------------------------------------------------------------------
-  lookupService :: B.ByteString -> IO Bool
-  lookupService s = do
-    mbS <- lookupS s
+  lookupService :: Registry -> B.ByteString -> IO Bool
+  lookupService r s = do
+    mbS <- lookupS r s
     case mbS of
       Nothing -> return False
       Just  _ -> return True
@@ -235,16 +227,16 @@ where
   --                          and update its heartbeat
   --   - if free q is emtpy, take the first of the busy queue
   -------------------------------------------------------------------------
-  getWorker :: B.ByteString -> IO (Maybe Identity)
-  getWorker s = do
+  getWorker :: Registry -> B.ByteString -> IO (Maybe Identity)
+  getWorker r s = do
     now <- getCurrentTime
-    mbS <- lookupS s
+    mbS <- lookupS r s
     case mbS of
-      Nothing -> return Nothing
+      Nothing -> return Nothing -- service does not exist
       Just sn -> do
-        bury now sn -- remove non-responsive workers
+        bury r now sn    -- remove non-responsive workers
         modifyMVar (srvQ sn) $ \q ->
-          case firstFreeQ q of
+          case firstFreeQ q of -- get first of free
             Just (i,_) ->
               return (setStateQ i Busy (updHb updMe now) q, Just i)
             Nothing    -> 
@@ -258,20 +250,20 @@ where
   -- and heartbeat those that have been inactive 
   --     for at least one heartbeat period
   -------------------------------------------------------------------------
-  checkWorker :: IO [Identity]
-  checkWorker = do
+  checkWorker :: Registry -> IO [Identity]
+  checkWorker r = do
     now <- getCurrentTime
-    checkService >>= \mbS -> case mbS of
-                               Nothing -> return ()
-                               Just s  -> bury now s
-    concat <$> withMVar _srv (mapM (getWorkers now) . M.elems)
+    checkService r >>= \mbS -> case mbS of
+                                 Nothing -> return ()
+                                 Just s  -> bury r now s
+    srv <- M.elems <$> withReg r (return . rgSrv) 
+    concat <$> mapM (getWorkers now) srv
 
     where getWorkers now s = do
             is <- withMVar (srvQ s) ( 
                     return . map fst . takeIfQ Free tst)
-            mapM_ (`updWorker` updSt) is
+            mapM_ (\i -> updWorker r i updSt) is
             return is
-
             where updSt (i,w) = let hb  = updMe now $ wrkHB w
                                  in (i, w{wrkHB = hb}) 
                   tst = checkMe now . wrkHB . snd
@@ -284,59 +276,62 @@ where
   --       if a lot of services have been removed since our last visit
   --          we will go through this many times
   -------------------------------------------------------------------------
-  checkService :: IO (Maybe Service)
-  checkService = do
-    mbS <- modifyMVar _s getS
+  checkService :: Registry -> IO (Maybe Service)
+  checkService r = do 
+    mbS <- modifyReg r $ \reg -> do
+      let (s, mbS) = getS (rgS reg)
+      return (reg {rgS = s}, mbS)
     case mbS of 
       Nothing -> return Nothing
       Just s  -> do
-        mbSrv <- lookupS s
+        mbSrv <- lookupS r s
         case mbSrv of
-          Nothing  -> rm >> checkService
+          Nothing  -> rm >> checkService r
           Just srv -> return $ Just srv
     where getS s = 
             case S.viewl s of
-              EmptyL  -> return (s, Nothing)
-              x :< xs -> 
-                return (xs |> x, Just x)
+              EmptyL  -> (s, Nothing)
+              x :< xs -> (xs |> x, Just x)
           rmTail s = 
             case S.viewr s of
-              EmptyR  -> return s
-              xs :> _ -> return xs
-          rm = modifyMVar_ _s rmTail
+              EmptyR  -> s
+              xs :> _ -> xs
+          rm = modifyReg_ r $ \reg -> 
+                 return reg {rgS = rmTail (rgS reg)}
 
   -------------------------------------------------------------------------
   -- Remove unresponsive workers
   -------------------------------------------------------------------------
-  bury :: UTCTime -> Service -> IO ()
-  bury now sn = do
-    q <- readMVar $ srvQ sn
-    mapM_ (remove . fst) $ findDeads $ qFree q
-    mapM_ (remove . fst) $ findDeads $ qBusy q
-    where findDeads = filter (not . alive now . wrkHB . snd) . toList
+  bury :: Registry -> UTCTime -> Service -> IO ()
+  bury r now sn = do 
+    q <- readMVar $ srvQ sn -- we use remove on registry, so don't block
+    mapM_ (remove r . fst) $ findDead $ qFree q
+    mapM_ (remove r . fst) $ findDead $ qBusy q
+    where findDead = filter (not . alive now . wrkHB . snd) . toList
 
   -------------------------------------------------------------------------
-  -- Clean up global variables
+  -- Clean up registry
   -------------------------------------------------------------------------
-  clean :: IO ()
-  clean = do modifyMVar_ _wrk $ \_ -> return M.empty
-             modifyMVar_ _srv $ \_ -> return M.empty
-             modifyMVar_ _s   $ \_ -> return S.empty
+  clean :: Registry -> IO ()
+  clean r = modifyReg_ r $ \reg -> return reg {
+                                     rgWrk = M.empty,
+                                     rgSrv = M.empty,
+                                     rgS   = S.empty}
 
   -------------------------------------------------------------------------
   -- Number of workers
   -------------------------------------------------------------------------
-  size :: IO Int
-  size = withMVar _wrk $ \t -> return $ M.size t
+  size :: Registry -> IO Int
+  size r = withReg r $ \reg -> return $ M.size (rgWrk reg)
 
   -------------------------------------------------------------------------
   -- Per service:
   --     number of free workers
   --     number of busy workers
   -------------------------------------------------------------------------
-  statPerService :: B.ByteString -> IO (B.ByteString, Int, Int)
-  statPerService s = do
-    mbS <- lookupS s
+  statPerService :: Registry -> B.ByteString -> IO (B.ByteString, Int, Int)
+  statPerService r s = do
+    mbS <- lookupS r s
     case mbS of
       Nothing -> return (s, 0, 0)
       Just sn -> perService (s, sn)
@@ -346,8 +341,9 @@ where
   --     number of free workers
   --     number of busy workers
   -------------------------------------------------------------------------
-  stat :: IO [(B.ByteString, Int, Int)]
-  stat = withMVar _srv $ \t -> mapM perService $ M.assocs t
+  stat :: Registry -> IO [(B.ByteString, Int, Int)]
+  stat r = withReg r $ \reg -> 
+             mapM perService $ M.assocs (rgSrv reg)
 
   -------------------------------------------------------------------------
   -- Get stats per service
@@ -360,9 +356,9 @@ where
   -------------------------------------------------------------------------
   -- Debug: print q
   -------------------------------------------------------------------------
-  printQ :: B.ByteString -> IO ()
-  printQ s = do
-    mbS <- lookupS s
+  printQ :: Registry -> B.ByteString -> IO ()
+  printQ r s = do
+    mbS <- lookupS r s
     case mbS of
       Nothing -> return ()
       Just x  -> do q <- readMVar (srvQ x)
@@ -377,53 +373,20 @@ where
   --        initialising heartbeat
   --        inserting    into service queue
   -------------------------------------------------------------------------
-  initW :: Identity -> Service -> IO ()
-  initW i sn = modifyMVar_ (srvQ sn) $ \q -> do
-                 hb <- withMVar _hb newHeartbeat 
-                 let w = Worker {
-                           wrkId    = i,
-                           wrkState = Free,
-                           wrkHB    = hb,
-                           wrkQ     = srvQ sn}
-                 return $ insertQ (i,w) q
+  initW :: Identity -> Heartbeat -> Service -> IO ()
+  initW i hb sn = modifyMVar_ (srvQ sn) $ \q -> do
+                    let w = Worker {
+                              wrkId    = i,
+                              wrkHB    = hb,
+                              wrkQ     = srvQ sn}
+                    return $ insertQ (i,w) q
                     
-  -------------------------------------------------------------------------
-  -- Lookup worker, returning service
-  -------------------------------------------------------------------------
-  lookupW :: Identity -> IO (Maybe Service)
-  lookupW i = withMVar _wrk $ \t -> return $ M.lookup i t
-
   -------------------------------------------------------------------------
   -- Lookup service
   -------------------------------------------------------------------------
-  lookupS :: B.ByteString -> IO (Maybe Service)
-  lookupS sn = withMVar _srv $ \t -> return $ M.lookup sn t
-
-  -------------------------------------------------------------------------
-  -- Insert worker
-  -------------------------------------------------------------------------
-  insertW :: Identity -> Service -> IO ()
-  insertW i sn = modifyMVar_ _wrk $ \t -> return $ M.insert i sn t
-
-  -------------------------------------------------------------------------
-  -- Insert service
-  -------------------------------------------------------------------------
-  insertS :: B.ByteString -> Service -> IO ()
-  insertS s sn = do
-    modifyMVar_ _srv $ \t  -> return $ M.insert s sn t
-    modifyMVar_ _s   $ \ss -> return $ ss |> s
-  
-  -------------------------------------------------------------------------
-  -- Delete worker
-  -------------------------------------------------------------------------
-  deleteW :: Identity -> IO ()
-  deleteW i = modifyMVar_ _wrk $ \t -> return $ M.delete i t
-  
-  -------------------------------------------------------------------------
-  -- Delete service
-  -------------------------------------------------------------------------
-  deleteS :: B.ByteString -> IO ()
-  deleteS s = modifyMVar_ _srv $ \t -> return $ M.delete s t
+  lookupS :: Registry -> B.ByteString -> IO (Maybe Service)
+  lookupS r sn = withMVar r $ \reg -> 
+                   return $ M.lookup sn (rgSrv reg)
 
   -------------------------------------------------------------------------
   -- Queue:
@@ -548,7 +511,7 @@ where
                (w :< _) -> Just w
 
   -------------------------------------------------------------------------
-  -- Take n that fulfil f with state s
+  -- Take those that fulfil f with state s
   -------------------------------------------------------------------------
   takeIfQ :: State -> (WrkNode -> Bool) -> Queue -> [WrkNode]
   takeIfQ s f q = case s of

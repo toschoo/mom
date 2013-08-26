@@ -10,7 +10,7 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Patterns.Broker.Client (
                    Client, withClient, checkService,
-                   request)
+                   request, checkResult)
 where
 
   import qualified Data.ByteString.Char8  as B
@@ -117,13 +117,22 @@ where
   request :: Client -> Timeout -> Source -> SinkR (Maybe a) -> IO (Maybe a)
   request c tmo src snk = do
     runSender   (clSock c)     $ mdpSrc (clService c) src
-    runReceiver (clSock c) tmo $ mdpSnk (clService c) snk
+    if tmo /= 0 then runReceiver (clSock c) tmo $ mdpSnk (clService c) snk
+                else return Nothing
 
-  {- currently not provided
-  checkReceive :: Client -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
-  checkReceive c tmo snk = 
+  ------------------------------------------------------------------------
+  -- | Check for a of a previously requested result;
+  --   use case: request with timout 0, do some work
+  --             and check for a result later.
+  --   Do not use this function without having requested the service
+  --      previously.
+  --   The parameters equal those of 'request',
+  --   but do not include a 'Source'.
+  ------------------------------------------------------------------------
+  checkResult :: Client -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
+  checkResult c tmo snk | tmo == 0  = return Nothing
+                        | otherwise = 
     runReceiver (clSock c) tmo $ mdpSnk (clService c) snk
-  -}
     
   ------------------------------------------------------------------------
   -- Add MDP headers to a stream created by source

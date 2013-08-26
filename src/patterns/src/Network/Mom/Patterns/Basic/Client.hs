@@ -9,7 +9,7 @@
 -- Client side of Client/Server
 -------------------------------------------------------------------------------
 module Network.Mom.Patterns.Basic.Client (
-         Client, clService, withClient, request)
+         Client, clService, withClient, request, checkResult)
 where
 
   import qualified System.ZMQ            as Z
@@ -85,8 +85,21 @@ where
   -- >                     Nothing -> return Nothing
   -- >                     Just x  -> return $ Just $ B.unpack x
   ------------------------------------------------------------------------
-  request :: Client -> Timeout -> Source -> SinkR (Maybe a) -> IO (Maybe a)
+  request :: Client -> Timeout -> Source -> SinkR (Maybe r) -> IO (Maybe r)
   request c tmo src snk = do
     runSender   (clSock c) src
     if tmo /= 0 then runReceiver (clSock c) tmo snk
                 else return Nothing
+
+  ------------------------------------------------------------------------
+  -- | Check for a of a previously requested result;
+  --   use case: request with timout 0, do some work
+  --             and check for a result later.
+  --   Do not use this function without having requested the service
+  --      previously.
+  --   The parameters equal those of 'request',
+  --   but do not include a 'Source'.
+  ------------------------------------------------------------------------
+  checkResult :: Client -> Timeout -> SinkR (Maybe r) -> IO (Maybe r)
+  checkResult c tmo snk | tmo == 0  = return Nothing
+                        | otherwise = runReceiver (clSock c) tmo snk

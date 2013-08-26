@@ -141,9 +141,10 @@ where
 
   prpInsertOne :: NonEmptyList Char -> Property
   prpInsertOne (NonEmpty is) = monadicIO $ do
-    run clean
-    run $ insert (B.pack is) (B.pack "Test")
-    mbW <- run $ getWorker   (B.pack "Test") 
+    mbW <- run $ do
+      r <- newReg 200
+      insert r (B.pack is) (B.pack "Test")
+      getWorker r (B.pack "Test") 
     case mbW of
       Nothing -> assert False
       Just w  -> assert (B.unpack w == is)
@@ -151,29 +152,31 @@ where
   prpInsertSize :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertSize ns = let is = nub $ nonemptyString ns
                      in monadicIO $ do
-    run clean
-    run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
-    n <- run size
+    n <- run $ do
+      r <- newReg 200
+      mapM_ (\i -> insert r (B.pack i) $ B.pack "Test") is
+      size r
     assert (n == length is) 
 
   prpInsertAll :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertAll ns = let is = nub $ nonemptyString ns
                      in monadicIO $ do
-    run clean
-    run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
-    ws <- run $ (map B.unpack . catMaybes) <$> 
-                mapM (\_ -> getWorker $ B.pack "Test") is
+    ws <- run $ do
+      r <- newReg 200
+      mapM_ (\i -> insert r (B.pack i) $ B.pack "Test") is
+      (map B.unpack . catMaybes) <$> 
+          mapM (\_ -> getWorker r $ B.pack "Test") is
     assert (ws == is)
 
   prpStatsPerService :: NonEmptyList (NonEmptyList Char) -> Property
   prpStatsPerService ns = let is = nub $ nonemptyString ns
                            in monadicIO $ do
-    run clean
-    run $ mapM_ (\i -> insert (B.pack i) $ B.pack "Test") is
+    r <- run $ newReg 200
+    run $ mapM_ (\i -> insert r (B.pack i) $ B.pack "Test") is
     n <- pick $ choose (1, length is)
-    _ <- run  $ mapM (\_ -> getWorker $ B.pack "Test") [1..n]
-    sAll <- run stat
-    sSrv <- run $ statPerService $ B.pack "Test"
+    _ <- run  $ mapM (\_ -> getWorker r $ B.pack "Test") [1..n]
+    sAll <- run $ stat r
+    sSrv <- run $ statPerService r $ B.pack "Test"
     assert (not (null sAll)   &&
             length sAll == 1  &&
             head sAll == sSrv && 
@@ -183,9 +186,9 @@ where
   prpNextHB ns = let is = nub $ nonemptyString ns
                   in monadicIO $ do
     let sn = B.pack "Test"
-    run clean
-    run $ mapM_ (\i -> insert (B.pack i) sn) is
-    xs <- run checkWorker
+    r <- run $ newReg 200
+    run $ mapM_ (\i -> insert r (B.pack i) sn) is
+    xs <- run $ checkWorker r
     assert (null xs)
 
   ------------------------------------------------------------------------
@@ -195,10 +198,10 @@ where
   prpCheckSnd ns = let is = map B.pack $ nub $ nonemptyString ns
                     in monadicIO $ do
     let sn = B.pack "Test"
-    run $ do clean
-             mapM_ (`insert` sn) is
-             setMeBack (-10000) is
-    xs <- run checkWorker
+    xs <- run $ do r <- newReg 200
+                   mapM_ (\i -> insert r i sn) is
+                   setMeBack r (-10000) is
+                   checkWorker r
     assert (xs == is)
 
   ------------------------------------------------------------------------
@@ -209,15 +212,15 @@ where
                         in monadicIO $ do
     let sn = B.pack "Test"
     (xs, ys, zs, n1 , n2) <- run $ do 
-      clean
-      mapM_ (`insert` sn) is
-      n1 <- size
-      xs <- checkWorker
-      setMeBack (-10000) is
-      ys <- checkWorker
-      setHimBack (-100000) is
-      zs <- checkWorker
-      n2 <- size
+      r <- newReg 200
+      mapM_ (\i -> insert r i sn) is
+      n1 <- size r
+      xs <- checkWorker r
+      setMeBack r (-10000) is
+      ys <- checkWorker r
+      setHimBack r (-100000) is
+      zs <- checkWorker r
+      n2 <- size r
       return (xs, ys, zs, n1, n2)
     assert (null xs  &&    
             ys == is &&
@@ -233,14 +236,14 @@ where
                      in monadicIO $ do
     let sn = B.pack "Test"
     (xs, n1, n2) <- run $ do 
-      clean
-      mapM_ (`insert` sn) is
-      n1 <- size
-      setMeBack (-10000) is
-      xs <- checkWorker
-      setHimBack (-100000) is
-      mapM_ (\_ -> getWorker sn) [1..length is] 
-      n2 <- size
+      r <- newReg 200
+      mapM_ (\i -> insert r i sn) is
+      n1 <- size r
+      setMeBack r (-10000) is
+      xs <- checkWorker r
+      setHimBack r (-100000) is
+      mapM_ (\_ -> getWorker r sn) [1..length is] 
+      n2 <- size r
       return (xs, n1, n2)
     assert (xs == is &&
             n1 > n2 &&  
@@ -254,13 +257,13 @@ where
                      in monadicIO $ do
     let sn = B.pack "Test"
     (xs, n1, n2) <- run $ do 
-      clean
-      mapM_ (`insert` sn) is
-      n1 <- size
-      mapM_ (\_ -> getWorker sn) is
-      setHimBack (-100000) is
-      xs <- checkWorker
-      n2 <- size
+      r <- newReg 200
+      mapM_ (\i -> insert r i sn) is
+      n1 <- size r
+      mapM_ (\_ -> getWorker r sn) is
+      setHimBack r (-100000) is
+      xs <- checkWorker r
+      n2 <- size r
       return (xs, n1, n2)
     assert (null xs  && 
             n1 > n2  &&  
@@ -271,48 +274,48 @@ where
                           in monadicIO $ do
     let sn = B.pack "Test"
     (xs, n1, n2) <- run $ do 
-      clean
-      mapM_ (`insert` sn) is
-      n1 <- size
-      mapM_ (\_ -> getWorker sn) is 
-      setBack (-10) is
-      xs <- checkWorker
-      n2 <- size
+      r <- newReg 200
+      mapM_ (\i -> insert r i sn) is
+      n1 <- size r
+      mapM_ (\_ -> getWorker r sn) is 
+      setBack r (-10) is
+      xs <- checkWorker r
+      n2 <- size r
       return (xs, n1, n2)
     assert (null xs && n1 == n2)
 
   prpDontBuryAlive :: NonEmptyList (NonEmptyList Char) -> Property
   prpDontBuryAlive ns = let is  = map B.pack $ nub $ nonemptyString ns
-                            is2 = map (`B.append` (B.pack "x-")) is
+                            is2 = map (`B.append` B.pack "x-") is
                           in monadicIO $ do
     let sn = B.pack "Test"
     (xs, n1, n2, n3) <- run $ do 
-      clean
-      mapM_ (`insert` sn) is
-      n1 <- size
-      mapM_ (\_ -> getWorker sn) is
-      setHimBack (-100000) is
-      mapM_ (`insert` sn) is2
-      n2 <- size
-      xs <- checkWorker
-      n3 <- size
+      r <- newReg 200
+      mapM_ (\i -> insert r i sn) is
+      n1 <- size r
+      mapM_ (\_ -> getWorker r sn) is
+      setHimBack r (-100000) is
+      mapM_ (\i -> insert r i sn) is2
+      n2 <- size r
+      xs <- checkWorker r
+      n3 <- size r
       return (xs, n1, n2, n3)
     assert (null xs                      && 
             n1 == length is              &&
             n2 == length is + length is2 && 
             n3 == length is2)
 
-  setBack :: Msec -> [B.ByteString] -> IO ()
-  setBack ms is = setMeBack ms is >> setHimBack ms is
+  setBack :: Registry -> Msec -> [B.ByteString] -> IO ()
+  setBack r ms is = setMeBack r ms is >> setHimBack r ms is
 
-  setMeBack :: Msec -> [B.ByteString] -> IO ()
-  setMeBack ms = mapM_ (`updWorker` setTime) 
+  setMeBack :: Registry -> Msec -> [B.ByteString] -> IO ()
+  setMeBack r ms = mapM_ (\i -> updWorker r i setTime) 
     where setTime (i, w) = 
             let hb  = (wrkHB w){hbNextMe = timeAdd (hbNextMe $ wrkHB w) ms}
              in (i, w {wrkHB = hb})
 
-  setHimBack :: Msec -> [B.ByteString] -> IO ()
-  setHimBack ms = mapM_ (`updWorker` setTime) 
+  setHimBack :: Registry -> Msec -> [B.ByteString] -> IO ()
+  setHimBack r ms = mapM_ (\i -> updWorker r i setTime) 
     where setTime (i, w) = 
             let hb  = (wrkHB w){hbNextHe = timeAdd (hbNextHe $ wrkHB w) ms}
              in (i, w {wrkHB = hb})
@@ -345,7 +348,6 @@ where
      let i = B.pack s
      return (i, Worker {
                   wrkId    = i,
-                  wrkState = Free,
                   wrkHB    = hb,
                   wrkQ     = mq})
 

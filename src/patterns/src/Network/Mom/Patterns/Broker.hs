@@ -87,12 +87,6 @@ where
      The functionality provided by the broker module
      can be used to implement a standalone broker
      or an in-process broker linked with its clients and servers.
-     Note, however, 
-     that brokers must not share the same process
-     with other brokers, since, internally,
-     the broker module uses a global registry,
-     which would be shared among all brokers 
-     in the same process as well. 
   -}
 
   {- $common

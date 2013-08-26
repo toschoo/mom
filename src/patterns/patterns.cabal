@@ -26,6 +26,30 @@ Description:
   More examples and a test suite are available 
   on <http://github.com/toschoo/mom>.
 
+  .
+
+  Release History:
+
+  .
+
+  [0.1.1] Client (Basic and MDP):
+          checkResult added;
+          MDP Broker:
+          Many brokers in one process.
+
+  .
+
+  [0.1.0] Major Review:
+          Conduits replace enumerators,
+          Interfaces simplified to ByteString,
+          Interfaces simplified in general,
+          Advanced patterns:
+          Majordomo Broker.
+
+  .
+
+  [0.0.1] Initial Release.
+
 -- with libzmq 2.1, 2.2 is broken!
 Library
   Build-Depends:   base        >= 4.5 && <= 5.0,

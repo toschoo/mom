@@ -289,9 +289,6 @@ where
          | MDPExc   String
          -- | MMI Protocol
          | MMIExc   String
-         -- | SingleBroker error
-         --   (another broker is already running in the same process)
-         | SingleBrokerExc String -- move to Broker.Common
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception MDPException
