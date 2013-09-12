@@ -52,6 +52,7 @@ where
                        conSes  :: String, -- session identifier (from broker)
                        conUsr  :: String,      -- user
                        conPwd  :: String,      -- passcode
+                       conCli  :: String,      -- client-id
                        conMax  :: Int,         -- max receive
                        conSock :: Maybe Socket,     -- if connected: socket
                        conRcv  :: Maybe S.Receiver, -- if connected: receiver
@@ -134,8 +135,8 @@ where
   ---------------------------------------------------------------------
   -- Make a connection
   ---------------------------------------------------------------------
-  mkConnection :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> Connection
-  mkConnection host port mx usr pwd vers beat = 
+  mkConnection :: String -> Int -> Int -> String -> String -> String -> [F.Version] -> F.Heart -> Connection
+  mkConnection host port mx usr pwd cli vers beat = 
     Connection {
        conAddr = host,
        conPort = port,
@@ -145,6 +146,7 @@ where
        conSes  = "",
        conUsr  = usr, 
        conPwd  = pwd,
+       conCli  = cli,
        conMax  = mx,
        conSock = Nothing,
        conRcv  = Nothing,
@@ -185,11 +187,11 @@ where
   ---------------------------------------------------------------------
   -- connect
   ---------------------------------------------------------------------
-  connect :: String -> Int -> Int -> String -> String -> [F.Version] -> F.Heart -> IO Connection
-  connect host port mx usr pwd vers beat = 
+  connect :: String -> Int -> Int -> String -> String -> String -> [F.Version] -> F.Heart -> IO Connection
+  connect host port mx usr pwd cli vers beat = 
     bracketOnError (do s <- S.connect host port
                        let c = mkConnection host port mx 
-                                            usr  pwd  vers beat
+                                            usr  pwd cli vers beat
                        return c {conSock = Just s, conTcp = True}) 
                    disc
                    (connectBroker mx vers beat) 
@@ -301,7 +303,7 @@ where
   ---------------------------------------------------------------------
   connectBroker :: Int -> [F.Version] -> F.Heart -> Connection -> IO Connection
   connectBroker mx vers beat c = 
-    case mkConF (conAddr c) (conUsr c) (conPwd c) vers beat of
+    case mkConF (conAddr c) (conUsr c) (conPwd c) (conCli c) vers beat of
       Left e  -> return c {conErrM = e}
       Right f -> do
         rc  <- S.initReceiver
@@ -353,14 +355,16 @@ where
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
-  mkConF :: String -> String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
-  mkConF host usr pwd vers beat = 
+
+  mkConF :: String -> String -> String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
+  mkConF host usr pwd cli vers beat = 
     let uHdr = if null usr then [] else [F.mkLogHdr  usr]
         pHdr = if null pwd then [] else [F.mkPassHdr pwd]
+        cHdr = if null cli then [] else [F.mkCliIdHdr cli]
      in F.mkConFrame $ [F.mkHostHdr host,
                         F.mkAcVerHdr $ F.versToVal vers, 
                         F.mkBeatHdr  $ F.beatToVal beat] ++
-                       uHdr ++ pHdr
+                       uHdr ++ pHdr ++ cHdr
 
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =
