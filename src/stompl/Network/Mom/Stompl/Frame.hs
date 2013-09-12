@@ -322,7 +322,8 @@ where
                    frmAck   :: AckMode,
                    frmSel   :: String,
                    frmId    :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | USubFrame {
                    frmDest  :: String,
@@ -490,15 +491,18 @@ where
   --   * Receipt: A unique identifier defined by the application
   --              to request confirmation of receipt of this frame.
   --              If no receipt is wanted, the string shall be empty.
+  --
+  --   * 'Header': List of additional headers.
   ----------------------------------------------------------------------
-  mkSubscribe :: String -> AckMode -> String -> String -> String -> Frame
-  mkSubscribe dst ack sel sid rc =
+  mkSubscribe :: String -> AckMode -> String -> String -> String -> [Header] -> Frame
+  mkSubscribe dst ack sel sid rc hs =
     SubFrame {
       frmDest = dst,
       frmAck  = ack,
       frmSel  = sel,
       frmId   = sid,
-      frmRec  = rc}
+      frmRec  = rc,
+      frmHdrs = hs}
 
   ----------------------------------------------------------------------
   -- | make an 'Unsubscribe' frame (Application -> Broker).
@@ -887,7 +891,7 @@ where
               (ConFrame  _ _ _  _ _ _  ) -> Connect
               (CondFrame _ _ _ _       ) -> Connected
               (DisFrame  _             ) -> Disconnect
-              (SubFrame  _ _ _ _ _     ) -> Subscribe
+              (SubFrame  _ _ _ _ _ _   ) -> Subscribe
               (USubFrame _ _ _         ) -> Unsubscribe
               (SndFrame  _ _ _ _ _ _ _ ) -> Send
               (BgnFrame  _ _           ) -> Begin
@@ -1182,12 +1186,12 @@ where
   toHeaders (DisFrame r) =
     if null r then [] else [mkRecHdr r]
   -- Subscribe Frame ------------------------------------------------------
-  toHeaders (SubFrame d a s i r) =
+  toHeaders (SubFrame d a s i r h) =
     let ah = if a == Auto then [] else [mkAckHdr (show a)]
         sh = if null s then [] else [mkSelHdr s]
         rh = if null r then [] else [mkRecHdr r]
         ih = if null i then [] else [mkIdHdr i]
-    in mkDestHdr d : (ah ++ sh ++ ih ++ rh)
+    in mkDestHdr d : (ah ++ sh ++ ih ++ rh ++ h)
   -- Unsubscribe Frame ----------------------------------------------------
   toHeaders (USubFrame d i r) =
     let ih = if null i then [] else [mkIdHdr i]
@@ -1381,7 +1385,9 @@ where
                                         frmAck  = a,
                                         frmSel  = findStrHdr hdrSel "" hs,
                                         frmId   = findStrHdr hdrId  "" hs,
-                                        frmRec  = findStrHdr hdrRec "" hs}
+                                        frmRec  = findStrHdr hdrRec "" hs,
+                                        frmHdrs = rmHdrs hs [hdrDest, hdrAck,
+                                                  hdrSel, hdrId, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Unsubscribe' frame
