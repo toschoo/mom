@@ -129,6 +129,8 @@ clean:
 	rm -f $(SMOKEDIR)/frost
 	rm -f $(SMOKEDIR)/cl1
 	rm -f $(SMOKEDIR)/conduit1
+	rm -f $(SMOKEDIR)/client1
+	rm -f $(SMOKEDIR)/server1
 	rm -f $(SMOKEDIR)/contx1
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
