@@ -28,6 +28,8 @@ INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 
 smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/send2 \
+        $(SMOKEDIR)/client1 \
+        $(SMOKEDIR)/server1 \
         $(SMOKEDIR)/sendtx \
         $(SMOKEDIR)/sendf \
         $(SMOKEDIR)/sendforever \
@@ -40,6 +42,12 @@ $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/send2:	$(SMOKEDIR)/send2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/client1:	$(SMOKEDIR)/client1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/server1:	$(SMOKEDIR)/server1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)

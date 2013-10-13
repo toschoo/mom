@@ -9,12 +9,15 @@
 -- Subscriber side of \'Publish Subscribe\'
 -------------------------------------------------------------------------------
 module Network.Mom.Patterns.Basic.Subscriber (
-         Sub, withSub, subscribe, checkSub)
+         Sub, withSub, subscribe, checkSub, withSubVarR, withSubVar_)
          
 where
 
   import qualified Data.Conduit          as C
   import qualified System.ZMQ            as Z
+  import           Control.Concurrent (MVar, modifyMVar_, forkIO, killThread)
+  import           Control.Monad      (forever)
+  import           Control.Exception  (bracket)
   import           Network.Mom.Patterns.Types
   import           Network.Mom.Patterns.Streams
 
@@ -75,10 +78,34 @@ where
   --                 is dropped.
   ------------------------------------------------------------------------
   checkSub :: Sub -> Timeout -> SinkR (Maybe a) -> IO (Maybe a)
-  checkSub s tmo snk = runReceiver (subSock s) tmo subSnk
-    where subSnk = do
-            mb <- C.await -- subscription header is filtered out!
-            case mb of
-              Nothing -> return Nothing
-              Just _  -> snk
+  checkSub s tmo snk = runReceiver (subSock s) tmo (subSnk snk)
+
+  subSnk :: SinkR (Maybe a) -> SinkR (Maybe a)
+  subSnk snk = do
+    mb <- C.await -- subscription header is filtered out!
+    case mb of
+      Nothing -> return Nothing
+      Just _  -> snk
+
+  withSubVar_ :: Context -> String -> LinkType -> [Service] ->
+                 MVar a  -> (MVar a -> SinkR (Maybe ()))    -> IO () -> IO ()
+  withSubVar_ ctx a l ts m snk act = bracket (forkIO subvar)
+                                             killThread
+                                             (\_ -> act)
+    where subvar = withSub ctx a l $ \s -> 
+                     subscribe s ts >> forever (do
+                       _ <- runReceiver (subSock s) (-1) (subSnk (snk m))
+                       return ())
+
+  withSubVarR :: Context -> String -> LinkType -> [Service] ->
+                 MVar a  -> SinkR (Maybe a)    -> IO ()     -> IO ()
+  withSubVarR ctx a l ts m snk act = bracket (forkIO subvar)
+                                             killThread
+                                             (\_ -> act)
+    where subvar = withSub ctx a l $ \s -> 
+                     subscribe s ts >> forever (do
+                       mbR <- runReceiver (subSock s) (-1) (subSnk snk)
+                       case mbR of
+                         Nothing -> return ()
+                         Just r  -> modifyMVar_ m $ \_ -> return r)
 

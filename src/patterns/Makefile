@@ -202,6 +202,9 @@ $(SMOKEDIR)/mdbounce:	$(SMOKEDIR)/mdbounce.hs $(SUBSRC)
 $(SMOKEDIR)/pubsub:	$(SMOKEDIR)/pubsub.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/pubsubvar:	$(SMOKEDIR)/pubsubvar.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/demo1:	$(SMOKEDIR)/demo1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
@@ -288,6 +291,7 @@ clean:
 	rm -f $(SMOKEDIR)/bridge
 	rm -f $(SMOKEDIR)/pipe
 	rm -f $(SMOKEDIR)/pubsub
+	rm -f $(SMOKEDIR)/pubsubvar
 	rm -f $(SMOKEDIR)/demo1
 	rm -f $(SMOKEDIR)/zmqpubsub
 	rm -f $(SMOKEDIR)/eot

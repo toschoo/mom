@@ -249,7 +249,7 @@ where
   testSndRcv :: Con -> IO TestResult
   testSndRcv c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
-    oQ <- newWriter c "OUT" tQ1 []    [] oconv
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
     writeQ oQ nullType [] text1
     m <- readQ iQ
     if msgContent m == text1

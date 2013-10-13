@@ -31,7 +31,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- $stomp_queues
                    Reader, Writer, 
                    newReader, newWriter, 
-                   withReader, withReader_,
+                   withReader, withWriter, withPair,
                    Qopt(..), F.AckMode(..), 
                    InBound, OutBound, 
                    readQ, 
@@ -705,19 +705,75 @@ where
   --   > x <- withReader c "TestQ" "/queue/test" [] [] iconv $ \q -> do
   ------------------------------------------------------------------------
   withReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-                InBound a -> (Reader a -> IO b) -> IO b
+                InBound i -> (Reader i -> IO r) -> IO r
   withReader cid qn dst os hs conv act = do
     q <- newReader cid qn dst os hs conv
     act q `finally` unsub q
 
   ------------------------------------------------------------------------
-  -- | A variant of 'withReader' 
-  --   for actions that do not return anything.
+  -- | Creates a 'Writer' with limited life time. 
+  --   The queue will live only in the scope of the action
+  --   that is passed as last parameter. 
+  --   The function is useful for writers
+  --   that are used only temporarly, /e.g./ during initialisation.
+  --
+  --   'withWriter' returns the result of the action.
+  --   Since the life time of the queue is limited to the action,
+  --   it should not be returned.
+  --   Any operation on a writer created by 'withWriter'
+  --   outside the action will raise a 'QueueException'.
   ------------------------------------------------------------------------
-  withReader_ :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-                 InBound a -> (Reader a -> IO ()) -> IO ()
-  withReader_ cid qn dst os hs conv act = 
-    withReader cid qn dst os hs conv act >>= (\_ -> return ())
+  withWriter :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
+                OutBound o -> (Writer o -> IO r) -> IO r
+  withWriter cid qn dst os hs conv act = 
+    newWriter cid qn dst os hs conv >>= act
+
+  ------------------------------------------------------------------------
+  -- | Creates a pair of ('Reader', 'Writer') with limited life time. 
+  --   The pair will live only in the scope of the action
+  --   that is passed as last parameter. 
+  --   The function is useful for readers\/writers
+  --   used in combination, /e.g./ to emulate a client\/server
+  --   kind of communication.
+  --
+  --   'withPair' returns the result of the action passed in.
+  --
+  --   The parameters are:
+  --
+  --   * The connection handle 'Con'
+  --
+  --   * The name of the pair; 
+  --     the reader will be identified by a string
+  --                with \"_r\" added to this name,
+  --     the writer by a string with \"_w\" added to this name.
+  --
+  --   * The reader queue name
+  --
+  --   * The writer queue name
+  --
+  --   * The reader 'Qopt's
+  --
+  --   * The writer 'Qopt's
+  --
+  --   * The reader headers
+  --
+  --   * The writer headers
+  --
+  --   * The reader's (inbound) converter
+  --
+  --   * The writer's (outbound) converter
+  --
+  --   * The action
+  ------------------------------------------------------------------------
+  withPair :: Con -> String     -> 
+                     String     -> String     -> 
+                     [Qopt]     -> [Qopt]     ->
+                     [F.Header] -> [F.Header] ->
+                     InBound i  -> OutBound o -> 
+                     ((Reader i, Writer o)    -> IO r) -> IO r
+  withPair cid n rn wn rq wq rh wh iconv oconv act = 
+    withReader cid (n ++ "_r") rn rq rh iconv $ \r ->
+      withWriter cid (n ++ "_w") wn wq wh oconv $ \w -> act (r,w)
 
   ------------------------------------------------------------------------
   -- Creating a SendQ is plain and simple.
