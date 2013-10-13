@@ -3,7 +3,7 @@ module State (
          Connection(..),
          Copt(..),
          oHeartBeat, oMaxRecv,
-         oAuth,
+         oAuth, oCliId,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -117,7 +117,11 @@ where
     OHeartBeat  (F.Heart) |
 
     -- | Authentication: user and password
-    OAuth String String
+    OAuth String String |
+
+    -- | Identification: specifies the JMS Client ID for persistant connections
+    OClientId String
+
     deriving (Eq, Show)
 
   ------------------------------------------------------------------------
@@ -128,6 +132,7 @@ where
   is (OMaxRecv    _) (OMaxRecv    _) = True
   is (OHeartBeat  _) (OHeartBeat  _) = True
   is (OAuth     _ _) (OAuth     _ _) = True
+  is (OClientId   _) (OClientId  _)  = True
   is _               _               = False
 
   noWait :: Int
@@ -141,6 +146,9 @@ where
 
   noAuth :: (String, String)
   noAuth = ("","")
+
+  noCliId :: String
+  noCliId = ""
 
   oWaitBroker :: [Copt] -> Int
   oWaitBroker os = case find (is $ OWaitBroker 0) os of
@@ -161,6 +169,11 @@ where
   oAuth os = case find (is $ OAuth "" "") os of
                Just (OAuth u p) -> (u, p)
                _   -> noAuth
+
+  oCliId :: [Copt] -> String
+  oCliId os = case find (is $ OClientId "") os of
+               Just (OClientId i) -> i
+               _   -> noCliId
 
   findCon :: Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)

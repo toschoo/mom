@@ -391,7 +391,8 @@ where
     let beat  = oHeartBeat os
     let mx    = oMaxRecv   os
     let (u,p) = oAuth      os
-    bracket (P.connect host port mx u p vers beat)
+    let (ci)  = oCliId     os
+    bracket (P.connect host port mx u p ci vers beat)
             P.disc -- important: At the end, we close the socket!
             (whenConnected os act)
 
