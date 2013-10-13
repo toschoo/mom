@@ -42,7 +42,7 @@ module Network.Mom.Stompl.Frame (
                        mkSesHdr,   mkMsgHdr,  mkMIdHdr,
                        mkAcVerHdr, mkVerHdr,  mkHostHdr,
                        mkBeatHdr,  mkMimeHdr, mkSrvHdr,
-                       mkSubHdr,
+                       mkSubHdr, mkCliIdHdr,
                        valToVer, valToVers, verToVal, versToVal,
                        beatToVal, valToBeat,
                        ackToVal, valToAck,
@@ -57,7 +57,7 @@ module Network.Mom.Stompl.Frame (
                        complies,
                        -- * Get Access to Frames
                        getDest, getTrans, getReceipt,
-                       getLogin, getPasscode, 
+                       getLogin, getPasscode, getCliId,
                        getHost, getVersions, getVersion,
                        getBeat, 
                        getSession, getServer, 
@@ -156,9 +156,10 @@ where
 
   hdrLog, hdrPass, hdrDest, hdrSub, hdrLen, hdrTrn, hdrRec, hdrRecId,
     hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, hdrSrv,
-    hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime :: String
+    hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime, hdrCliId :: String
   hdrLog   = "login"
   hdrPass  = "passcode"
+  hdrCliId = "client-id"
   hdrDest  = "destination"
   hdrSub   = "subscription"
   hdrLen   = "content-length"
@@ -189,6 +190,10 @@ where
   -- | make /passcode/ header
   ------------------------------------------------------------------------
   mkPassHdr  :: String -> Header
+  ------------------------------------------------------------------------
+  -- | make /client-id/ header
+  ------------------------------------------------------------------------
+  mkCliIdHdr  :: String -> Header
   ------------------------------------------------------------------------
   -- | make /destination/ header
   ------------------------------------------------------------------------
@@ -264,6 +269,7 @@ where
 
   mkLogHdr   = mkHeader hdrLog
   mkPassHdr  = mkHeader hdrPass
+  mkCliIdHdr = mkHeader hdrCliId
   mkDestHdr  = mkHeader hdrDest
   mkLenHdr   = mkHeader hdrLen
   mkMimeHdr  = mkHeader hdrMime
@@ -302,7 +308,8 @@ where
                    frmPass  :: String,
                    frmHost  :: String,
                    frmBeat  :: Heart,
-                   frmAcVer :: [Version] -- 1.1
+                   frmAcVer :: [Version], -- 1.1
+                   frmCliId :: String
                  }
                | CondFrame {
                    frmSes   :: String,
@@ -315,7 +322,8 @@ where
                    frmAck   :: AckMode,
                    frmSel   :: String,
                    frmId    :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | USubFrame {
                    frmDest  :: String,
@@ -423,15 +431,18 @@ where
   --                  the heart-beat.
   --
   --   * 'Version': the versions supported by the client.
+  --
+  --   * 'ClientId': Client identification for persistent connections.
   ----------------------------------------------------------------------
-  mkConnect :: String -> String -> String -> Heart -> [Version] -> Frame
-  mkConnect usr pwd hst beat vers =
+  mkConnect :: String -> String -> String -> Heart -> [Version] -> String -> Frame
+  mkConnect usr pwd hst beat vers cli =
     ConFrame {
        frmLogin = usr,
        frmPass  = pwd,
        frmHost  = hst,
        frmBeat  = beat,
-       frmAcVer = vers}
+       frmAcVer = vers,
+       frmCliId = cli}
 
   ----------------------------------------------------------------------
   -- | make a 'Connect' frame (Broker -> Application).
@@ -480,15 +491,18 @@ where
   --   * Receipt: A unique identifier defined by the application
   --              to request confirmation of receipt of this frame.
   --              If no receipt is wanted, the string shall be empty.
+  --
+  --   * 'Header': List of additional headers.
   ----------------------------------------------------------------------
-  mkSubscribe :: String -> AckMode -> String -> String -> String -> Frame
-  mkSubscribe dst ack sel sid rc =
+  mkSubscribe :: String -> AckMode -> String -> String -> String -> [Header] -> Frame
+  mkSubscribe dst ack sel sid rc hs =
     SubFrame {
       frmDest = dst,
       frmAck  = ack,
       frmSel  = sel,
       frmId   = sid,
-      frmRec  = rc}
+      frmRec  = rc,
+      frmHdrs = hs}
 
   ----------------------------------------------------------------------
   -- | make an 'Unsubscribe' frame (Application -> Broker).
@@ -759,6 +773,11 @@ where
   getPasscode :: Frame -> String
   getPasscode = frmPass
   ------------------------------------------------------------------------
+  -- | get /client-id/ from 'Connect'
+  ------------------------------------------------------------------------
+  getCliId :: Frame -> String
+  getCliId = frmCliId
+  ------------------------------------------------------------------------
   -- | get /version/ from 'Connected'
   ------------------------------------------------------------------------
   getVersion :: Frame -> Version
@@ -869,10 +888,10 @@ where
   ------------------------------------------------------------------------
   typeOf :: Frame -> FrameType
   typeOf f = case f of
-              (ConFrame  _ _ _ _ _     ) -> Connect
+              (ConFrame  _ _ _  _ _ _  ) -> Connect
               (CondFrame _ _ _ _       ) -> Connected
               (DisFrame  _             ) -> Disconnect
-              (SubFrame  _ _ _ _ _     ) -> Subscribe
+              (SubFrame  _ _ _ _ _ _   ) -> Subscribe
               (USubFrame _ _ _         ) -> Unsubscribe
               (SndFrame  _ _ _ _ _ _ _ ) -> Send
               (BgnFrame  _ _           ) -> Begin
@@ -1152,11 +1171,11 @@ where
   ------------------------------------------------------------------------
   toHeaders :: Frame -> [Header]
   -- Connect Frame -------------------------------------------------------
-  toHeaders (ConFrame l p h b v) = 
+  toHeaders (ConFrame l p h b v i) = 
     [mkLogHdr l, mkPassHdr p, 
      mkAcVerHdr $ versToVal v, 
      mkBeatHdr  $ beatToVal b,
-     mkHostHdr h]
+     mkHostHdr h, mkCliIdHdr i ]
   -- Connected Frame -----------------------------------------------------
   toHeaders (CondFrame s b v d) =
     [mkSesHdr s, 
@@ -1167,12 +1186,12 @@ where
   toHeaders (DisFrame r) =
     if null r then [] else [mkRecHdr r]
   -- Subscribe Frame ------------------------------------------------------
-  toHeaders (SubFrame d a s i r) =
+  toHeaders (SubFrame d a s i r h) =
     let ah = if a == Auto then [] else [mkAckHdr (show a)]
         sh = if null s then [] else [mkSelHdr s]
         rh = if null r then [] else [mkRecHdr r]
         ih = if null i then [] else [mkIdHdr i]
-    in mkDestHdr d : (ah ++ sh ++ ih ++ rh)
+    in mkDestHdr d : (ah ++ sh ++ ih ++ rh ++ h)
   -- Unsubscribe Frame ----------------------------------------------------
   toHeaders (USubFrame d i r) =
     let ih = if null i then [] else [mkIdHdr i]
@@ -1253,9 +1272,10 @@ where
   ------------------------------------------------------------------------
   mkConFrame :: [Header] -> Either String Frame
   mkConFrame hs = 
-    let l   = findStrHdr hdrLog  "" hs
-        p   = findStrHdr hdrPass "" hs
-        h   = findStrHdr hdrHost "" hs
+    let l   = findStrHdr hdrLog   "" hs
+        p   = findStrHdr hdrPass  "" hs
+        h   = findStrHdr hdrHost  "" hs
+        i   = findStrHdr hdrCliId "" hs
         eiB = case lookup hdrBeat hs of
                 Nothing -> Right noBeat
                 Just x  -> case valToBeat x of
@@ -1271,7 +1291,7 @@ where
           Left  e  -> Left e
           Right vs -> case eiB of
                         Left e  -> Left e
-                        Right b -> Right $ ConFrame l p h b vs 
+                        Right b -> Right $ ConFrame l p h b vs i
 
   ------------------------------------------------------------------------
   -- | make 'Connected' frame
@@ -1365,7 +1385,9 @@ where
                                         frmAck  = a,
                                         frmSel  = findStrHdr hdrSel "" hs,
                                         frmId   = findStrHdr hdrId  "" hs,
-                                        frmRec  = findStrHdr hdrRec "" hs}
+                                        frmRec  = findStrHdr hdrRec "" hs,
+                                        frmHdrs = rmHdrs hs [hdrDest, hdrAck,
+                                                  hdrSel, hdrId, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Unsubscribe' frame
