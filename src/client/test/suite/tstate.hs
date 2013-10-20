@@ -468,7 +468,8 @@ where
   {-# NOINLINE con #-}
   con :: MVar P.Connection
   con = unsafePerformIO $ do
-    c <- P.connect "127.0.0.1" 22222 1024 "guest" "guest" [(1,0), (1,1)] (0,0)
+    c <- P.connect "127.0.0.1" 22222 1024 "guest" "guest" "" 
+                   [(1,0), (1,1)] (0,0) []
     _ <- P.disc c
     newMVar c
 
@@ -560,14 +561,14 @@ where
   -------------------------------------------------------------
   deepCheck :: (Testable p) => p -> IO Result
   deepCheck = quickCheckWithResult stdArgs{maxSuccess=100,
-                                           maxDiscard=500}
+                                           maxDiscardRatio=10}
 
   -------------------------------------------------------------
   -- do just one test
   -------------------------------------------------------------
   oneCheck :: (Testable p) => p -> IO Result
   oneCheck = quickCheckWithResult stdArgs{maxSuccess=1,
-                                          maxDiscard=1}
+                                          maxDiscardRatio=10}
 
   -------------------------------------------------------------
   -- combinator, could be a monad...

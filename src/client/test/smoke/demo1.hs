@@ -9,7 +9,7 @@ import           Control.Monad (forever)
 
 
 main :: IO ()
-main = withConnection "localhost" 61613 [] $ \c -> do
+main = withConnection "localhost" 61613 [] [] $ \c -> do
          iq <- newReader c "demoI" "/q/demo" [] [] 
                          (\_ _ _ -> return . B.unpack)
          oQ <- newWriter c "demoO" "/q/demo" [] []

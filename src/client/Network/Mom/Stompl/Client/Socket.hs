@@ -17,12 +17,14 @@ where
 
   import           Control.Concurrent.MVar
   import           Control.Applicative ((<$>))
-  import           Control.Monad (unless)
+  import           Control.Monad (unless, when)
   import           Control.Exception (throwIO, finally, SomeException)
   import qualified Control.Exception as Ex (try)
 
   import qualified Data.Attoparsec.ByteString as A (
                                    Result, IResult(..), feed, parse)
+
+  import System.IO (stderr, hPutStrLn)
 
   type Result = A.Result F.Frame
 
@@ -62,13 +64,11 @@ where
                getBuffer = get buf,
                putBuffer = put buf}
 
-  lockSock :: MVar Bool -> IO ()
-  lockSock l = putMVar l True
+  lockSock :: MVar () -> IO ()
+  lockSock l = putMVar l ()
 
-  releaseSock :: MVar Bool -> IO ()
-  releaseSock l = do
-    _ <- takeMVar l
-    return ()
+  releaseSock :: MVar () -> IO ()
+  releaseSock = takeMVar 
 
   initWriter :: IO Writer
   initWriter = do
@@ -80,7 +80,7 @@ where
         
   connect :: String -> Int -> IO S.Socket
   connect host port = do
-    let p   = fromIntegral port :: S.PortNumber
+    let p = fromIntegral port :: S.PortNumber
     prot <- getProtocolNumber "tcp" 
     let hints = S.defaultHints {S.addrSocketType = S.Stream,
                                 S.addrProtocol   = prot}
@@ -104,8 +104,8 @@ where
                 eiS  <- Ex.try $ S.connect sock a
                 case eiS of
                   Left  e -> do
-                    putStrLn $ "Network.Mom.Stompl.Socket - " ++
-                               "Warning: " ++ show (e::SomeException)
+                    hPutStrLn stderr $ "Network.Mom.Stompl.Socket - " ++
+                                       "Warning: " ++ show (e::SomeException)
                     tryConnect p is
                   Right _ -> return sock
 
@@ -119,11 +119,16 @@ where
 #ifdef _DEBUG
     putStrLn $ "Sending: " ++ U.toString s
 #endif
-    n <- finally (BS.send sock s)
-                 (release wr)
-    unless (n == B.length s) $ throwIO $ SocketException $
-                                  "Could not send complete buffer. " ++
-                                  "Bytes sent: " ++ show n
+    finally (resend sock s) (release wr)
+
+  resend :: S.Socket -> B.ByteString -> IO ()
+  resend s b | B.length b == 0 = return ()
+             | otherwise       = do
+    let t = B.length b
+    n <- BS.send s b
+    if n == 0
+      then throwIO $ SocketException "Could not send buffer -- unknown error"
+      else when (n < t) $ resend s $ B.drop n b 
 
   receive :: Receiver -> S.Socket -> Int -> IO (Either String F.Frame)
   receive rec sock mx = handlePartial rec sock mx Nothing 0

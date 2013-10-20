@@ -8,34 +8,27 @@ where
 
   import System.Exit
   import System.Environment
-
   import Network.Socket (withSocketsDo)
+  import qualified Data.ByteString.Char8 as B
+  import Codec.MIME.Type (nullType)
   import Control.Monad (forever)
-
-  import qualified Data.ByteString.UTF8  as U
 
   main :: IO ()
   main = do
     os <- getArgs
     case os of
-      [q] -> withSocketsDo $ conAndListen q
+      [q] -> withSocketsDo $ forever $ makeTransaction q
       _   -> do
         putStrLn "I need a queue name (and only a queue name)."
         exitFailure
 
-  conAndListen :: String -> IO ()
-  conAndListen qn = withSocketsDo $ do -- connectAndGo
+  makeTransaction :: String -> IO ()
+  makeTransaction qn = withSocketsDo $ do -- connectAndGo
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do
-      let conv _ _ _ = return . U.toString
-      q <- newReader c "Q-Hof" qn [] [] conv
-      listen2 q
-
-  listen2 :: Reader String -> IO ()
-  listen2 q = forever $ do
-    eiM <- try $ readQ q 
-    case eiM of
-      Left  e -> do
-        putStrLn $ "Error: " ++ (show (e::StomplException))
-      Right m -> do
-        putStrLn (msgContent m)
+      let conv = return . B.pack
+      q <- newWriter c "Q-Hof" qn [] [] conv
+      withTransaction c [] $ \_ -> do
+        writeQ q nullType [] "Tx Message 1" 
+        writeQ q nullType [] "Tx Message 2"
+        writeQ q nullType [] "Tx Message 3"
 

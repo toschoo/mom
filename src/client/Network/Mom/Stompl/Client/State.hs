@@ -1,3 +1,4 @@
+{-# Language BangPatterns #-}
 module State (
          msgContent, numeric, ms,
          Connection(..),
@@ -233,7 +234,7 @@ where
   setMyTime t c = c {conMyBeat = t}
 
   updCon :: Connection -> [Connection] -> [Connection]
-  updCon c cs = c : delete c cs
+  updCon c cs = let !cs' = delete c cs in c:cs' 
   
   ------------------------------------------------------------------------
   -- Transaction 
@@ -464,12 +465,14 @@ where
         case findTx tx ts of
           Nothing -> return (c, ())
           Just t  -> 
-            let t' = f t
+            let !t' = f t
             in  return (c {conThrds = 
                              updTxInThrds t' tid (conThrds c) ts}, 
                         ())
     where updTxInThrds t tid ts trns =
-            (tid, t : delete t trns) : deleteBy eq (tid, trns) ts
+            let !trns' = delete t trns
+                !ts'   = deleteBy eq (tid, trns) ts
+             in (tid, t : trns') : ts'
 
   ------------------------------------------------------------------------
   -- update transaction state
@@ -552,7 +555,7 @@ where
 
   ------------------------------------------------------------------------
   -- search for a receipt either in connection or transactions.
-  -- this is used by the listener that is not in the thread list
+  -- this is used by the listener (which is not in the thread list)
   ------------------------------------------------------------------------
   forceRmRec :: Con -> Receipt -> IO ()
   forceRmRec cid r = withCon cid doRmRec 

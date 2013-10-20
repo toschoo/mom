@@ -23,7 +23,6 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Connections
                    -- $stomp_con
                    withConnection, 
-                   withConnection_, 
                    Factory.Con, 
                    F.Heart,
                    Copt(..),
@@ -31,7 +30,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- $stomp_queues
                    Reader, Writer, 
                    newReader, newWriter, 
-                   withReader, withWriter, withPair,
+                   withReader, withWriter, withPair, ReaderDesc, WriterDesc,
                    Qopt(..), F.AckMode(..), 
                    InBound, OutBound, 
                    readQ, 
@@ -49,8 +48,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- $stomp_trans
                    Tx,
                    withTransaction,
-                   withTransaction_,
-                   Topt(..), beginTx, commit, abort, abortTx,
+                   Topt(..), abort, 
                    -- * Acknowledgments
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
@@ -300,7 +298,7 @@ where
      >
      > ping :: String -> IO ()
      > ping qn = 
-     >   withConnection_ "localhost" 61613 [] $ \c -> do
+     >   withConnection "localhost" 61613 [] [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
      >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
@@ -329,14 +327,6 @@ where
   vers = [(1,0), (1,1)]
 
   ------------------------------------------------------------------------
-  -- | A variant of 'withConnection' that returns nothing
-  ------------------------------------------------------------------------
-  withConnection_ :: String -> Int -> 
-                     [Copt] -> (Con -> IO ()) -> IO ()
-  withConnection_ host port os act = 
-    withConnection host port os act >>= (\_ -> return ())
-
-  ------------------------------------------------------------------------
   -- | Initialises a connection and executes an 'IO' action.
   --   The connection life time is the scope of this action.
   --   The connection handle, 'Con', that is passed to the action
@@ -346,6 +336,8 @@ where
   --   not to terminate the action before all other threads
   --   working on the connection have finished.
   --
+  --   There should be only one connection to the same broker per process.
+  --
   --   Paramter:
   --
   --   * 'String': The broker's hostname or IP-address
@@ -353,6 +345,9 @@ where
   --   * 'Int': The broker's port
   --
   --   * 'Copt': Control options passed to the connection
+  --             (including user/password)
+  --
+  --   * 'Header': List of additional, broker-specific headers
   --
   --   * ('Con' -> 'IO' a): The action to execute.
   --                        The action receives the connection handle
@@ -366,7 +361,7 @@ where
   --
   -- Example:
   --
-  -- > withConnection "localhost" 61613 [] $ \c -> do
+  -- > withConnection "localhost" 61613 [] [] $ \c -> do
   --
   -- This would connect to a broker listening to the loopback interface,
   -- port number 61613.
@@ -383,16 +378,16 @@ where
   -- 
   -- Example:
   --
-  -- > t <- forkIO $ withConnection_ "127.0.0.1" 61613 [] $ \c -> do
+  -- > t <- forkIO $ withConnection "127.0.0.1" 61613 [] [] $ \c -> do
   ------------------------------------------------------------------------
-  withConnection :: String -> Int -> [Copt] -> 
+  withConnection :: String -> Int -> [Copt] -> [F.Header] ->
                     (Con -> IO a) -> IO a
-  withConnection host port os act = do
+  withConnection host port os hs act = do
     let beat  = oHeartBeat os
     let mx    = oMaxRecv   os
     let (u,p) = oAuth      os
     let (ci)  = oCliId     os
-    bracket (P.connect host port mx u p ci vers beat)
+    bracket (P.connect host port mx u p ci vers beat hs)
             P.disc -- important: At the end, we close the socket!
             (whenConnected os act)
 
@@ -705,8 +700,9 @@ where
   --
   --   > x <- withReader c "TestQ" "/queue/test" [] [] iconv $ \q -> do
   ------------------------------------------------------------------------
-  withReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-                InBound i -> (Reader i -> IO r) -> IO r
+  withReader :: Con -> String    -> 
+                       String    -> [Qopt] -> [F.Header] -> 
+                       InBound i -> (Reader i -> IO r)   -> IO r
   withReader cid qn dst os hs conv act = do
     q <- newReader cid qn dst os hs conv
     act q `finally` unsub q
@@ -724,13 +720,14 @@ where
   --   Any operation on a writer created by 'withWriter'
   --   outside the action will raise a 'QueueException'.
   ------------------------------------------------------------------------
-  withWriter :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
-                OutBound o -> (Writer o -> IO r) -> IO r
+  withWriter :: Con -> String     -> 
+                       String     -> [Qopt] -> [F.Header] -> 
+                       OutBound o -> (Writer o -> IO r)   -> IO r
   withWriter cid qn dst os hs conv act = 
     newWriter cid qn dst os hs conv >>= act
 
   ------------------------------------------------------------------------
-  -- | Creates a pair of ('Reader', 'Writer') with limited life time. 
+  -- | Creates a pair of ('Reader' i, 'Writer' o) with limited lifetime. 
   --   The pair will live only in the scope of the action
   --   that is passed as last parameter. 
   --   The function is useful for readers\/writers
@@ -748,33 +745,51 @@ where
   --                with \"_r\" added to this name,
   --     the writer by a string with \"_w\" added to this name.
   --
-  --   * The reader queue name
+  --   * The description of the 'Reader', 'ReaderDesc'
   --
-  --   * The writer queue name
+  --   * The description of the 'Writer', 'WriterDesc'
   --
-  --   * The reader 'Qopt's
+  --   * The application-defined action
   --
-  --   * The writer 'Qopt's
-  --
-  --   * The reader headers
-  --
-  --   * The writer headers
-  --
-  --   * The reader's (inbound) converter
-  --
-  --   * The writer's (outbound) converter
-  --
-  --   * The action
+  --  The reason for introducing the reader and writer description
+  --  is to provide error detection at compile time:
+  --  It is this way much more difficult to accidently confuse
+  --  the writer's and the reader's parameters (/e.g./ 
+  --  passing the writer's 'Qopt's to the reader).
   ------------------------------------------------------------------------
-  withPair :: Con -> String     -> 
-                     String     -> String     -> 
-                     [Qopt]     -> [Qopt]     ->
-                     [F.Header] -> [F.Header] ->
-                     InBound i  -> OutBound o -> 
-                     ((Reader i, Writer o)    -> IO r) -> IO r
-  withPair cid n rn wn rq wq rh wh iconv oconv act = 
-    withReader cid (n ++ "_r") rn rq rh iconv $ \r ->
-      withWriter cid (n ++ "_w") wn wq wh oconv $ \w -> act (r,w)
+  withPair :: Con -> String  ->  ReaderDesc i -> 
+                                 WriterDesc o ->
+                                 ((Reader i, Writer o) -> IO r) -> IO r
+  withPair cid n (rq,ro,rh,iconv)
+                 (wq,wo,wh,oconv) act = 
+    withReader cid (n ++ "_r") rq ro rh iconv $ \r ->
+      withWriter cid (n ++ "_w") wq wo wh oconv $ \w -> act (r,w)
+
+  ------------------------------------------------------------------------
+  -- | The 'Reader' parameters of 'withPair':
+  --
+  --     * The reader's queue name 
+  --
+  --     * The reader's 'Qopt's
+  --
+  --     * The reader's 'Header's
+  --
+  --     * The reader's (inbound) converter
+  ------------------------------------------------------------------------
+  type ReaderDesc i = (String, [Qopt], [F.Header], InBound  i)
+
+  ------------------------------------------------------------------------
+  -- | The 'Writer' parameters of 'withPair'
+  --
+  --     * The writer's queue name
+  --
+  --     * The writer's 'Qopt's
+  --
+  --     * The writer's 'Header's
+  --
+  --     * The writer's (outbound) converter
+  ------------------------------------------------------------------------
+  type WriterDesc o = (String, [Qopt], [F.Header], OutBound o)
 
   ------------------------------------------------------------------------
   -- Creating a SendQ is plain and simple.
@@ -930,6 +945,17 @@ where
   writeQ q mime hs x =
     writeQWith q mime hs x >>= (\_ -> return ())
 
+  ------------------------------------------------------------------------
+  -- | This is a variant of 'writeQ'
+  --   that overwrites the destination queue defined in the writer queue.
+  --   It can be used for /ad hoc/ communication and
+  --   for emulations of client/server-like protocols:
+  --   the client would pass the name of the queue
+  --   where it expects the server response in a header;
+  --   the server would send the resply to the queue
+  --   indicated in the header using 'writeAdHoc'.
+  --   The additional 'String' parameter contains the destination.
+  ------------------------------------------------------------------------
   writeAdHoc :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO ()
   writeAdHoc q dest mime hs x =
     writeGeneric q dest mime hs x >>= (\_ -> return ())
@@ -953,14 +979,24 @@ where
   --   > r <- writeQWith q nullType [] "hello world!"
   ------------------------------------------------------------------------
   writeQWith :: Writer a -> Mime.Type -> [F.Header] -> a -> IO Receipt
-  writeQWith q mime hs x = 
-    writeGeneric q (wDest q) mime hs x 
+  writeQWith q = writeGeneric q (wDest q) 
 
+  ------------------------------------------------------------------------
+  -- | This is a variant of 'writeAdHoc' 
+  --   that is particularly useful for queues 
+  --   created with 'OWithReceipt', but without 'OWaitReceipt'.
+  --   It returns the 'Receipt', so that it can be waited for
+  --   later, using 'waitReceipt'.
+  --   Please refer to 'writeQWith' for more details.
+  ------------------------------------------------------------------------
   writeAdHocWith :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO Receipt
-  writeAdHocWith q dest mime hs x = 
-    writeGeneric q dest mime hs x 
+  writeAdHocWith = writeGeneric 
  
-  writeGeneric :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  ------------------------------------------------------------------------
+  -- internal work horse
+  ------------------------------------------------------------------------
+  writeGeneric :: Writer a -> String -> 
+                  Mime.Type -> [F.Header] -> a -> IO Receipt
   writeGeneric q dest mime hs x = do
     c <- getCon (wCon q)
     if not $ P.connected (conCon c)
@@ -1065,26 +1101,19 @@ where
              when with $ waitReceipt cid rc 
 
   ------------------------------------------------------------------------
-  -- | Variant of 'withTransaction' that does not return anything.
-  ------------------------------------------------------------------------
-  withTransaction_ :: Con -> [Topt] -> (Tx -> IO ()) -> IO ()
-  withTransaction_ cid os op = do
-    _ <- withTransaction cid os op
-    return ()
-
-  ------------------------------------------------------------------------
   -- | Starts a transaction and executes the action
   --   in the last parameter.
   --   After the action has finished, 
   --   the transaction will be either committed or aborted
-  --   even if an exception was raised.
+  --   even if an exception has been raised.
   --   Note that, depending on the options,
   --   the way a transaction is terminated may vary,
   --   refer to 'Topt' for details.
   --
   --   Transactions cannot be shared among threads.
   --   Transactions are internally protected against
-  --   access from any thread that has not started the transaction.
+  --   access from any thread but the one
+  --   that has actually started the transaction.
   --
   --   It is /not/ advisable to use 'withTransaction' with /timeout/.
   --   It is preferred to use /timeout/ on the 
@@ -1150,30 +1179,6 @@ where
             unless ok $ do
               threadDelay $ ms 1
               waitForMe 
-
-  beginTx :: Con -> [Topt] -> IO Tx
-  beginTx cid os = do
-    tx <- mkUniqueTxId
-    c  <- getCon cid
-    let t = mkTrn tx os
-    if not $ P.connected (conCon c)
-      then throwIO $ ConnectException $
-             "Not connected (" ++ show cid ++ ")"
-      else onException (do addTx t cid
-                           startTx cid c t
-                           return tx)
-                       (rmThisTx tx cid)
-
-  commit :: Con -> Tx -> IO ()
-  commit cid tx = do
-    updTxState tx cid TxEnded
-    terminateTx cid tx
-
-  ------------------------------------------------------------------------
-  -- | Aborts the transaction immediately by raising. 
-  ------------------------------------------------------------------------
-  abortTx :: Con -> Tx -> IO ()
-  abortTx cid tx = terminateTx cid tx
 
   ------------------------------------------------------------------------
   -- | Aborts the transaction immediately by raising 'AppException'.

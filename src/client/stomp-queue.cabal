@@ -1,5 +1,5 @@
 Name:            stomp-queue
-Version:         0.0.3
+Version:         0.0.5
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2013
 License:         LGPL
@@ -28,6 +28,31 @@ Description:
   The Stomp specification can be found at
   <http://stomp.github.com>.
 
+  .
+
+  Release History:
+
+  .
+
+  [0.0.5] Underline functions removed, 
+          with* functions: withWriter, withPair,
+          new option for connection (ClientId),
+          Headers for broker-specific options can be passed to connection,
+          memory leaks solved.
+
+  .
+
+  [0.0.3] New interface writeAdHoc
+
+  .
+
+  [0.0.2] Minor corrections
+          
+  .
+
+  [0.0.1] Initial release
+
+
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
                    bytestring  >= 0.9 && < 0.10,
@@ -35,7 +60,7 @@ Library
                    attoparsec  >= 0.9.1.1,
                    split       >= 0.1.4.1,
                    network     >= 2.3.0.4,
-                   stompl      >= 0.0.2,
+                   stompl      >= 0.0.3,
                    mime        >= 0.3.3,
                    time        >= 1.1.4
 

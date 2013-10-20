@@ -21,17 +21,16 @@ module Network.Mom.Stompl.Frame (
 
                        -- ** Basic Frame Constructors
                        mkConnect, mkConnected, 
-                       mkSubscribe, mkUnsubscribe, mkSend,
-                       mkMessage, 
+                       mkSubscribe, mkUnsubscribe, 
+                       mkSend, mkMessage, mkErr,
                        mkBegin, mkCommit,  mkAbort,
                        mkAck, mkNack, 
                        mkDisconnect,  
-                       mkBeat,
-                       mkErr, mkReceipt,
+                       mkBeat, mkReceipt,
                        -- ** Header-based Frame Constructors
-                       mkConFrame, mkCondFrame, 
-                       mkSubFrame, mkUSubFrame, mkMsgFrame,
-                       mkSndFrame, mkDisFrame,  mkErrFrame,
+                       mkConFrame, mkCondFrame, mkDisFrame,
+                       mkSubFrame, mkUSubFrame, 
+                       mkSndFrame, mkMsgFrame, mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
                        mkAckFrame, mkNackFrame, mkRecFrame,
                        -- * Working with Headers
@@ -77,9 +76,9 @@ where
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
-  import           Data.List (find, sortBy, foldl')
+  import           Data.List (find, sortBy, foldl', nub)
   import           Data.List.Split (splitWhen)
-  import           Data.Maybe (catMaybes)
+  import           Data.Maybe (catMaybes, fromMaybe)
   import           Codec.MIME.Type as Mime (showType, Type, nullType)
   import           Codec.MIME.Parse        (parseMIMEType)
 
@@ -309,13 +308,15 @@ where
                    frmHost  :: String,
                    frmBeat  :: Heart,
                    frmAcVer :: [Version], -- 1.1
-                   frmCliId :: String
+                   frmCliId :: String,
+                   frmHdrs  :: [Header]
                  }
                | CondFrame {
                    frmSes   :: String,
                    frmBeat  :: Heart,
                    frmVer   :: Version, -- 1.1
-                   frmSrv   :: SrvDesc
+                   frmSrv   :: SrvDesc,
+                   frmHdrs  :: [Header]
                  }
                | SubFrame {
                    frmDest  :: String,
@@ -328,7 +329,8 @@ where
                | USubFrame {
                    frmDest  :: String,
                    frmId    :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | SndFrame {
                    frmHdrs  :: [Header],
@@ -339,31 +341,37 @@ where
                    frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | DisFrame {
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | BgnFrame {
                    frmTrans :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | CmtFrame {
                    frmTrans :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | AckFrame {
                    frmId    :: String,
                    frmSub   :: String,
                    frmTrans :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | NackFrame {
                    frmId    :: String,
                    frmSub   :: String,
                    frmTrans :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | AbrtFrame {
                    frmTrans :: String,
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | MsgFrame {
                    frmHdrs  :: [Header],
@@ -374,13 +382,15 @@ where
                    frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | RecFrame {
-                   frmRec   :: String
+                   frmRec   :: String,
+                   frmHdrs  :: [Header]
                  }
                | ErrFrame {
                    frmMsg  :: String,
                    frmRec  :: String,
                    frmLen  :: Int,
                    frmMime :: Mime.Type,
+                   frmHdrs :: [Header],
                    frmBody :: Body}
                | BeatFrame
     deriving (Show, Eq)
@@ -432,16 +442,23 @@ where
   --
   --   * 'Version': the versions supported by the client.
   --
-  --   * 'ClientId': Client identification for persistent connections.
+  --   * ClientId: Client identification for persistent connections.
+  --                 Note that the client id is not a standard Stomp feature,
+  --                 but specific to ActiveMQ and other brokers.
+  --                
+  --
+  --   * 'Header': List of additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkConnect :: String -> String -> String -> Heart -> [Version] -> String -> Frame
-  mkConnect usr pwd hst beat vers cli =
+  mkConnect :: String -> String -> String -> Heart -> [Version] -> 
+               String -> [Header] -> Frame
+  mkConnect usr pwd hst beat vers cli hs =
     ConFrame {
        frmLogin = usr,
        frmPass  = pwd,
        frmHost  = hst,
        frmBeat  = beat,
        frmAcVer = vers,
+       frmHdrs  = hs,
        frmCliId = cli}
 
   ----------------------------------------------------------------------
@@ -456,14 +473,17 @@ where
   --   * 'Version': The version accepted by the broker
   --
   --   * 'SrvDesc': The server description
+  --
+  --   * 'Header': List of additional, broker-specific headers.
   ----------------------------------------------------------------------
-  mkConnected :: String -> Heart -> Version -> SrvDesc -> Frame
-  mkConnected ses beat ver srv =
+  mkConnected :: String -> Heart -> Version -> SrvDesc -> [Header] -> Frame
+  mkConnected ses beat ver srv hs =
     CondFrame {
       frmSes  = ses,
       frmBeat = beat,
       frmVer  = ver, 
-      frmSrv  = srv}
+      frmSrv  = srv,
+      frmHdrs = hs}
 
   ----------------------------------------------------------------------
   -- | make a 'Subscribe' frame (Application -> Broker).
@@ -492,9 +512,10 @@ where
   --              to request confirmation of receipt of this frame.
   --              If no receipt is wanted, the string shall be empty.
   --
-  --   * 'Header': List of additional headers.
+  --   * 'Header': List of additional, broker-specific headers.
   ----------------------------------------------------------------------
-  mkSubscribe :: String -> AckMode -> String -> String -> String -> [Header] -> Frame
+  mkSubscribe :: String -> AckMode -> 
+                 String -> String  -> String -> [Header] -> Frame
   mkSubscribe dst ack sel sid rc hs =
     SubFrame {
       frmDest = dst,
@@ -517,13 +538,16 @@ where
   --   * Subscription Id: The subscription identifier (see 'mkSubscribe')
   -- 
   --   * Receipt: The receipt (see 'mkSubscribe')
+  --
+  --   * 'Header': Additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkUnsubscribe :: String -> String -> String -> Frame
-  mkUnsubscribe dst sid rc =
+  mkUnsubscribe :: String -> String -> String -> [Header] -> Frame
+  mkUnsubscribe dst sid rc hs =
     USubFrame {
       frmDest = dst,
       frmId   = sid,
-      frmRec  = rc}
+      frmRec  = rc,
+      frmHdrs = hs}
  
   ----------------------------------------------------------------------
   -- | make a 'Send' frame (Application -> Broker).
@@ -610,20 +634,24 @@ where
   --                  defined by the application. 
   --
   --   * Receipt: A receipt (see 'mkSubscribe' for details)
+  --
+  --   * 'Header': Additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkBegin  :: String -> String -> Frame
+  mkBegin  :: String -> String -> [Header] -> Frame
   mkBegin = BgnFrame
 
   ----------------------------------------------------------------------
   -- | make a 'Commit' frame (Application -> Broker).
   --   The parameters are:
   --
-  --   * Transaction: A unique transaction identifier
+  --   * 'Transaction': A unique transaction identifier
   --                  defined by the application. 
   --
-  --   * Receipt: A receipt (see 'mkSubscribe' for details)
+  --   * 'Receipt': A receipt (see 'mkSubscribe' for details)
+  --
+  --   * 'Header': Additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkCommit :: String -> String -> Frame
+  mkCommit :: String -> String -> [Header] -> Frame
   mkCommit = CmtFrame
 
   ----------------------------------------------------------------------
@@ -634,8 +662,10 @@ where
   --                  defined by the application. 
   --
   --   * Receipt: A receipt (see 'mkSubscribe' for details)
+  --
+  --   * 'Header': Additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkAbort  :: String -> String -> Frame
+  mkAbort  :: String -> String -> [Header] -> Frame
   mkAbort = AbrtFrame
 
   ----------------------------------------------------------------------
@@ -652,12 +682,13 @@ where
   --
   --   * Receipt: see 'mkSubscribe' for details
   ----------------------------------------------------------------------
-  mkAck :: String -> String -> String -> String -> Frame
-  mkAck mid sid trn rc = AckFrame {
-                           frmId    = mid,
-                           frmSub   = sid,
-                           frmTrans = trn,
-                           frmRec   = rc}
+  mkAck :: String -> String -> String -> String -> [Header] -> Frame
+  mkAck mid sid trn rc hs = AckFrame {
+                             frmId    = mid,
+                             frmSub   = sid,
+                             frmTrans = trn,
+                             frmRec   = rc,
+                             frmHdrs  = hs}
 
   ----------------------------------------------------------------------
   -- | make a 'Nack' frame (Application -> Broker).
@@ -673,12 +704,13 @@ where
   --
   --   * Receipt: see 'mkSubscribe' for details
   ----------------------------------------------------------------------
-  mkNack :: String -> String -> String -> String -> Frame
-  mkNack mid sid trn rc = NackFrame {
-                            frmId    = mid,
-                            frmSub   = sid,
-                            frmTrans = trn,
-                            frmRec   = rc}
+  mkNack :: String -> String -> String -> String -> [Header] -> Frame
+  mkNack mid sid trn rc hs = NackFrame {
+                               frmId    = mid,
+                               frmSub   = sid,
+                               frmTrans = trn,
+                               frmRec   = rc,
+                               frmHdrs  = hs}
 
   ----------------------------------------------------------------------
   -- | make a 'HeatBeat' frame (Application -> Broker and
@@ -693,17 +725,19 @@ where
   --
   --   * Receipt: see 'mkSubscribe' for details
   ----------------------------------------------------------------------
-  mkDisconnect :: String -> Frame
-  mkDisconnect rec = DisFrame rec
+  mkDisconnect :: String -> [Header] -> Frame
+  mkDisconnect = DisFrame 
 
   ----------------------------------------------------------------------
   -- | make a 'Receipt' frame (Broker -> Application).
   --   The parameter is:
   -- 
   --   * Receipt: The receipt identifier received from the application
+  --
+  --   * 'Header': List of additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkReceipt :: String -> Frame
-  mkReceipt rec = RecFrame rec
+  mkReceipt :: String -> [Header] -> Frame
+  mkReceipt = RecFrame 
 
   ----------------------------------------------------------------------
   -- | make a 'Receipt' frame (Broker -> Application).
@@ -718,16 +752,19 @@ where
   --
   --   * Length: The length of the error message
   --
+  --   * 'Header': List of additional, broker-specific headers
+  --
   --   * 'Body': The error message
   ----------------------------------------------------------------------
-  mkErr :: String -> String -> Mime.Type -> Int -> Body -> Frame
-  mkErr mid rc mime len bdy =
+  mkErr :: String -> String -> Mime.Type -> Int -> [Header] -> Body -> Frame
+  mkErr mid rc mime len hs bdy =
     ErrFrame {
       frmMsg  = mid,
       frmRec  = rc,
       frmLen  = len,
       frmMime = mime,
-      frmBody = bdy}
+      frmBody = bdy,
+      frmHdrs = hs}
 
   ------------------------------------------------------------------------
   -- | get /destination/ 
@@ -888,21 +925,21 @@ where
   ------------------------------------------------------------------------
   typeOf :: Frame -> FrameType
   typeOf f = case f of
-              (ConFrame  _ _ _  _ _ _  ) -> Connect
-              (CondFrame _ _ _ _       ) -> Connected
-              (DisFrame  _             ) -> Disconnect
-              (SubFrame  _ _ _ _ _ _   ) -> Subscribe
-              (USubFrame _ _ _         ) -> Unsubscribe
-              (SndFrame  _ _ _ _ _ _ _ ) -> Send
-              (BgnFrame  _ _           ) -> Begin
-              (CmtFrame  _ _           ) -> Commit
-              (AbrtFrame _ _           ) -> Abort
-              (AckFrame  _ _ _ _       ) -> Ack
-              (NackFrame _ _ _ _       ) -> Nack
-              (MsgFrame  _ _ _ _ _ _ _ ) -> Message
-              (RecFrame  _             ) -> Receipt
-              (ErrFrame  _ _ _ _ _     ) -> Error
-              (BeatFrame               ) -> HeartBeat
+              ConFrame  {} -> Connect
+              CondFrame {} -> Connected
+              DisFrame  {} -> Disconnect
+              SubFrame  {} -> Subscribe
+              USubFrame {} -> Unsubscribe
+              SndFrame  {} -> Send
+              BgnFrame  {} -> Begin
+              CmtFrame  {} -> Commit
+              AbrtFrame {} -> Abort
+              AckFrame  {} -> Ack
+              NackFrame {} -> Nack
+              MsgFrame  {} -> Message
+              RecFrame  {} -> Receipt
+              ErrFrame  {} -> Error
+              BeatFrame {} -> HeartBeat
 
   ------------------------------------------------------------------------
   -- The AckMode of a Subscription
@@ -985,7 +1022,7 @@ where
   -- | convert list of 'Version' to 'String'
   ------------------------------------------------------------------------
   versToVal :: [Version] -> String
-  versToVal = foldr addVer "" . map verToVal 
+  versToVal = foldr (addVer . verToVal) "" 
     where addVer v vs = if not $ null vs
                           then v ++ "," ++ vs
                           else v
@@ -994,7 +1031,7 @@ where
   -- | convert 'Version' to 'String'
   ------------------------------------------------------------------------
   verToVal :: Version -> String
-  verToVal (major, minor) = (show major) ++ "." ++ (show minor)
+  verToVal (major, minor) = show major ++ "." ++ show minor
 
   ------------------------------------------------------------------------ 
   -- | convert 'String' to list of 'Version'
@@ -1020,7 +1057,7 @@ where
   -- | convert 'HeartBeat' to 'String' 
   ------------------------------------------------------------------------
   beatToVal :: Heart -> String
-  beatToVal (x, y) = (show x) ++ "," ++ (show y)
+  beatToVal (x, y) = show x ++ "," ++ show y
 
   ------------------------------------------------------------------------ 
   -- | convert 'String' to 'HeartBeat' 
@@ -1037,7 +1074,7 @@ where
   ------------------------------------------------------------------------
   srvToStr :: SrvDesc -> String
   srvToStr (n, v, c) = n ++ "/" ++ v ++ c'
-    where c' = if null c then "" else " " ++ c
+    where c' = if null c then "" else ' ' : c
 
   ------------------------------------------------------------------------ 
   -- | convert 'String' to 'SrvDesc' 
@@ -1080,7 +1117,7 @@ where
   --   the function results in version 1.0!
   ------------------------------------------------------------------------
   negoVersion :: [Version] -> [Version] -> Version
-  negoVersion bs cs = nego bs' cs
+  negoVersion bs = nego bs' 
     where bs'  = sortBy desc bs
           desc = flip compare 
           nego []     _    = defVersion
@@ -1153,7 +1190,7 @@ where
   ------------------------------------------------------------------------
   putHeaders :: Frame -> B.ByteString
   putHeaders f = 
-    let hs = toHeaders f
+    let hs = toHeaders f 
         s  = B.concat $ map putHeader hs
     in  s |> '\n'
 
@@ -1171,82 +1208,92 @@ where
   ------------------------------------------------------------------------
   toHeaders :: Frame -> [Header]
   -- Connect Frame -------------------------------------------------------
-  toHeaders (ConFrame l p h b v i) = 
-    [mkLogHdr l, mkPassHdr p, 
-     mkAcVerHdr $ versToVal v, 
-     mkBeatHdr  $ beatToVal b,
-     mkHostHdr h, mkCliIdHdr i ]
+  toHeaders (ConFrame l p h b v i hs) =
+    let lh = if null l     then [] else [mkLogHdr l]
+        ph = if null p     then [] else [mkPassHdr p]
+        bh = if b == (0,0) then [] else [mkBeatHdr $ beatToVal b]
+        ih = if null i     then [] else [mkCliIdHdr i]
+     in normalise $ [mkAcVerHdr $ versToVal v, 
+                     mkHostHdr h] ++ lh ++ ph ++ bh ++ ih ++ hs 
   -- Connected Frame -----------------------------------------------------
-  toHeaders (CondFrame s b v d) =
-    [mkSesHdr s, 
-     mkVerHdr  $ verToVal  v,
-     mkBeatHdr $ beatToVal b,
-     mkSrvHdr  $ srvToStr  d]
+  toHeaders (CondFrame s b v d hs) =
+    let sh = if s == "0"   then [] else [mkSesHdr s]
+        bh = if b == (0,0) then [] else [mkBeatHdr $ beatToVal b]
+        x  = srvToStr d
+        dh = if x == "/"   then [] else [mkSrvHdr x]
+     in normalise $ mkVerHdr (verToVal v) : sh ++ bh ++ dh ++ hs
   -- Disconnect Frame -----------------------------------------------------
-  toHeaders (DisFrame r) =
-    if null r then [] else [mkRecHdr r]
+  toHeaders (DisFrame r hs) =
+    if null r then hs else normalise $ mkRecHdr r : hs
   -- Subscribe Frame ------------------------------------------------------
-  toHeaders (SubFrame d a s i r h) =
+  toHeaders (SubFrame d a s i r hs) =
     let ah = if a == Auto then [] else [mkAckHdr (show a)]
-        sh = if null s then [] else [mkSelHdr s]
-        rh = if null r then [] else [mkRecHdr r]
-        ih = if null i then [] else [mkIdHdr i]
-    in mkDestHdr d : (ah ++ sh ++ ih ++ rh ++ h)
+        sh = if null s    then [] else [mkSelHdr s]
+        rh = if null r    then [] else [mkRecHdr r]
+        ih = if null i    then [] else [mkIdHdr i]
+    in normalise $ mkDestHdr d : (ah ++ sh ++ ih ++ rh) ++ hs
   -- Unsubscribe Frame ----------------------------------------------------
-  toHeaders (USubFrame d i r) =
+  toHeaders (USubFrame d i r hs) =
     let ih = if null i then [] else [mkIdHdr i]
         dh = if null d then [] else [mkDestHdr d]
         rh = if null r then [] else [mkRecHdr r]
-    in dh ++ ih ++ rh
+    in normalise $ dh ++ ih ++ rh ++ hs
   -- Send Frame -----------------------------------------------------------
-  toHeaders (SndFrame h d t r l m _) = 
+  toHeaders (SndFrame hs d t r l m _) = 
     let th = if null t then [] else [mkTrnHdr t]
         rh = if null r then [] else [mkRecHdr r]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
-    in [mkDestHdr d, 
-        mkMimeHdr (showType m)] ++ th ++ rh ++ lh ++ h
+    in normalise $ [mkDestHdr d, 
+                    mkMimeHdr (showType m)] ++ th ++ rh ++ lh ++ hs
   -- Begin Frame -----------------------------------------------------------
-  toHeaders (BgnFrame  t r) = 
+  toHeaders (BgnFrame  t r hs) = 
     let rh = if null r then [] else [mkRecHdr r]
-    in  [mkTrnHdr t] ++ rh
+    in  normalise $ [mkTrnHdr t] ++ rh ++ hs
   -- Commit Frame -----------------------------------------------------------
-  toHeaders (CmtFrame  t r) = 
+  toHeaders (CmtFrame  t r hs) = 
     let rh = if null r then [] else [mkRecHdr r]
-    in  [mkTrnHdr t] ++ rh
+    in  normalise $ [mkTrnHdr t] ++ rh ++ hs
   -- Abort Frame -----------------------------------------------------------
-  toHeaders (AbrtFrame t r) = 
+  toHeaders (AbrtFrame t r hs) = 
     let rh = if null r then [] else [mkRecHdr r]
-    in  [mkTrnHdr t] ++ rh
+    in  normalise $ [mkTrnHdr t] ++ rh ++ hs
   -- Ack Frame --------------------------------------------------------------
-  toHeaders (AckFrame i s t r) = 
-    let sh = if null s then [] else [mkSubHdr s]
-        rh = if null r then [] else [mkRecHdr r]
-        th = if null t then [] else [mkTrnHdr t]
-    in ([mkMIdHdr i] ++ th ++ sh ++ rh)
+  toHeaders (AckFrame i s t r hs) = 
+    normalise ([mkMIdHdr i] ++ hs ++ subRecTrn s r t)
   -- Nack Frame -------------------------------------------------------------
-  toHeaders (NackFrame i s t r) = 
-    let sh = if null s then [] else [mkSubHdr s]
-        rh = if null r then [] else [mkRecHdr r]
-        th = if null t then [] else [mkTrnHdr t]
-    in ([mkMIdHdr i] ++ th ++ sh ++ rh)
+  toHeaders (NackFrame i s t r hs) = 
+    normalise ([mkMIdHdr i] ++ hs ++ subRecTrn s r t)
   -- Message Frame ----------------------------------------------------------
-  toHeaders (MsgFrame h s d i l m _)  = 
+  toHeaders (MsgFrame hs s d i l m _)  = 
     let sh = if null s then [] else [mkSubHdr  s]
         dh = if null d then [] else [mkDestHdr d]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
-    in  [mkMIdHdr i,
-         mkMimeHdr (showType m)] 
-        ++ sh ++ dh ++ lh ++ h
+    in normalise $ [mkMIdHdr i,
+                    mkMimeHdr (showType m)] 
+                    ++ sh ++ dh ++ lh ++ hs
   -- Receipt Frame ----------------------------------------------------------
-  toHeaders (RecFrame  r) = [mkRecIdHdr r]
+  toHeaders (RecFrame  r hs) = normalise $ mkRecIdHdr r : hs
   -- Error Frame ------------------------------------------------------------
-  toHeaders (ErrFrame m r l t _) = 
+  toHeaders (ErrFrame m r l t hs _) = 
     let mh = if null m then [] else [mkMsgHdr m]
         rh = if null r then [] else [mkRecIdHdr r]
-        lh = if l <  0 then [] else [mkLenHdr (show l)]
-    in  mh ++ rh ++ lh ++ [mkMimeHdr $ showType t]
+        lh = if l <= 0 then [] else [mkLenHdr (show l)]
+    in  normalise $ mh ++ rh ++ lh ++ [mkMimeHdr $ showType t] ++ hs
   -- Beat Frame --------------------------------------------------------------
   toHeaders BeatFrame = []
+
+  subRecTrn :: String -> String -> String -> [Header]
+  subRecTrn s r t =  
+    let sh = if null s then [] else [mkSubHdr s]
+        rh = if null r then [] else [mkRecHdr r]
+        th = if null t then [] else [mkTrnHdr t]
+     in sh ++ rh ++ th
+
+  ----------------------------------------------------------------------------
+  -- no duplicates, alphanumerical order
+  ----------------------------------------------------------------------------
+  normalise :: [Header] -> [Header]
+  normalise = nub
 
   ------------------------------------------------------------------------
   -- get body from frame
@@ -1254,18 +1301,16 @@ where
   putBody :: Frame -> Body
   putBody f =
     case f of 
-      SndFrame _ _ _ _ _ _ b -> b |> '\x00'
-      ErrFrame _ _ _ _     b -> b |> '\x00'
-      MsgFrame _ _ _ _ _ _ b -> b |> '\x00'
-      _                    -> B.pack "\x00"
+      x@SndFrame {} -> frmBody x |> '\x00'
+      x@ErrFrame {} -> frmBody x |> '\x00'
+      x@MsgFrame {} -> frmBody x |> '\x00'
+      _             -> B.pack "\x00"
 
   ------------------------------------------------------------------------
   -- find a header and return it as string value (with default)
   ------------------------------------------------------------------------
   findStrHdr :: String -> String -> [Header] -> String
-  findStrHdr h d hs = case lookup h hs of
-                        Nothing -> d
-                        Just x  -> x
+  findStrHdr h d hs = fromMaybe d $ lookup h hs 
 
   ------------------------------------------------------------------------
   -- | make 'Connect' frame
@@ -1289,9 +1334,11 @@ where
                             Just x  -> Right x
      in case eiVs of
           Left  e  -> Left e
-          Right vs -> case eiB of
-                        Left e  -> Left e
-                        Right b -> Right $ ConFrame l p h b vs i
+          Right vs -> 
+            case eiB of
+              Left e  -> Left e
+              Right b -> Right $ ConFrame l p h b vs i $ 
+                           rmHdrs hs [hdrLog, hdrPass, hdrHost, hdrCliId]
 
   ------------------------------------------------------------------------
   -- | make 'Connected' frame
@@ -1312,14 +1359,15 @@ where
          Nothing -> Left $ "Not a valid version: " ++ v
          Just v' -> case eiB of 
                       Left  e -> Left e
-                      Right b -> Right $ CondFrame s b v' d
+                      Right b -> Right $ CondFrame s b v' d $ 
+                                   rmHdrs hs [hdrSes, hdrVer, hdrSrv, hdrBeat]
 
   ------------------------------------------------------------------------
   -- | make 'Disconnect' frame
   ------------------------------------------------------------------------
   mkDisFrame :: [Header] -> Either String Frame
   mkDisFrame hs = 
-    Right $ DisFrame (findStrHdr hdrRec "" hs)
+    Right $ DisFrame (findStrHdr hdrRec "" hs) $ rmHdrs hs [hdrRec]
 
   ------------------------------------------------------------------------
   -- | make 'Send' frame
@@ -1328,7 +1376,7 @@ where
   mkSndFrame hs l b =
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in SEND Frame"
-      Just d  -> Right $ SndFrame {
+      Just d  -> Right SndFrame {
                            frmHdrs  = rmHdrs hs [hdrMime, hdrTrn, hdrRec,
                                                  hdrDest, hdrLen],
                            frmDest  = d,
@@ -1336,9 +1384,7 @@ where
                            frmMime  = case lookup hdrMime hs of
                                         Nothing -> defMime
                                         Just t  -> 
-                                          case parseMIMEType t of
-                                            Nothing -> defMime
-                                            Just m  -> m,
+                                          fromMaybe defMime (parseMIMEType t),
                            frmTrans = findStrHdr hdrTrn "" hs,
                            frmRec   = findStrHdr hdrRec "" hs,
                            frmBody  = b
@@ -1354,22 +1400,19 @@ where
       Just d  -> case lookup hdrMId hs of
                    Nothing -> Left "No message id in MESSAGE Frame"
                    Just i  ->
-                     Right $ MsgFrame {
-                               frmHdrs = rmHdrs hs [hdrSub, hdrMime, 
-                                                    hdrLen, hdrDest,
-                                                    hdrMId],
-                               frmDest = d,
-                               frmSub  = findStrHdr hdrSub "" hs,
-                               frmId   = i, 
-                               frmLen  = l,
-                               frmMime = case lookup hdrMime hs of
-                                           Nothing -> defMime
-                                           Just t  -> 
-                                             case parseMIMEType t of
-                                               Nothing -> defMime
-                                               Just m  -> m,
-                               frmBody = b
-                             }
+                     Right MsgFrame {
+                             frmHdrs = rmHdrs hs [hdrSub, hdrMime, 
+                                                  hdrLen, hdrDest,
+                                                  hdrMId],
+                             frmDest = d,
+                             frmSub  = findStrHdr hdrSub "" hs,
+                             frmId   = i, 
+                             frmLen  = l,
+                             frmMime = case lookup hdrMime hs of
+                                         Nothing -> defMime
+                                         Just t  -> 
+                                           fromMaybe defMime (parseMIMEType t),
+                             frmBody = b}
 
   ------------------------------------------------------------------------
   -- | make 'Subscribe' frame
@@ -1380,14 +1423,15 @@ where
       Nothing -> Left "No destination header in Subscribe Frame"
       Just d  -> case getAck hs of
                    Left  e -> Left e
-                   Right a -> Right $ SubFrame {
-                                        frmDest = d,
-                                        frmAck  = a,
-                                        frmSel  = findStrHdr hdrSel "" hs,
-                                        frmId   = findStrHdr hdrId  "" hs,
-                                        frmRec  = findStrHdr hdrRec "" hs,
-                                        frmHdrs = rmHdrs hs [hdrDest, hdrAck,
-                                                  hdrSel, hdrId, hdrRec]}
+                   Right a -> Right SubFrame {
+                                      frmDest = d,
+                                      frmAck  = a,
+                                      frmSel  = findStrHdr hdrSel "" hs,
+                                      frmId   = findStrHdr hdrId  "" hs,
+                                      frmRec  = findStrHdr hdrRec "" hs,
+                                      frmHdrs = rmHdrs hs [hdrDest, hdrAck,
+                                                           hdrSel, hdrId, 
+                                                           hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Unsubscribe' frame
@@ -1398,14 +1442,16 @@ where
       Nothing -> case lookup hdrId hs of
                    Nothing -> Left $ "No destination and no id header " ++
                                      "in UnSubscribe Frame"
-                   Just i  -> Right $ USubFrame {
-                                        frmId   = i,
-                                        frmDest = "",
-                                        frmRec  = findStrHdr hdrRec "" hs}
-      Just d  -> Right $ USubFrame {
-                           frmId   = findStrHdr hdrId "" hs,
-                           frmDest = d,
-                           frmRec  = findStrHdr hdrRec "" hs}
+                   Just i  -> Right USubFrame {
+                                      frmId   = i,
+                                      frmDest = "",
+                                      frmRec  = findStrHdr hdrRec "" hs,
+                                      frmHdrs = rmHdrs hs [hdrId, hdrRec]}
+      Just d  -> Right USubFrame {
+                          frmId   = findStrHdr hdrId "" hs,
+                          frmDest = d,
+                          frmRec  = findStrHdr hdrRec "" hs,
+                          frmHdrs = rmHdrs hs [hdrId, hdrDest, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Begin' frame
@@ -1413,10 +1459,11 @@ where
   mkBgnFrame :: [Header] -> Either String Frame
   mkBgnFrame hs =
     case lookup hdrTrn hs of
-      Nothing -> Left $ "No transation header in Begin Frame"
-      Just t  -> Right $ BgnFrame {
-                           frmTrans = t,
-                           frmRec = findStrHdr hdrRec "" hs}
+      Nothing -> Left "No transation header in Begin Frame"
+      Just t  -> Right BgnFrame {
+                         frmTrans = t,
+                         frmRec   = findStrHdr hdrRec "" hs,
+                         frmHdrs  = rmHdrs hs [hdrTrn, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Commit' frame
@@ -1424,10 +1471,11 @@ where
   mkCmtFrame :: [Header] -> Either String Frame
   mkCmtFrame hs =
     case lookup hdrTrn hs of
-      Nothing -> Left $ "No transation header in Commit Frame"
-      Just t  -> Right $ CmtFrame {
-                           frmTrans = t,
-                           frmRec = findStrHdr hdrRec "" hs}
+      Nothing -> Left "No transation header in Commit Frame"
+      Just t  -> Right CmtFrame {
+                         frmTrans = t,
+                         frmRec   = findStrHdr hdrRec "" hs,
+                         frmHdrs  = rmHdrs hs [hdrTrn, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Abort' frame
@@ -1435,10 +1483,11 @@ where
   mkAbrtFrame :: [Header] -> Either String Frame
   mkAbrtFrame hs =
     case lookup hdrTrn hs of
-      Nothing -> Left $ "No transation header in Abort Frame"
-      Just t  -> Right $ AbrtFrame {
-                           frmTrans = t,
-                           frmRec = findStrHdr hdrRec "" hs}
+      Nothing -> Left "No transation header in Abort Frame"
+      Just t  -> Right AbrtFrame {
+                         frmTrans = t,
+                         frmRec   = findStrHdr hdrRec "" hs,
+                         frmHdrs  = rmHdrs hs [hdrTrn, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Ack' frame
@@ -1446,15 +1495,15 @@ where
   mkAckFrame :: [Header] -> Either String Frame
   mkAckFrame hs =
     case lookup hdrMId hs of
-      Nothing -> Left $ "No message-id header in Ack Frame"
-      Just i  -> let t = findStrHdr hdrTrn "" hs
-                     s = findStrHdr hdrSub "" hs
-                     r = findStrHdr hdrRec "" hs
-                 in Right AckFrame {
+      Nothing -> Left "No message-id header in Ack Frame"
+      Just i  -> let (t,s,r) = findSubRecTrn hs
+                  in Right AckFrame {
                               frmId    = i,
                               frmSub   = s,
                               frmTrans = t,
-                              frmRec   = r}
+                              frmRec   = r,
+                              frmHdrs  = rmHdrs hs [hdrMId, hdrTrn, 
+                                                    hdrSub, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Nack' frame
@@ -1462,15 +1511,22 @@ where
   mkNackFrame :: [Header] -> Either String Frame
   mkNackFrame hs =
     case lookup hdrMId hs of
-      Nothing -> Left $ "No message-id header in Ack Frame"
-      Just i  -> let t = findStrHdr hdrTrn "" hs
-                     s = findStrHdr hdrSub "" hs
-                     r = findStrHdr hdrRec "" hs
-                 in Right NackFrame {
+      Nothing -> Left "No message-id header in Ack Frame"
+      Just i  -> let (t,s,r) = findSubRecTrn hs
+                  in Right NackFrame {
                               frmId    = i,
                               frmSub   = s,
                               frmTrans = t,
-                              frmRec   = r}
+                              frmRec   = r,
+                              frmHdrs  = rmHdrs hs [hdrMId, hdrTrn,
+                                                    hdrSub, hdrRec]}
+
+  findSubRecTrn :: [Header] -> (String, String, String)
+  findSubRecTrn hs = 
+      let t = findStrHdr hdrTrn "" hs
+          s = findStrHdr hdrSub "" hs
+          r = findStrHdr hdrRec "" hs
+       in (t,s,r)
 
   ------------------------------------------------------------------------
   -- | make 'Receipt' frame
@@ -1478,25 +1534,24 @@ where
   mkRecFrame :: [Header] -> Either String Frame
   mkRecFrame hs =
     case lookup hdrRecId hs of
-      Nothing -> Left $ "No receipt-id header in Receipt Frame"
-      Just r  -> Right $ RecFrame r
+      Nothing -> Left "No receipt-id header in Receipt Frame"
+      Just r  -> Right $ RecFrame r $ rmHdrs hs [hdrRecId]
 
   ------------------------------------------------------------------------
   -- | make 'Error' frame
   ------------------------------------------------------------------------
   mkErrFrame :: [Header] -> Int -> Body -> Either String Frame
   mkErrFrame hs l b =
-    Right $ ErrFrame {
-              frmMsg  = findStrHdr hdrMsg   "" hs,
-              frmRec  = findStrHdr hdrRecId "" hs,
-              frmLen  = l,
-              frmMime = case lookup hdrMime hs of
-                               Nothing -> defMime
-                               Just t  -> 
-                                 case parseMIMEType t of
-                                   Nothing -> defMime
-                                   Just x  -> x,
-              frmBody = b}
+    Right ErrFrame {
+            frmMsg  = findStrHdr hdrMsg   "" hs,
+            frmRec  = findStrHdr hdrRecId "" hs,
+            frmLen  = l,
+            frmMime = 
+              case lookup hdrMime hs of
+                Nothing -> defMime
+                Just t  -> fromMaybe defMime (parseMIMEType t),
+            frmHdrs = rmHdrs hs [hdrMime, hdrLen, hdrMsg, hdrRecId],
+            frmBody = b}
 
   ------------------------------------------------------------------------
   -- | converts a 'Send' frame into a 'Message' frame;
@@ -1544,7 +1599,8 @@ where
                                    frmSes  = i,
                                    frmBeat = negoBeat (frmBeat f) b,
                                    frmVer  = negoVersion vs $ frmAcVer f,
-                                   frmSrv  = strToSrv s
+                                   frmSrv  = strToSrv s,
+                                   frmHdrs = frmHdrs f
                                  }
                           _ -> Nothing
 
@@ -1554,7 +1610,7 @@ where
   complies :: Version -> Frame -> Bool
   complies v f = all (`elm` has) must 
     where must = getHdrs (typeOf f) v
-          has  = toHeaders f
+          has  = toHeaders f ++ frmHdrs f
           elm  h hs = case lookup h hs of
                         Nothing -> False
                         Just _  -> True

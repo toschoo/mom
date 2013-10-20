@@ -41,12 +41,12 @@ where
   instance Arbitrary Frame where
     arbitrary = do
       t <- elements [Connect, Connected, Disconnect,
-                     Subscribe, Unsubscribe,
-                     Send, Message,
+                     Subscribe, Unsubscribe, 
+                     Send, Message, 
                      Begin, Commit, Abort,
                      Ack, Nack,
-                     Receipt,  Error,
-                     HeartBeat]
+                     Receipt,  Error, 
+                     HeartBeat] 
       mst <- concat <$> (mapM (mkHdr Must) $ getHdrs t Must)
       may <- concat <$> (mapM (mkHdr May ) $ getHdrs t May)
       mk  <- getMk t
@@ -137,8 +137,7 @@ where
     case t of
        Connect     -> 
          if must m then ["host", "accept-version"]
-           else ["login", "passcode", "host",
-                 "heart-beat", "accept-version"] 
+           else ["login", "passcode", "client-id", "heart-beat"] 
        Connected   ->
          if must m then ["version"]
            else ["session", "server", "heart-beat"]
@@ -152,10 +151,10 @@ where
        Send        ->
          if must m then ["destination"]
            else ["content-type", 
-                 "transaction", "receipt"]
+                 "transaction", "receipt", "content-length"]
        Message     ->
          if must m then ["message-id", "subscription", "destination"]
-           else ["content-type"]
+           else ["content-type", "content-length"]
        Begin       ->
          if must m then ["transaction"] else ["receipt"]
        Commit      ->
@@ -171,23 +170,22 @@ where
        Error       ->
          if must m then [] 
            else ["message", "receipt-id", 
-                 "content-type"]
+                 "content-type", "content-length"]
        Receipt     -> if must m then ["receipt-id"] else []
        HeartBeat   -> []
 
   -- put, parse and compare equal -------------------------------------------
   prp_Parse :: Frame -> Property
-  prp_Parse f = collect (typeOf f) $
-    let b   = putFrame f
-    in case stompAtOnce b of
-         Left  _ -> False
-         Right x -> if x == f then True -- x == f
-                      else error $ "Not equal:\n" ++ show x ++ "\n" ++ show f
+  prp_Parse f = collect (typeOf f) $ 
+    case stompAtOnce $ putFrame f of
+      Left  _ -> False
+      Right x -> if x == f then True -- x == f
+                   else error $ "Not equal:\n" ++ show x ++ "\n" ++ show f
 
   -- Check -------------------------------------------------------------------
   deepCheck :: (Testable p) => p -> IO Result
   deepCheck = quickCheckWithResult stdArgs{maxSuccess=10000,
-                                           maxDiscard=50000}
+                                           maxDiscardRatio=10}
 
   -------------------------------------------------------------------------
   -- Controlled Tests

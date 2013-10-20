@@ -64,81 +64,81 @@ where
         t30  = mkTest "Begin           " $ testWith (\c -> P.begin  c (show tx1) 
                                                                       (show Fac.NoRec)) 
                                                     (F.mkBegin  (show tx1) 
-                                                                (show Fac.NoRec)) 
+                                                                (show Fac.NoRec) []) 
         t40  = mkTest "Begin with Rc   " $ testWith (\c -> P.begin  c (show tx1) (show rc1)) 
-                                                    (F.mkBegin  (show tx1) (show rc1)) 
+                                                    (F.mkBegin  (show tx1) (show rc1) []) 
         t50  = mkTest "Commit          " $ testWith (\c -> P.commit c (show tx1) 
                                                                       (show Fac.NoRec)) 
                                                     (F.mkCommit (show tx1) 
-                                                                (show Fac.NoRec))
+                                                                (show Fac.NoRec) [])
         t60  = mkTest "Commit with Rc  " $ testWith (\c -> P.commit c (show tx1) (show rc1)) 
-                                                    (F.mkCommit (show tx1) (show rc1))
+                                                    (F.mkCommit (show tx1) (show rc1) [])
         t70  = mkTest "Abort           " $ testWith (\c -> P.abort  c (show tx1) 
                                                                       (show Fac.NoRec)) 
                                                     (F.mkAbort  (show tx1) 
-                                                                (show Fac.NoRec))
+                                                                (show Fac.NoRec) [])
         t80  = mkTest "Abort with Rc   " $ testWith (\c -> P.abort  c (show tx1) (show rc1)) 
-                                                    (F.mkAbort  (show tx1) (show rc1))
+                                                    (F.mkAbort  (show tx1) (show rc1) [])
         t100 = mkTest "Ack             " $ testWith (testAck True  
                                                              Fac.NoTx 
                                                              Fac.NoSub 
                                                              text1 
                                                              Fac.NoRec)
-                                                    (F.mkAck  msg1 "" "" "")
+                                                    (F.mkAck  msg1 "" "" "" [])
         t110 = mkTest "Nack            " $ testWith (testAck False 
                                                              Fac.NoTx 
                                                              Fac.NoSub 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkNack msg1 "" "" "")
+                                                    (F.mkNack msg1 "" "" "" [])
         t120 = mkTest "Ack with Tx     " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkAck  msg1 "" (show tx1) "")
+                                                    (F.mkAck  msg1 "" (show tx1) "" [])
         t130 = mkTest "Nack with Tx    " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkNack msg1 "" (show tx1) "")
+                                                    (F.mkNack msg1 "" (show tx1) "" [])
         t140 = mkTest "Ack with Rc     " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkAck  msg1 "" (show tx1) (show rc1))
+                                                    (F.mkAck  msg1 "" (show tx1) (show rc1) [])
         t150 = mkTest "Nack with Rc    " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkNack msg1 "" (show tx1) (show rc1))
+                                                    (F.mkNack msg1 "" (show tx1) (show rc1) [])
         t160 = mkTest "Ack with Sub    " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              (Fac.Sub sub1)
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkAck  msg1 (show sub1) (show tx1) (show rc1))
+                                                    (F.mkAck  msg1 (show sub1) (show tx1) (show rc1) [])
         t170 = mkTest "Nack with Sub   " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              (Fac.Sub sub1)
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkNack msg1 (show sub1) (show tx1) (show rc1))
+                                                    (F.mkNack msg1 (show sub1) (show tx1) (show rc1) [])
         t180 = mkTest "Send            " $ testWith (testSend 
                                                        Fac.NoTx Fac.NoRec text1 [])
                                                     (mkSend
                                                        Fac.NoTx Fac.NoRec text1 [])
         t190 = mkTest "Send with Hdrs  " $ testWith (testSend 
                                                        Fac.NoTx Fac.NoRec text1 
-                                                       [("special","some text"),
-                                                        ("another","more text")])
+                                                       [("another","some text"),
+                                                        ("special","more text")])
                                                     (mkSend
                                                        Fac.NoTx Fac.NoRec text1 
-                                                       [("special","some text"),
-                                                        ("another","more text")])
+                                                       [("another","some text"),
+                                                        ("special","more text")])
         t200 = mkTest "Send with Tx    " $ testWith (testSend 
                                                        (Fac.Tx tx1)
                                                        Fac.NoRec text1 [])
@@ -157,35 +157,35 @@ where
                                                            (show Fac.NoRec) [])
                                                     (F.mkSubscribe q1 F.Auto "" 
                                                              (show Fac.NoSub)
-                                                             (show Fac.NoRec))
+                                                             (show Fac.NoRec) [])
         t230 = mkTest "Sub with Sub    " $ testWith (\c -> P.subscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.Auto)  
                                                            (show Fac.NoRec) [])
                                                     (F.mkSubscribe q1 F.Auto "" 
                                                              (show $ Fac.Sub sub1)
-                                                             (show Fac.NoRec))
+                                                             (show Fac.NoRec) [])
         t240 = mkTest "Sub with Rc     " $ testWith (\c -> P.subscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.Auto)  
                                                            (show $ Fac.Rec rc1) [])
                                                     (F.mkSubscribe q1 F.Auto "" 
                                                              (show $ Fac.Sub sub1)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t250 = mkTest "Sub with Client " $ testWith (\c -> P.subscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.Client)  
                                                            (show $ Fac.Rec rc1) [])
                                                     (F.mkSubscribe q1 F.Client "" 
                                                              (show $ Fac.Sub sub1)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t260 = mkTest "Sub with ClientI" $ testWith (\c -> P.subscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.ClientIndi)  
                                                            (show $ Fac.Rec rc1) [])
                                                     (F.mkSubscribe q1 F.ClientIndi "" 
                                                              (show $ Fac.Sub sub1)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t270 = mkTest "Sub with Sel.   " $ testWith (\c -> P.subscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.Client)
@@ -193,21 +193,21 @@ where
                                                            [("selector","@x='y'")])
                                                     (F.mkSubscribe q1 F.Client "@x='y'" 
                                                              (show $ Fac.Sub sub1)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t280 = mkTest "Unsub           " $ testWith (\c -> P.unsubscribe c
                                                            (P.mkSub (Fac.Sub sub1) q1
                                                                     F.Client)
                                                            (show $ Fac.Rec rc1) [])
                                                     (F.mkUnsubscribe q1  
                                                              (show $ Fac.Sub sub1)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t290 = mkTest "Unsub no Sub    " $ testWith (\c -> do let sub = P.mkSub Fac.NoSub q1
                                                                                 F.Client
                                                               P.unsubscribe c sub
                                                                   (show $ Fac.Rec rc1) [])
                                                     (F.mkUnsubscribe q1  
                                                              (show   Fac.NoSub)
-                                                             (show $ Fac.Rec rc1))
+                                                             (show $ Fac.Rec rc1) [])
         t300 = mkTest "HeartBeat       " $ testWith P.sendBeat 
                                                     F.mkBeat
     in  mkGroup "Protocol Tests" (Stop (Fail "")) [
@@ -239,7 +239,7 @@ where
 
   testConnect :: IO TestResult
   testConnect = do
-    c <- P.connect host port maxRcv "guest" "guest" vers beat
+    c <- P.connect host port maxRcv "guest" "guest" "" vers beat []
     let r = if P.connected c 
               then Pass
               else Fail $ "Not connected: " ++ P.getErr c
@@ -271,7 +271,7 @@ where
     
   testWith :: (P.Connection -> IO ()) -> F.Frame -> IO TestResult
   testWith act tertium = do
-    c <- P.connect host port maxRcv "guest" "guest" vers beat
+    c <- P.connect host port maxRcv "guest" "guest" "" vers beat []
     if not (P.connected c)
       then return $ Fail $ P.getErr c
       else do

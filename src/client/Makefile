@@ -20,7 +20,7 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
          $(SUTDIR)/Client/Basic.hs 
 
 GHC = ghc
-FLGS = -DTEST -Wall --make
+FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all -fforce-recomp
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../broker/Network/Mom/Stompl \
 		    -i../stompl/Network/Mom/Stompl \
@@ -31,10 +31,12 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/client1 \
         $(SMOKEDIR)/server1 \
         $(SMOKEDIR)/sendtx \
+        $(SMOKEDIR)/sendtx2 \
         $(SMOKEDIR)/sendf \
         $(SMOKEDIR)/sendforever \
         $(SMOKEDIR)/sendjp \
         $(SMOKEDIR)/frost \
+        $(SMOKEDIR)/psend \
         $(SMOKEDIR)/ping \
         $(SMOKEDIR)/demo1
 
@@ -53,7 +55,13 @@ $(SMOKEDIR)/server1:	$(SMOKEDIR)/server1.hs $(SUBSRC)
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/psend:	$(SMOKEDIR)/psend.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/sendtx:	$(SMOKEDIR)/sendtx.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/sendtx2:	$(SMOKEDIR)/sendtx2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/sendf:	$(SMOKEDIR)/sendf.hs $(SUBSRC)
@@ -109,6 +117,12 @@ $(TDIR)/tdialogsdbg:	$(TDIR)/tdialogs.hs $(SUBSRC)
 $(TDIR)/tstate:		$(TDIR)/tstate.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+prof-clean:
+	mv -f ./*.prof  ./profiling/
+	mv -f ./*.hp    ./profiling/
+	mv -f ./*.ps    ./profiling/
+	mv -f ./*.aux   ./profiling/
+
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
@@ -121,12 +135,14 @@ clean:
 	rm -f $(SMOKEDIR)/listen2
 	rm -f $(SMOKEDIR)/send2
 	rm -f $(SMOKEDIR)/sendtx
+	rm -f $(SMOKEDIR)/sendtx2
 	rm -f $(SMOKEDIR)/sendf
 	rm -f $(SMOKEDIR)/sendjp
 	rm -f $(SMOKEDIR)/sendforever
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/demo1
 	rm -f $(SMOKEDIR)/frost
+	rm -f $(SMOKEDIR)/psend
 	rm -f $(SMOKEDIR)/cl1
 	rm -f $(SMOKEDIR)/conduit1
 	rm -f $(SMOKEDIR)/client1

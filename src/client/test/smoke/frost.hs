@@ -24,7 +24,7 @@ where
 
   conAndSend :: String -> IO ()
   conAndSend qn = do
-    withConnection_ "127.0.0.1" 61613 [] $ \c -> do
+    withConnection "127.0.0.1" 61613 [] [] $ \c -> do
       let conv = return . B.pack
       q <- newWriter c "Test-Q" qn [] [] conv
       forever $ frost q

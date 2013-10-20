@@ -8,9 +8,9 @@ where
   import System.Environment
   import Data.ByteString as B (readFile)
 
-  testSndToMsg :: String -> Frame -> (Bool, String)
-  testSndToMsg i f = 
-    case sndToMsg i f of
+  testSndToMsg :: String -> String -> Frame -> (Bool, String)
+  testSndToMsg i sub f = 
+    case sndToMsg i sub f of
       Nothing -> (False, "Not a SendFrame")
       Just m  -> 
         let p1 = getHeaders m == getHeaders f
@@ -21,18 +21,17 @@ where
         in if p1 && p2 && p3 && p4 && p5 
              then (True, "")
              else 
-               let e = if not p1 
-                         then "Headers differ"
-                         else if not p2 
-                                then "Destinations differ"
-                                else if not p3 
-                                       then "Lengths differ"
-                                       else if not p4 
-                                              then "Mime Types differ"
-                                              else if not p5 
-                                                     then "Bodies differ"
-                                                     else "unknown error"
+               let e = ifList [(p1, "Headers differ"),
+                               (p2, "Destinations differ"),
+                               (p3, "Lengths differ"),
+                               (p4, "MIME Types differ"),
+                               (p5, "Bodies differ")]
                in (False, e)
+
+  ifList :: [(Bool, String)] -> String
+  ifList [] = "Unknown error"
+  ifList ((p, s):xs) | p = ifList xs
+                     | otherwise = s 
 
   applyTests :: FilePath -> IO ()
   applyTests d = do
@@ -43,7 +42,7 @@ where
         exitFailure
       Right s -> do
         putStrLn $ show $ getHeaders s
-        let (v, e) = testSndToMsg "1" s
+        let (v, e) = testSndToMsg "1" "/queue/test" s
         if v
           then do
             putStrLn "Ok. Test passed."

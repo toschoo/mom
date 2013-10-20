@@ -4,3 +4,6 @@ dist
 ./test
 src/scratchpad
 src/patterns.old
+src/client/profiling
+src/stompl/profiling
+src/patterns/profiling

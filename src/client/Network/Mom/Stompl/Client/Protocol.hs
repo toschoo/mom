@@ -10,8 +10,6 @@ module Protocol (Connection, mkConnection,
                  Message(..), mkMessage,
                  MsgId(..),
                  send, ack, nack)
-                 
-                 
 where
 
   import qualified Socket  as S
@@ -36,7 +34,7 @@ where
   -- Default version, when broker does not send a version
   ---------------------------------------------------------------------
   defVersion :: F.Version
-  defVersion = (1,0)
+  defVersion = (1,1)
 
   ---------------------------------------------------------------------
   -- Connection 
@@ -48,7 +46,7 @@ where
                                                -- the agreed version 
                                                -- after connect
                        conBeat :: F.Heart, -- the heart beat
-                       conSrv  :: String, -- server descritpion
+                       conSrv  :: String, -- server description
                        conSes  :: String, -- session identifier (from broker)
                        conUsr  :: String,      -- user
                        conPwd  :: String,      -- passcode
@@ -135,7 +133,9 @@ where
   ---------------------------------------------------------------------
   -- Make a connection
   ---------------------------------------------------------------------
-  mkConnection :: String -> Int -> Int -> String -> String -> String -> [F.Version] -> F.Heart -> Connection
+  mkConnection :: String -> Int    -> Int    -> 
+                  String -> String -> String -> 
+                  [F.Version] -> F.Heart     -> Connection
   mkConnection host port mx usr pwd cli vers beat = 
     Connection {
        conAddr = host,
@@ -187,14 +187,16 @@ where
   ---------------------------------------------------------------------
   -- connect
   ---------------------------------------------------------------------
-  connect :: String -> Int -> Int -> String -> String -> String -> [F.Version] -> F.Heart -> IO Connection
-  connect host port mx usr pwd cli vers beat = 
+  connect :: String -> Int -> Int -> 
+             String -> String -> String -> 
+             [F.Version] -> F.Heart -> [F.Header] -> IO Connection
+  connect host port mx usr pwd cli vers beat hs = 
     bracketOnError (do s <- S.connect host port
                        let c = mkConnection host port mx 
                                             usr  pwd cli vers beat
                        return c {conSock = Just s, conTcp = True}) 
                    disc
-                   (connectBroker mx vers beat) 
+                   (connectBroker mx vers beat hs) 
 
   ---------------------------------------------------------------------
   -- disconnect either on broker level or on tcp/ip level
@@ -301,15 +303,18 @@ where
   ---------------------------------------------------------------------
   -- the hard work on connecting to a broker
   ---------------------------------------------------------------------
-  connectBroker :: Int -> [F.Version] -> F.Heart -> Connection -> IO Connection
-  connectBroker mx vers beat c = 
-    case mkConF (conAddr c) (conUsr c) (conPwd c) (conCli c) vers beat of
+  connectBroker :: Int -> [F.Version] -> F.Heart -> [F.Header] ->
+                   Connection -> IO Connection
+  connectBroker mx vers beat hs c = 
+    case mkConF (conAddr c) 
+                (conUsr  c) (conPwd c) 
+                (conCli  c) vers beat hs of
       Left e  -> return c {conErrM = e}
       Right f -> do
         rc  <- S.initReceiver
         wr  <- S.initWriter
         S.send wr (getSock c) f 
-        eiC <- catch (S.receive rc (getSock c) mx)
+        eiC <- catch (S.receive rc (getSock c) mx) -- no timeout?
                      (\e -> return $ Left $ show (e::SomeException)) 
         case eiC of
           Left  e -> return c {conErrM = e}
@@ -323,30 +328,30 @@ where
     where period = snd . conBeat
 
   ---------------------------------------------------------------------
-  -- handle broker responds connect frame
+  -- handle broker response to connect frame
   ---------------------------------------------------------------------
   handleConnected :: F.Frame -> Connection -> Connection
   handleConnected f c = 
     case F.typeOf f of
       F.Connected -> c {
                       conSrv  =  let srv = F.getServer f
-                                 in F.getSrvName srv ++ "/"  ++
-                                    F.getSrvVer  srv ++ " (" ++
-                                    F.getSrvCmts srv ++ ")",
+                                  in F.getSrvName srv ++ "/"  ++
+                                     F.getSrvVer  srv ++ " (" ++
+                                     F.getSrvCmts srv ++ ")",
                       conBeat =  F.getBeat    f,
                       conVers = [F.getVersion f],
                       conSes  =  F.getSession f}
       F.Error     -> c {conErrM = errToMsg f}
-      _           -> c {conErrM = "Unexpected Frame: " ++ U.toString (F.putCommand f)}
+      _           -> c {conErrM = "Unexpected Frame: " ++ 
+                                  U.toString (F.putCommand f)}
 
   ---------------------------------------------------------------------
   -- transform an error frame into a string
   ---------------------------------------------------------------------
   errToMsg :: F.Frame -> String
-  errToMsg f = let msg = if B.length (F.getBody f) == 0 
-                           then "."
-                           else ": " ++ U.toString (F.getBody f)
-               in F.getMsg f ++ msg
+  errToMsg f = F.getMsg f ++ if B.length (F.getBody f) == 0 
+                                   then "."
+                                   else ": " ++ U.toString (F.getBody f)
 
   ---------------------------------------------------------------------
   -- frame constructors
@@ -356,15 +361,16 @@ where
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
 
-  mkConF :: String -> String -> String -> String -> [F.Version] -> F.Heart -> Either String F.Frame
-  mkConF host usr pwd cli vers beat = 
+  mkConF :: String -> String -> String -> String -> 
+            [F.Version] -> F.Heart -> [F.Header] -> Either String F.Frame
+  mkConF host usr pwd cli vers beat hs = 
     let uHdr = if null usr then [] else [F.mkLogHdr  usr]
         pHdr = if null pwd then [] else [F.mkPassHdr pwd]
         cHdr = if null cli then [] else [F.mkCliIdHdr cli]
      in F.mkConFrame $ [F.mkHostHdr host,
                         F.mkAcVerHdr $ F.versToVal vers, 
                         F.mkBeatHdr  $ F.beatToVal beat] ++
-                       uHdr ++ pHdr ++ cHdr
+                       uHdr ++ pHdr ++ cHdr ++ hs
 
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =

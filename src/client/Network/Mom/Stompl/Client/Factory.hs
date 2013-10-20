@@ -5,6 +5,13 @@ module Factory (
         Rec(..), mkUniqueRecc, parseRec)
 where
 
+  ------------------------------------------------------------------------
+  -- To-do:
+  --   - Currently, we use running numbers to uniquely identify 
+  --     subscription ids, receipts, transactions, etc.
+  --   - A better approach is to use random numbers
+  ------------------------------------------------------------------------
+
   import System.IO.Unsafe
   import Control.Concurrent
   import Data.Char (isDigit)

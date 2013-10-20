@@ -1,6 +1,6 @@
 Name:            stompl
 Category:        Message-Oriented Middleware, Network, Stomp, Parser
-Version:         0.0.2
+Version:         0.0.3
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2012
 License:         LGPL
@@ -32,6 +32,26 @@ Description:
   <https://github.com/toschoo/mom/>.
   The Stomp specification can be found at
   <http://stomp.github.com>.
+
+  .
+
+  Release History:
+
+  .
+
+  [0.0.3] Major changes:
+          New attribute "ClientId" in Connect frame 
+            for compatibility with ActiveMQ; 
+          all commands accept additional headers
+            to ease adaptations to broker-specific features. 
+
+  .
+
+  [0.0.2] Minor corrections and documentation
+
+  .
+
+  [0.0.1] Initial Release
 
 Library
   Build-Depends:   base        >= 4.0 && < 5.0,

@@ -12,7 +12,7 @@ SUBSRC = $(SUTDIR)/Frame.hs \
          $(SUTDIR)/Parser.hs 
 
 GHC = ghc
-FLGS = -DTEST -Wall --make
+FLGS = -DTEST -Wall -O2 --make -prof -auto-all -caf-all -fforce-recomp
 INC  = -i./test/src -i./Network/Mom/Stompl -i../broker/Network/Mom/Stompl
 
 run:

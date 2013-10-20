@@ -145,7 +145,7 @@ where
   ------------------------------------------------------------------------
   testIPConnect :: Int -> IO TestResult
   testIPConnect p = do
-    eiC <- try $ withConnection "127.0.0.1" p [] (\_ -> return ())
+    eiC <- try $ withConnection "127.0.0.1" p [] [] (\_ -> return ())
     case eiC of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass
@@ -158,7 +158,7 @@ where
   ------------------------------------------------------------------------
   testNConnect :: Int -> IO TestResult
   testNConnect p = do
-    eiC <- try $ withConnection "localhost" p [] (\_ -> return ())
+    eiC <- try $ withConnection "localhost" p [] [] (\_ -> return ())
     case eiC of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass
@@ -172,7 +172,7 @@ where
   testAuth :: Int -> IO TestResult
   testAuth p = do
     eiC <- try $ withConnection "localhost" p 
-                [OAuth "guest" "guest"] (\_ -> return ())
+                [OAuth "guest" "guest"] [] (\_ -> return ())
     case eiC of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass
@@ -1264,7 +1264,7 @@ where
   testWaitBroker :: Int -> IO TestResult
   testWaitBroker p = do
     eiR <- try $ withConnection host p 
-                               [OWaitBroker 100] $ \_ -> return Pass
+                               [OWaitBroker 100] [] $ \_ -> return Pass
     case eiR of
        Left (ProtocolException e) -> 
          if "Peer disconnected" `isSuffixOf` e then return Pass
@@ -1284,7 +1284,7 @@ where
   testBeat :: Int -> IO TestResult
   testBeat p = do
     let b = (500,500)
-    eiR <- try $ withConnection host p [OHeartBeat b] $ \c -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] [] $ \c -> do
       oQ  <- newWriter c "OUT" tQ1 [] [] oconv
       iQ  <- newReader c "IN"  tQ1 [] [] iconv
       threadDelay $ 1000 * 1000
@@ -1312,7 +1312,7 @@ where
   testBeatR :: Int -> IO TestResult
   testBeatR p = do
     let b = (100,100)
-    eiR <- try $ withConnection host p [OHeartBeat b] $ \_ -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] [] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1330,7 +1330,7 @@ where
   testBeatRfail :: Int -> IO TestResult
   testBeatRfail p = do
     let b = (50,50) -- this beat signals responder to ignore heartbeats
-    eiR <- try $ withConnection host p [OHeartBeat b] $ \_ -> do
+    eiR <- try $ withConnection host p [OHeartBeat b] [] $ \_ -> do
       threadDelay $ 1000 * 1000
       return Pass
     case eiR of
@@ -1420,7 +1420,7 @@ where
   -- shall connect with passed parameters
   ------------------------------------------------------------------------
   stdCon :: Int -> (Con -> IO TestResult) -> IO TestResult
-  stdCon port = withConnection host port []
+  stdCon port = withConnection host port [] []
 
   testWith :: Int -> (Con -> IO TestResult) -> IO TestResult
   testWith port act = do

@@ -10,9 +10,7 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Parser (
                         stompParser,
-                        stompAtOnce,
-                        startParsing,
-                        continueParsing
+                        stompAtOnce
                       )
 where
 
@@ -26,29 +24,11 @@ where
   import           Network.Mom.Stompl.Frame
 
   ------------------------------------------------------------------------
-  -- | Starts parsing with Attoparsec 'parse'.
-  --   May fail, conclude or return a partial result.
-  ------------------------------------------------------------------------
-  startParsing :: B.ByteString -> Either String (Result Frame)
-  startParsing m = case parse stompParser m  of
-                        Fail _ _ e -> Left e
-                        r          -> Right r
-
-  ------------------------------------------------------------------------
-  -- | Continues parsing with Attoparsec 'feed'.
-  --   May fail, conclude or return a partial result.
-  ------------------------------------------------------------------------
-  continueParsing :: Result Frame -> B.ByteString -> Either String (Result Frame)
-  continueParsing r m = case feed r m of
-                          Fail _ _ e -> Left e
-                          r'         -> Right r'
-
-  ------------------------------------------------------------------------
   -- | Parses a ByteString at once with Attoparsec 'parseOnly'.
   --   May fail or conclude.
   ------------------------------------------------------------------------
   stompAtOnce :: B.ByteString -> Either String Frame
-  stompAtOnce s = parseOnly stompParser s
+  stompAtOnce = parseOnly stompParser 
 
   ------------------------------------------------------------------------
   -- | The Stomp Parser
@@ -78,7 +58,7 @@ where
   msgType :: Parser String
   msgType = do
     skipWhite
-    t <- A.takeTill (endAny)
+    t <- A.takeTill endAny
     skipWhite
     terminal
     return $ U.toString t
@@ -214,7 +194,7 @@ where
     return ()
 
   endAny :: Word8 -> Bool
-  endAny w = (w == col || w == eol || w == spc || w == nul)
+  endAny w = w `elem` [col, eol, spc, nul]
 
   endLine :: Word8 -> Bool
   endLine = (== eol)
@@ -228,5 +208,5 @@ where
   failBodyLen :: Int -> Int -> Parser a
   failBodyLen l1 l2 = 
     fail $ "Body longer than indicated by content-length: " ++
-           (show l1) ++ " - " ++ (show l2)
+           show l1 ++ " - " ++ show l2
   
