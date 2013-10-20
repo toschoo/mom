@@ -1,8 +1,0 @@
-JOB "psend /q/test +RTS -hd -p -i0.01 -K100M (null)"
-DATE "Sat Oct 19 16:11 2013"
-SAMPLE_UNIT "seconds"
-VALUE_UNIT "bytes"
-BEGIN_SAMPLE 0.00
-END_SAMPLE 0.00
-BEGIN_SAMPLE 0.03
-END_SAMPLE 0.03
