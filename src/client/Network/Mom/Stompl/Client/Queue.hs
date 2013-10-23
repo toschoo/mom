@@ -336,7 +336,11 @@ where
   --   not to terminate the action before all other threads
   --   working on the connection have finished.
   --
-  --   There should be only one connection to the same broker per process.
+  --   Since 'Connection' is a heavy data type,
+  --   you should try to reduce the number of connections
+  --   to the same broker within the same process - 
+  --   there is ideally only one connection per broker
+  --   in one process.
   --
   --   Paramter:
   --

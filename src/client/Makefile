@@ -17,11 +17,12 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs \
          $(SUTDIR)/Client/Streams.hs \
-         $(SUTDIR)/Client/Basic.hs 
+	 $(SUTDIR)/Client/Client.hs \
+	 $(SUTDIR)/Client/Server.hs 
 
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make 
-# -rtsopts -prof -auto-all -caf-all -fforce-recomp
+FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
+#-fforce-recomp
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../broker/Network/Mom/Stompl \
 		    -i../stompl/Network/Mom/Stompl \
@@ -37,6 +38,7 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/sendforever \
         $(SMOKEDIR)/sendjp \
         $(SMOKEDIR)/frost \
+        $(SMOKEDIR)/luke \
         $(SMOKEDIR)/psend \
         $(SMOKEDIR)/ping \
         $(SMOKEDIR)/demo1
@@ -54,6 +56,9 @@ $(SMOKEDIR)/server1:	$(SMOKEDIR)/server1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/luke:	$(SMOKEDIR)/luke.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/psend:	$(SMOKEDIR)/psend.hs $(SUBSRC)
@@ -143,6 +148,7 @@ clean:
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/demo1
 	rm -f $(SMOKEDIR)/frost
+	rm -f $(SMOKEDIR)/luke
 	rm -f $(SMOKEDIR)/psend
 	rm -f $(SMOKEDIR)/cl1
 	rm -f $(SMOKEDIR)/conduit1

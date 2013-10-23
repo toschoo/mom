@@ -35,7 +35,7 @@ where
 
   import           System.IO.Unsafe
 
-  import           Data.List (find, deleteBy, delete)
+  import           Data.List (find)
   import           Data.Char (isDigit)
   import           Data.Time.Clock
 
@@ -51,6 +51,18 @@ where
   ------------------------------------------------------------------------
   numeric :: String -> Bool
   numeric = all isDigit
+
+  ------------------------------------------------------------------------
+  -- strict deletes
+  ------------------------------------------------------------------------
+  delete' :: Eq a => a -> [a] -> [a]
+  delete' = deleteBy' (==) 
+
+  deleteBy' :: (a -> a -> Bool) -> a -> [a] -> [a]
+  deleteBy' _ _ [] = []
+  deleteBy' f p (x:xs) | f p x     = xs
+                       | otherwise = let !xs' = deleteBy' f p xs
+                                      in  x : xs'
 
   ------------------------------------------------------------------------
   -- convert milliseconds to microseconds 
@@ -187,13 +199,13 @@ where
   addAckToCon mid c = c {conAcks = mid : conAcks c} 
 
   rmAckFromCon :: P.MsgId -> Connection -> Connection
-  rmAckFromCon mid c = c {conAcks = delete mid $ conAcks c}
+  rmAckFromCon mid c = c {conAcks = delete' mid $ conAcks c}
 
   addRecToCon :: Receipt -> Connection -> Connection
   addRecToCon r c = c {conRecs = r : conRecs c}
 
   rmRecFromCon :: Receipt -> Connection -> Connection
-  rmRecFromCon r c = c {conRecs = delete r $ conRecs c}
+  rmRecFromCon r c = c {conRecs = delete' r $ conRecs c}
 
   checkReceiptCon :: Receipt -> Connection -> Bool
   checkReceiptCon r c = case find (== r) $ conRecs c of
@@ -215,7 +227,7 @@ where
 
   rmSubFromCon :: SubEntry -> Connection -> Connection
   rmSubFromCon s c = c {conSubs = ss} 
-    where ss = deleteBy eq s (conSubs c)
+    where ss = deleteBy' eq s (conSubs c)
 
   addDestToCon :: DestEntry -> Connection -> Connection
   addDestToCon d c = c {conDests = d : conDests c}
@@ -225,7 +237,7 @@ where
 
   rmDestFromCon :: DestEntry -> Connection -> Connection
   rmDestFromCon d c = c {conDests = ds}
-    where ds = deleteBy eq d (conDests c)
+    where ds = deleteBy' eq d (conDests c)
 
   setHisTime :: UTCTime -> Connection -> Connection
   setHisTime t c = c {conHisBeat = t}
@@ -234,7 +246,7 @@ where
   setMyTime t c = c {conMyBeat = t}
 
   updCon :: Connection -> [Connection] -> [Connection]
-  updCon c cs = let !cs' = delete c cs in c:cs' 
+  updCon c cs = c : delete' c cs
   
   ------------------------------------------------------------------------
   -- Transaction 
@@ -333,13 +345,13 @@ where
   addAckToTx mid t = t {txAcks = mid : txAcks t}
 
   rmAckFromTx :: P.MsgId -> Transaction -> Transaction
-  rmAckFromTx mid t = t {txAcks = delete mid $ txAcks t}
+  rmAckFromTx mid t = t {txAcks = delete' mid $ txAcks t}
 
   addRecToTx :: Receipt -> Transaction -> Transaction
   addRecToTx r t = t {txRecs = r : txRecs t}
 
   rmRecFromTx :: Receipt -> Transaction -> Transaction
-  rmRecFromTx r t = t {txRecs = delete r $ txRecs t}
+  rmRecFromTx r t = t {txRecs = delete' r $ txRecs t}
 
   checkReceiptTx :: Receipt -> Transaction -> Bool
   checkReceiptTx r = notElem r . txRecs 
@@ -376,8 +388,7 @@ where
   rmCon cid = modifyMVar_ con $ \cs -> 
     case findCon cid cs of
       Nothing -> return cs
-      Just c  -> 
-        return $ delete c cs
+      Just c  -> return $ delete' c cs
 
   ------------------------------------------------------------------------
   -- Apply an action that may change a connection to the state
@@ -440,7 +451,7 @@ where
       Just ts -> 
         return (c {conThrds = addTx2Thrds t tid (conThrds c) ts}, ())
     where addTx2Thrds tx tid ts trns = 
-            (tid, tx : trns) : deleteBy eq (tid, trns) ts
+            (tid, tx : trns) : deleteBy' eq (tid, trns) ts
 
   ------------------------------------------------------------------------
   -- get transaction from connection
@@ -465,13 +476,13 @@ where
         case findTx tx ts of
           Nothing -> return (c, ())
           Just t  -> 
-            let !t' = f t
+            let t' = f t
             in  return (c {conThrds = 
                              updTxInThrds t' tid (conThrds c) ts}, 
                         ())
     where updTxInThrds t tid ts trns =
-            let !trns' = delete t trns
-                !ts'   = deleteBy eq (tid, trns) ts
+            let trns' = delete' t trns
+                ts'   = deleteBy' eq (tid, trns) ts
              in (tid, t : trns') : ts'
 
   ------------------------------------------------------------------------
@@ -510,7 +521,7 @@ where
                       let ts' = t' : tail ts
                       let c'  = c {conThrds = 
                                       (tid, ts') : 
-                                         deleteBy eq (tid, ts) (conThrds c)}
+                                         deleteBy' eq (tid, ts) (conThrds c)}
                       return (c', ())
 
   ------------------------------------------------------------------------
@@ -601,17 +612,17 @@ where
       Nothing -> return (c, ())
       Just ts -> 
         if null ts 
-          then return (c {conThrds = deleteBy eq (tid, []) (conThrds c)}, ())
+          then return (c {conThrds = deleteBy' eq (tid, []) (conThrds c)}, ())
           else 
             case findTx tx ts of
               Nothing -> return (c, ())
               Just t  -> do
-                let ts' = delete t ts
+                let ts' = delete' t ts
                 if null ts' 
                   then return (c {conThrds = 
-                                   deleteBy eq (tid, ts) (conThrds c)},  ())
+                                   deleteBy' eq (tid, ts) (conThrds c)},  ())
                   else return (c {conThrds = (tid, ts') : 
-                                   deleteBy eq (tid, ts) (conThrds c)}, ())
+                                   deleteBy' eq (tid, ts) (conThrds c)}, ())
 
   ------------------------------------------------------------------------
   -- remove the current transaction
@@ -623,12 +634,12 @@ where
       Nothing -> return (c, ())
       Just ts -> 
         if null ts 
-          then return (c {conThrds = deleteBy eq (tid, []) (conThrds c)}, ())
+          then return (c {conThrds = deleteBy' eq (tid, []) (conThrds c)}, ())
           else do
             let ts' = tail ts
             if null ts' 
               then return (c {conThrds = 
-                               deleteBy eq (tid, ts) (conThrds c)},  ())
+                               deleteBy' eq (tid, ts) (conThrds c)},  ())
               else return (c {conThrds = (tid, ts') : 
-                               deleteBy eq (tid, ts) (conThrds c)}, ())
+                               deleteBy' eq (tid, ts) (conThrds c)}, ())
 

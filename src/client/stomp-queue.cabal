@@ -1,5 +1,5 @@
 Name:            stomp-queue
-Version:         0.0.5
+Version:         0.0.7
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2013
 License:         LGPL
@@ -34,11 +34,22 @@ Description:
 
   .
 
-  [0.0.5] Underline functions removed, 
-          with* functions: withWriter, withPair,
-          new option for connection (ClientId),
-          Headers for broker-specific options can be passed to connection,
-          memory leaks solved.
+  [0.0.7] Fighting with hackagedb...
+
+  .
+
+  [0.0.6] Heartbeats caused a memory leak by creating 
+          many Connection instances in the connection state list.
+          The connections were lazily deleted, /i.e./ were
+          not deleted at all.
+          Connection state is now cleaned up by a strict delete.
+
+  .
+
+  [0.0.5] Underscore functions removed; 
+          with* functions: withWriter, withPair;
+          new option for connection (ClientId);
+          Headers for broker-specific options can be passed to connection.
 
   .
 

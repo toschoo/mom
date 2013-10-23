@@ -14,15 +14,11 @@ where
                       clOut :: Q.Writer o}
   
   withClient :: Q.Con -> String ->
-                       String -> String ->
-                       [Q.Qopt] -> [Q.Qopt] ->
-                       [F.Header]       -> 
-                       Q.InBound  i       ->
-                       Q.OutBound o       ->
-                       (Client i o -> IO r) -> IO r
-  withClient c n rn wn rqs wqs hs iconv oconv act =
-    Q.withPair c n rn wn rqs wqs hs [] iconv oconv $ \(r,w) -> 
-      act $ Client rn r w
+                         Q.ReaderDesc i ->
+                         Q.WriterDesc o ->
+                         (Client i o  -> IO r) -> IO r
+  withClient c n rd@(rn, _, _, _) wd act = do
+    Q.withPair c n rd wd $ \(r,w) -> act $ Client rn r w
 
   request :: Client i o -> 
              Int -> M.Type -> [F.Header] -> o -> IO (Maybe (Q.Message i))
