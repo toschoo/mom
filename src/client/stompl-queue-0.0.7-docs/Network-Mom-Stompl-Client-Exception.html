@@ -1,0 +1,32 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Client.Exception</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Client-Exception.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-queue-0.0.7: Stompl Client Library</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>Safe-Infered</td></tr></table><p class="caption">Network.Mom.Stompl.Client.Exception</p></div><div id="description"><p class="caption">Description</p><div class="doc"><p>Exceptions for the Stompl Client
+</p></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><span class="keyword">data</span>  <a href="#t:StomplException">StomplException</a> <ul class="subs"><li>= <a href="#v:SocketException">SocketException</a> String  </li><li>| <a href="#v:ProtocolException">ProtocolException</a> String  </li><li>| <a href="#v:QueueException">QueueException</a> String  </li><li>| <a href="#v:TxException">TxException</a> String  </li><li>| <a href="#v:ConnectException">ConnectException</a> String  </li><li>| <a href="#v:ConvertException">ConvertException</a> String  </li><li>| <a href="#v:BrokerException">BrokerException</a> String  </li><li>| <a href="#v:AppException">AppException</a> String  </li><li>| <a href="#v:OuchException">OuchException</a> String  </li></ul></li><li class="src short"><a href="#v:try">try</a> ::  IO a -&gt; IO (Either <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a> a)</li><li class="src short"><a href="#v:convertError">convertError</a> ::  String -&gt; IO a</li></ul></div><div id="interface"><h1>Documentation</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:StomplException" class="def">StomplException</a>  </p><div class="doc"><p>The Stompl Client uses exceptions to communicate errors
+   to the user application.
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:SocketException" class="def">SocketException</a> String</td><td class="doc"><p>Thrown
+   on problems with the socket, <em>e.g.</em>
+   when a message cannot be sent
+</p></td></tr><tr><td class="src"><a name="v:ProtocolException" class="def">ProtocolException</a> String</td><td class="doc"><p>Thrown when something 
+   against the protocol happens, <em>e.g.</em>
+   an unexpected frame is received
+   or a message from a queue
+   that was not subscribed
+</p></td></tr><tr><td class="src"><a name="v:QueueException" class="def">QueueException</a> String</td><td class="doc"><p>Thrown on wrong uses of queues, <em>e.g.</em>
+   use of a queue outside its scope
+</p></td></tr><tr><td class="src"><a name="v:TxException" class="def">TxException</a> String</td><td class="doc"><p>Thrown on transaction errors, <em>e.g.</em>
+   pending acks
+</p></td></tr><tr><td class="src"><a name="v:ConnectException" class="def">ConnectException</a> String</td><td class="doc"><p>Thrown on connection errors, <em>e.g.</em>
+   connection was disconnected
+</p></td></tr><tr><td class="src"><a name="v:ConvertException" class="def">ConvertException</a> String</td><td class="doc"><p>Should be thrown 
+   by user-defined converters
+</p></td></tr><tr><td class="src"><a name="v:BrokerException" class="def">BrokerException</a> String</td><td class="doc"><p>Thrown when an error frame is received
+</p></td></tr><tr><td class="src"><a name="v:AppException" class="def">AppException</a> String</td><td class="doc"><p>Thrown by <em>abort</em>
+</p></td></tr><tr><td class="src"><a name="v:OuchException" class="def">OuchException</a> String</td><td class="doc"><p>You hit a bug!
+   This exception is only thrown
+   when something really strange happened
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:StomplException" class="caption collapser" onclick="toggleSection('i:StomplException')">Instances</p><div id="section.i:StomplException" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Read <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Typeable <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Exception <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:try" class="def">try</a> ::  IO a -&gt; IO (Either <a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a> a)</p><div class="doc"><p>Catches any <code><a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></code>,
+   including asynchronous exceptions coming from internal threads
+</p></div></div><div class="top"><p class="src"><a name="v:convertError" class="def">convertError</a> ::  String -&gt; IO a</p><div class="doc"><p>Throws <code><a href="Network-Mom-Stompl-Client-Exception.html#v:ConvertException">ConvertException</a></code>
+   to signal a conversion error.
+</p></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

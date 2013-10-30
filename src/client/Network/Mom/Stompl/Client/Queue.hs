@@ -49,7 +49,7 @@ module Network.Mom.Stompl.Client.Queue (
                    Tx,
                    withTransaction,
                    Topt(..), abort, 
-                   -- * Acknowledgments
+                   -- * Acknowledgements
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
                    -- * Exceptions
@@ -249,7 +249,7 @@ where
 
      Acknowledgements are used by the client to confirm the receipt
      of a message. The Stomp protocol foresees three different
-     acknowledgment modes, defined when the client subscribes to a queues.
+     acknowledgement modes, defined when the client subscribes to a queues.
      A subscription may use 
      /auto mode/, /i.e./ a message is considered acknowledged
      when it has been sent to the subscriber;
@@ -534,7 +534,7 @@ where
             -- | Expression often used by Ren&#x00e9; Artois.
             --   Furthermore, if 'OMode' is either
             --   'F.Client' or 'F.ClientIndi', then 
-            --   this option forces 'readQ' to send an acknowledgment
+            --   this option forces 'readQ' to send an acknowledgement
             --   automatically when a message has been read from the queue. 
             | OAck
             -- | A queue created with 'OForceTx' will throw 
