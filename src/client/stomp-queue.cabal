@@ -18,10 +18,14 @@ Description:
   the location or internal structure of each other.
   They see only each other's interfaces, /i.e./ the messages
   published and subscribed through the broker.
+
+  .
   
   The Stomp Queue library provides 
   a Stomp client, using abstractions like
   'Connection', 'Transaction', 'Queue' and 'Message'.
+
+  .
 
   More information, examples and a test suite are available 
   on <http://github.com/toschoo/mom>.
