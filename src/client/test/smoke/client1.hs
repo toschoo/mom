@@ -2,7 +2,7 @@ module Main
 where
 
   import Network.Mom.Stompl.Client.Queue
-  import Network.Mom.Stompl.Client.Client
+  import Network.Mom.Stompl.Client.Patterns
   import qualified Data.ByteString.Char8 as B
   import System.Environment
   import System.Exit

@@ -29,7 +29,7 @@ Description:
   either infinite streams or
   multipart messages with an explicit last message segment.
   The latter concept is
-  and extension of the Stomp specification.
+  an extension of the Stomp specification.
 
   .
 

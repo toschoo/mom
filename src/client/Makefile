@@ -17,8 +17,7 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs \
          $(SUTDIR)/Client/Streams.hs \
-	 $(SUTDIR)/Client/Client.hs \
-	 $(SUTDIR)/Client/Server.hs 
+	 $(SUTDIR)/Client/Patterns.hs
 
 GHC = ghc
 FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 

@@ -1,5 +1,5 @@
 Name:            stomp-queue
-Version:         0.0.7
+Version:         0.0.8
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2013
 License:         LGPL
@@ -31,6 +31,10 @@ Description:
   .
 
   Release History:
+
+  .
+
+  [0.0.8] Client/Server on top of Queues.
 
   .
 
@@ -78,8 +82,7 @@ Library
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, 
-                   Network.Mom.Stompl.Client.Exception
-                   -- Network.Mom.Stompl.Client.Client,
-                   -- Network.Mom.Stompl.Client.Server
+                   Network.Mom.Stompl.Client.Exception,
+                   Network.Mom.Stompl.Client.Patterns
   other-modules: Socket, Protocol, State, Factory
 
