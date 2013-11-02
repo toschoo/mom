@@ -16,7 +16,6 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
          $(SUTDIR)/Client/Factory.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs \
-         $(SUTDIR)/Client/Streams.hs \
 	 $(SUTDIR)/Client/Patterns.hs
 
 GHC = ghc
