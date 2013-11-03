@@ -1,12 +1,12 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Client.Queue</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
 window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Client-Queue.html");};
 //]]>
-</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-queue-0.0.7: Stompl Client Library</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Client.Queue</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Connections
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-queue-0.0.8: Stompl Client Library</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Client.Queue</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Connections
 </a></li><li><a href="#g:2">Queues
 </a></li><li><a href="#g:3">Messages
 </a></li><li><a href="#g:4">Receipts
 </a></li><li><a href="#g:5">Transactions
-</a></li><li><a href="#g:6">Acknowledgments
+</a></li><li><a href="#g:6">Acknowledgements
 </a></li><li><a href="#g:7">Exceptions
 </a></li><li><a href="#g:8">Complete Example
 </a></li></ul></div><div id="description"><p class="caption">Description</p><div class="doc"><p>The Stomp Protocol specifies message-oriented interoperability.
@@ -324,7 +324,7 @@ window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Cli
 </p></td></tr><tr><td class="src"><a name="v:OAck" class="def">OAck</a></td><td class="doc"><p>Expression often used by Ren&#233; Artois.
    Furthermore, if <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OMode">OMode</a></code> is either
    <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Client">Client</a></code> or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ClientIndi">ClientIndi</a></code>, then 
-   this option forces <code><a href="Network-Mom-Stompl-Client-Queue.html#v:readQ">readQ</a></code> to send an acknowledgment
+   this option forces <code><a href="Network-Mom-Stompl-Client-Queue.html#v:readQ">readQ</a></code> to send an acknowledgement
    automatically when a message has been read from the queue. 
 </p></td></tr><tr><td class="src"><a name="v:OForceTx" class="def">OForceTx</a></td><td class="doc"><p>A queue created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OForceTx">OForceTx</a></code> will throw 
    <code><a href="Network-Mom-Stompl-Client-Exception.html#v:QueueException">QueueException</a></code> when used outside a <code>Transaction</code>.
@@ -610,10 +610,10 @@ window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Cli
 </p></td></tr></table></div><div class="subs instances"><p id="control.i:Topt" class="caption collapser" onclick="toggleSection('i:Topt')">Instances</p><div id="section.i:Topt" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:abort" class="def">abort</a> :: String -&gt; IO ()</p><div class="doc"><p>Aborts the transaction immediately by raising <code><a href="Network-Mom-Stompl-Client-Exception.html#v:AppException">AppException</a></code>.
    The string passed in to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:abort">abort</a></code> will be added to the 
    exception message.
-</p></div></div><h1 id="g:6">Acknowledgments
+</p></div></div><h1 id="g:6">Acknowledgements
 </h1><div class="doc"><p>Acknowledgements are used by the client to confirm the receipt
      of a message. The Stomp protocol foresees three different
-     acknowledgment modes, defined when the client subscribes to a queues.
+     acknowledgement modes, defined when the client subscribes to a queues.
      A subscription may use 
      <em>auto mode</em>, <em>i.e.</em> a message is considered acknowledged
      when it has been sent to the subscriber;

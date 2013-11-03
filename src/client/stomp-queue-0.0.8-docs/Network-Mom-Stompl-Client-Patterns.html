@@ -1,0 +1,118 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Client.Patterns</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Client-Patterns.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-queue-0.0.8: Stompl Client Library</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Client.Patterns</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Client
+</a></li><li><a href="#g:2">Server
+</a></li></ul></div><div id="description"><p class="caption">Description</p><div class="doc"><p>The Stomp specification defines only one queuing pattern:
+ <em>publish and subscribe</em>.
+ In some situations, other patterns may be more appropriate
+ such as <em>peer-to-peer</em> or <em>client server</em>.
+ Whereas patterns like peer-to-peer 
+ are easy to simulate with the means provided by Stomp,
+ client/server needs some more coordination
+ between the involved parties, the clients and the server.
+</p><p>This module provides abstractions that implement
+ a simple client/server protocol on top of Stomp.
+ A server is an application that provides a <em>service</em>
+ to others.
+ The service must be explicitly requested by a client
+ and only the requesting client must see the response
+ produced by the server.
+</p><p>The module, basically, provides two data types (<code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a></code> and <code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a></code>)
+ and two functions working on these data types, namely
+ <code><a href="Network-Mom-Stompl-Client-Patterns.html#v:request">request</a></code> and <code><a href="Network-Mom-Stompl-Client-Patterns.html#v:reply">reply</a></code>.
+ With the request function, the client requests a service
+ and waits for a response.
+ With the reply function, a server waits for a request,
+ produces a response and sends it back through a channel
+ indicated by the client.
+</p><p>Internally, <code><a href="Network-Mom-Stompl-Client-Patterns.html#v:request">request</a></code> and <code><a href="Network-Mom-Stompl-Client-Patterns.html#v:reply">reply</a></code> use a message header
+ called &quot;__client__&quot; to agree on the reply queue
+</p></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><span class="keyword">data</span>  <a href="#t:ClientA">ClientA</a> i o</li><li class="src short"><a href="#v:withClient">withClient</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:request">request</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; o -&gt; IO (Maybe (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i))</li><li class="src short"><a href="#v:checkRequest">checkRequest</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; IO (Maybe (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i))</li><li class="src short"><span class="keyword">data</span>  <a href="#t:ServerA">ServerA</a> i o</li><li class="src short"><a href="#v:withServer">withServer</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a> i o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:reply">reply</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a> i o -&gt; Int -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i -&gt; IO o) -&gt; IO ()</li></ul></div><div id="interface"><h1 id="g:1">Client
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:ClientA" class="def">ClientA</a> i o </p><div class="doc"><p>The client data type
+</p></div></div><div class="top"><p class="src"><a name="v:withClient" class="def">withClient</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>The function creates a client that lives within its scope.
+</p><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>: Connection to a Stomp broker
+</li><li> <code>String</code>: Name of the Client, used for debugging.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a></code> i: Description of a reader queue;
+                     this is the queue through which the server
+                     will send its response.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a></code> o: Description of a writer queue;
+                     this is the queue through which the server
+                     is expecting requests.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a></code> i o -&gt; IO r: An application-defined action
+                            whose scope defines the client's lifetime
+</li></ul></div></div><div class="top"><p class="src"><a name="v:request" class="def">request</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; o -&gt; IO (Maybe (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i))</p><div class="doc"><p>The client will send the request of type <em>o</em>
+   and wait for the reply until the timeout exprires.
+   The reply is of type <em>i</em> and is returned as <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> <em>i</em>.
+   If the timeout expires before the reply has been received,
+   the function returns <code>Nothing</code>.
+</p><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a></code> i o: The client; note that i is the type of the reply,
+                                          o is the type of the request.
+</li><li> <code>Int</code>: The timeout in microseconds.
+</li><li> <code>Type</code>: The <em>MIME</em> type of the request.
+</li><li> [<code><a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a></code>]: List of additional headers 
+                   to be sent with the request;
+                   note that the function, internally,
+                   uses a header named &quot;__client__&quot;.
+                   This header name, hence, is reserved
+                   and must not be used by the application.
+</li><li> <em>o</em>: The request 
+</li></ul></div></div><div class="top"><p class="src"><a name="v:checkRequest" class="def">checkRequest</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; IO (Maybe (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i))</p><div class="doc"><p>This function serves as a &quot;delayed&quot; receiver for the case
+   that the timeout of a request has expired.
+   When using this function, it is assumed
+   that a request has been made, but no response has been received.
+   It can be used in time-critical applications,
+   where the client may use the time between request and reply
+   productively, instead of blocking on the reply queue.
+</p><p>Use this function with care! It can be easily abused
+   to break the client/server pattern, when it is called
+   without a request having been made before.
+   If, in this case, <em>timout</em> is <em>-1</em>,
+   the application will block for ever.
+</p><p>For parameters, please refer to <code><a href="Network-Mom-Stompl-Client-Patterns.html#v:request">request</a></code>.
+</p></div></div><h1 id="g:2">Server
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:ServerA" class="def">ServerA</a> i o </p><div class="doc"><p>The server data type
+</p></div></div><div class="top"><p class="src"><a name="v:withServer" class="def">withServer</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a> i o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>The function creates a server
+   that lives within its scope.
+</p><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>: Connection to a Stomp broker
+</li><li> <code>String</code>: Name of the Server, used for debugging.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a></code> i: Description of a reader queue;
+                     this is the queue through which clients
+                     are expected to send requests.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a></code> o: Description of a writer queue;
+                     this is the queue through which
+                     a specific client will expect the reply.
+                     Note that the server will overwrite
+                     the destination of this queue
+                     using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeAdHoc">writeAdHoc</a></code>; 
+                     the destination of this queue, hence,
+                     is irrelevant.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a></code> i o -&gt; IO r: An application-defined action
+                            whose scope defines the server's lifetime
+</li></ul></div></div><div class="top"><p class="src"><a name="v:reply" class="def">reply</a> ::  <a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a> i o -&gt; Int -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> i -&gt; IO o) -&gt; IO ()</p><div class="doc"><p>Waits for a client request, 
+   calls the application-defined transformer to generate a reply
+   and sends this reply through the queue
+   whose name is indicated by the value of the &quot;__client__&quot; header.
+   The time a server waits for a request may be restricted
+   by the timeout. Typically, you would call reply with 
+   timeout set to <em>-1</em> (for <em>wait eternally</em>).
+   There may be situations, however, where it actually
+   makes sense to restrict the waiting time,
+   <em>i.e.</em> to perform some housekeeping in between.
+</p><p>Typically, you call reply in a loop like
+</p><pre> forever $ reply srv (-1) nullType [] f
+</pre><p>where <em>f</em> is a function of type 
+</p><pre> 'Message' i -&gt; 'IO' o.
+</pre><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Client-Patterns.html#t:ServerA">ServerA</a></code> i o: The server; note that i is the request queue
+                                     and  o the reply queue.
+</li><li> <code>Int</code>: The timeout in microseconds.
+</li><li> <code>Type</code>: The <em>MIME</em> type of the reply.
+</li><li> [<code><a href="/home/ts/.cabal/share/doc/stompl-0.0.3/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a></code>]: Additional headers to be sent with the reply.
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> i -&gt; IO o: Transforms the request into a reply -
+                          this defines the service provided by this
+                          application.
+</li></ul></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

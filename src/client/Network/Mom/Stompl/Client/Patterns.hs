@@ -12,7 +12,7 @@
 -- such as /peer-to-peer/ or /client server/.
 -- Whereas patterns like peer-to-peer 
 -- are easy to simulate with the means provided by Stomp,
--- client/server involves some more coordination
+-- client/server needs some more coordination
 -- between the involved parties, the clients and the server.
 --
 -- This module provides abstractions that implement
@@ -23,7 +23,7 @@
 -- and only the requesting client must see the response
 -- produced by the server.
 --
--- The module, basically, provids two data types ('ClientA' and 'ServerA')
+-- The module, basically, provides two data types ('ClientA' and 'ServerA')
 -- and two functions working on these data types, namely
 -- 'request' and 'reply'.
 -- With the request function, the client requests a service
@@ -58,12 +58,13 @@ where
                       clOut :: Writer o}
   
   ------------------------------------------------------------------------
-  -- | The function creates a client
-  --   that lives within the scope of the function.
+  -- | The function creates a client that lives within its scope.
   --
   --   Parameters:
   --
   --   * 'Con': Connection to a Stomp broker
+  --
+  --   * 'String': Name of the Client, used for debugging.
   --
   --   * 'ReaderDesc' i: Description of a reader queue;
   --                     this is the queue through which the server
@@ -71,7 +72,7 @@ where
   --
   --   * 'WriterDesc' o: Description of a writer queue;
   --                     this is the queue through which the server
-  --                     is expecting for requests.
+  --                     is expecting requests.
   --
   --   * 'ClientA' i o -> IO r: An application-defined action
   --                            whose scope defines the client's lifetime
@@ -80,7 +81,7 @@ where
                        ReaderDesc i ->
                        WriterDesc o ->
                        (ClientA i o  -> IO r) -> IO r
-  withClient c n rd@(rn, _, _, _) wd act = 
+  withClient c n rd@(rn, _, _, _) wd act =
     withPair c n rd wd $ \(r,w) -> act $ Cl rn r w
 
   -- the reply queue header ----------------------------------------------
@@ -89,8 +90,8 @@ where
 
   ------------------------------------------------------------------------
   -- | The client will send the request of type /o/
-  --   and wait for the reply or until the timeout exprires.
-  --   The reply is of type /i/ and returned as 'Message'.
+  --   and wait for the reply until the timeout exprires.
+  --   The reply is of type /i/ and is returned as 'Message' /i/.
   --   If the timeout expires before the reply has been received,
   --   the function returns 'Nothing'.
   --
@@ -98,8 +99,6 @@ where
   --
   --   * 'ClientA' i o: The client; note that i is the type of the reply,
   --                                          o is the type of the request.
-  --
-  --   * 'String': Name of the Client, used for debugging.
   --
   --   * 'Int': The timeout in microseconds.
   --
@@ -110,7 +109,7 @@ where
   --                   note that the function, internally,
   --                   uses a header named \"__client__\".
   --                   This header name, hence, is reserved
-  --                   and must not be used!
+  --                   and must not be used by the application.
   --
   --  * /o/: The request 
   ------------------------------------------------------------------------
@@ -128,6 +127,12 @@ where
   --   It can be used in time-critical applications,
   --   where the client may use the time between request and reply
   --   productively, instead of blocking on the reply queue.
+  --
+  --   Use this function with care! It can be easily abused
+  --   to break the client/server pattern, when it is called
+  --   without a request having been made before.
+  --   If, in this case, /timout/ is /-1/,
+  --   the application will block for ever.
   --
   --   For parameters, please refer to 'request'.
   ------------------------------------------------------------------------
@@ -176,15 +181,15 @@ where
 
   ------------------------------------------------------------------------
   -- | Waits for a client request, 
-  --   calls the application defined transformer to generate a reply
+  --   calls the application-defined transformer to generate a reply
   --   and sends this reply through the queue
   --   whose name is indicated by the value of the \"__client__\" header.
   --   The time a server waits for a request may be restricted
   --   by the timeout. Typically, you would call reply with 
-  --   timeout set to -1 (for /wait eternally/).
+  --   timeout set to /-1/ (for /wait eternally/).
   --   There may be situations, however, where it actually
   --   makes sense to restrict the waiting time,
-  --   /i.e./ to perform some cleanup tasks in between.
+  --   /i.e./ to perform some housekeeping in between.
   --
   --   Typically, you call reply in a loop like
   --
@@ -196,10 +201,10 @@ where
   --
   --   Parameters:
   --
-  --   * 'ServerA' i o: The server; note that i the request queue
+  --   * 'ServerA' i o: The server; note that i is the request queue
   --                                     and  o the reply queue.
   --
-  --   * 'Int': The timeout.
+  --   * 'Int': The timeout in microseconds.
   --
   --   * 'M.Type': The /MIME/ type of the reply.
   --
