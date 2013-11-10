@@ -21,6 +21,7 @@ where
   import           Data.Word 
 
   import           Control.Applicative ((<|>), (<$>))
+  import           Control.Monad (void)
   import           Network.Mom.Stompl.Frame
 
   ------------------------------------------------------------------------
@@ -39,7 +40,7 @@ where
     case t of
       ""            -> beat
       "CONNECT"     -> connect
-      "STOMP"       -> connect
+      "STOMP"       -> stomp
       "CONNECTED"   -> connected
       "DISCONNECT"  -> disconnect
       "SEND"        -> send
@@ -58,7 +59,7 @@ where
   msgType :: Parser String
   msgType = do
     skipWhite
-    t <- A.takeTill endAny
+    t <- A.takeTill (`elem` [cr, eol, spc])
     skipWhite
     terminal
     return $ U.toString t
@@ -75,22 +76,14 @@ where
   prsError :: Parser Frame
   prsError = bodyFrame mkErrFrame
 
-  bodyFrame :: ([Header] -> Int -> Body -> Either String Frame) -> Parser Frame
-  bodyFrame mk = do
-    hs <- headers
-    case getLen hs of
-      Left  e -> fail e
-      Right l -> do
-        b  <- body l
-        case mk hs l b of
-          Left  e -> fail e
-          Right m -> return m
-
   connect :: Parser Frame
-  connect = genericFrame mkConFrame
+  connect = connectFrame mkConFrame
+
+  stomp   :: Parser Frame
+  stomp   = genericFrame mkStmpFrame
 
   connected :: Parser Frame
-  connected = genericFrame mkCondFrame
+  connected = connectFrame mkCondFrame
 
   disconnect :: Parser Frame
   disconnect = genericFrame mkDisFrame
@@ -119,52 +112,93 @@ where
   receipt :: Parser Frame
   receipt = genericFrame mkRecFrame
 
-  genericFrame :: ([Header] -> Either String Frame) -> Parser Frame
-  genericFrame mk = do
-    hs <- headers
+  ------------------------------------------------------------------------
+  -- Frame with body
+  ------------------------------------------------------------------------
+  bodyFrame :: ([Header] -> Int -> Body -> Either String Frame) -> Parser Frame
+  bodyFrame mk = do
+    hs <- headers True
+    case getLen hs of
+      Left  e -> fail e
+      Right l -> do
+        b  <- body l
+        case mk hs l b of
+          Left  e -> fail e
+          Right m -> return m
+
+  ------------------------------------------------------------------------
+  -- Frame without body and without escaping headers,
+  -- i.e. connect and connected
+  ------------------------------------------------------------------------
+  connectFrame :: ([Header] -> Either String Frame) -> Parser Frame
+  connectFrame mk = do
+    hs <- headers False
     ignoreBody
     case mk hs of
       Left e  -> fail e
       Right m -> return m
 
-  headers :: Parser [Header]
-  headers = reverse <$> headers' []
+  ------------------------------------------------------------------------
+  -- Frame without body
+  ------------------------------------------------------------------------
+  genericFrame :: ([Header] -> Either String Frame) -> Parser Frame
+  genericFrame mk = do
+    hs <- headers True
+    ignoreBody
+    case mk hs of
+      Left e  -> fail e
+      Right m -> return m
 
-  headers' :: [Header] -> Parser [Header]
-  headers' hs = do
+  ------------------------------------------------------------------------
+  -- we add each next header found to the head of the list 
+  -- of headers already parsed and therefore 
+  -- reverse the list of all headers
+  ------------------------------------------------------------------------
+  headers :: Bool -> Parser [Header]
+  headers t = reverse <$> headers' t []
+
+  headers' :: Bool -> [Header] -> Parser [Header]
+  headers' t hs = do
     skipWhite
-    endHeaders hs <|> getHeader hs 
+    endHeaders hs <|> getHeader t hs 
 
   endHeaders :: [Header] -> Parser [Header]
   endHeaders hs = do
     terminal
     return hs
 
-  getHeader :: [Header] -> Parser [Header]
-  getHeader hs = do
-    h <- header
-    headers' (h:hs)
+  getHeader :: Bool -> [Header] -> Parser [Header]
+  getHeader t hs = do
+    h <- header t
+    headers' t (h:hs)
 
-  header :: Parser Header
-  header = do
-    k <- A.takeTill endAny
-    keyValSep 
-    v <- A.takeTill endLine
+  header :: Bool -> Parser Header
+  header t = do
+    k <- escText t [col] 
+    keyValSep
+    v <- escText t [cr, eol]
     terminal
     return (U.toString k, U.toString v)
 
   keyValSep :: Parser ()
-  keyValSep = do
-    skipWhite
-    _ <- takeWhile1 (== col)
-    skipWhite
+  keyValSep = void $ word8 col
 
+  ------------------------------------------------------------------------
+  -- end-of-line: either lf or cr ++ lf
+  ------------------------------------------------------------------------
   terminal :: Parser ()
   terminal = do
-    -- skipWhite
-    _ <- word8 eol 
-    return ()
+    c <- anyWord8
+    case c of
+      10 -> return ()
+      13 -> void $ word8 eol
+      _  -> fail $ "Expecting end-of-line: " ++ show c
 
+  ------------------------------------------------------------------------
+  -- read text until null or,
+  -- if text length is given,
+  -- until text length
+  ------------------------------------------------------------------------
   body :: Int -> Parser B.ByteString
   body x = body' x B.empty
     where 
@@ -182,6 +216,33 @@ where
                 _ <- word8 nul
                 body' l (b |> '\x00') 
 
+  ------------------------------------------------------------------------
+  -- escape header key and value;
+  -- we don't do this for connect and connected frames,
+  -- this is controlled by the Bool parameter.
+  ------------------------------------------------------------------------
+  escText :: Bool -> [Word8] -> Parser B.ByteString
+  escText tt stps = go B.empty
+    where go t = do
+            let stps' | tt        = esc:stps
+                      | otherwise =     stps
+            n   <- A.takeTill (`elem` stps')
+            mbB <- peekWord8
+            case mbB of
+              Nothing -> fail $ "end reached, expected: " ++ show stps
+              Just b  ->
+                if b `elem` stps then return (t >|< n)
+                  else do 
+                    _ <- word8 esc
+                    x <- anyWord8
+                    c <- case x of
+                           92  -> return '\\'
+                           99  -> return ':'
+                           110 -> return '\n'
+                           114 -> return '\r'
+                           _   -> fail $ "Unknown escape sequence: " ++ show x
+                    go (t >|< n |> c)
+
   ignoreBody :: Parser ()
   ignoreBody = do 
     _ <- A.takeTill (== nul)
@@ -189,21 +250,18 @@ where
     return ()
 
   skipWhite :: Parser ()
-  skipWhite = do
-    _ <- A.takeWhile (== spc)
-    return ()
+  skipWhite = void $ A.takeWhile (== spc)
 
-  endAny :: Word8 -> Bool
-  endAny w = w `elem` [col, eol, spc, nul]
-
-  endLine :: Word8 -> Bool
-  endLine = (== eol)
-
-  nul, eol, spc, col :: Word8
-  nul  = 0
-  eol  = 10
-  spc  = 32
-  col  = 58
+  nul, eol, cr, spc, col, esc, _c, _r, _n  :: Word8
+  nul  =   0
+  eol  =  10
+  cr   =  13
+  spc  =  32
+  col  =  58
+  esc  =  92
+  _c   =  99
+  _r   = 114
+  _n   = 110
   
   failBodyLen :: Int -> Int -> Parser a
   failBodyLen l1 l2 = 

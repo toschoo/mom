@@ -21,6 +21,7 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
 GHC = ghc
 FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
 #-fforce-recomp
+# -D_DEBUG
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../broker/Network/Mom/Stompl \
 		    -i../stompl/Network/Mom/Stompl \

@@ -1,5 +1,5 @@
 MESSAGE
-destination : /queue/test
-message-id  : msg-54321
+destination:/queue/test
+message-id:msg-54321
 
 hello world!

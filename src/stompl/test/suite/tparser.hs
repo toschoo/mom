@@ -10,6 +10,7 @@ where
   import qualified Data.ByteString.UTF8 as U 
 
   import Data.Char (toUpper)
+  import Data.List (foldl')
 
   import System.FilePath ((</>))
   import System.Exit (exitSuccess, exitFailure)
@@ -40,7 +41,7 @@ where
   -------------------------------------------------------------------------
   instance Arbitrary Frame where
     arbitrary = do
-      t <- elements [Connect, Connected, Disconnect,
+      t <- elements [Connect, Stomp, Connected, Disconnect,
                      Subscribe, Unsubscribe, 
                      Send, Message, 
                      Begin, Commit, Abort,
@@ -58,8 +59,10 @@ where
   getMk :: FrameType -> Gen ([Header] -> Either String Frame)
   getMk t = 
       case t of
-        Connect -> return mkConFrame
-        Connected -> return mkCondFrame
+        Connect -> return (mkConFrame . cleanHdrs)    -- remove special chars
+        Stomp   -> return (mkStmpFrame . cleanHdrs)   -- remove special chars
+        Connected -> return (mkCondFrame . cleanHdrs) -- connect and connected
+                                                      -- are not escaped!
         Disconnect -> return mkDisFrame
         Subscribe -> return mkSubFrame 
         Unsubscribe -> return mkUSubFrame
@@ -123,7 +126,14 @@ where
   -- random char for header values -------------------------------------
   hdrChar :: Gen Char
   hdrChar = elements (['A'..'Z'] ++ ['a'..'z'] ++ ['0'..'9'] ++ 
-                      "!\"$%&/()=?<>#§")
+                      "!\"$%&/()=?<>#§:\n\r\\")
+
+  cleanHdrs :: [Header] -> [Header]
+  cleanHdrs = map cleanHdr
+    where cleanHdr (h,v) = (remove h, remove v)
+          remove = foldl' (\l -> (++) l . rm) []
+          rm c | c `elem` ":\n\r\\" = []
+               | otherwise          = [c] 
 
   -- mandatory or optional --------------------------------------------
   data Must = Must | May
@@ -136,6 +146,9 @@ where
   getHdrs t m =
     case t of
        Connect     -> 
+         if must m then ["host", "accept-version"]
+           else ["login", "passcode", "client-id", "heart-beat"] 
+       Stomp       -> 
          if must m then ["host", "accept-version"]
            else ["login", "passcode", "client-id", "heart-beat"] 
        Connected   ->
@@ -154,7 +167,7 @@ where
                  "transaction", "receipt", "content-length"]
        Message     ->
          if must m then ["message-id", "subscription", "destination"]
-           else ["content-type", "content-length"]
+           else ["ack", "content-type", "content-length"]
        Begin       ->
          if must m then ["transaction"] else ["receipt"]
        Commit      ->
@@ -162,11 +175,11 @@ where
        Abort       ->
          if must m then ["transaction"] else ["receipt"]
        Ack         ->
-         if must m then ["message-id", "subscription"]
-           else ["transaction", "receipt"]
+         if must m then ["id"]
+           else ["message-id", "subscription", "transaction", "receipt"]
        Nack        ->
-         if must m then ["message-id", "subscription"]
-           else ["transaction", "receipt"]
+         if must m then ["id", "subscription"]
+           else ["message-id", "subscription", "transaction", "receipt"]
        Error       ->
          if must m then [] 
            else ["message", "receipt-id", 
@@ -181,6 +194,18 @@ where
       Left  _ -> False
       Right x -> if x == f then True -- x == f
                    else error $ "Not equal:\n" ++ show x ++ "\n" ++ show f
+
+  -- repeated headers -------------------------------------------------------
+  prp_RepeatedHdrs :: [Header] -> Bool
+  prp_RepeatedHdrs hs = 
+    let b   = U.fromString "hello"
+        l   = B.length b
+        hs' = ("destination", "/q/test"):hs ++ 
+              [("message-id", "msg-1"), ("test", "true"), 
+               ("destination", "/q/false"), ("xyz", "-")]
+     in case mkMsgFrame hs' l b of
+          Left  e -> error $ "Can't create frame: " ++ e
+          Right f -> if getDest f == "/q/test" then True else False 
 
   -- Check -------------------------------------------------------------------
   deepCheck :: (Testable p) => p -> IO Result
@@ -230,7 +255,7 @@ where
              ("login", "guest"),
              ("passcode", "guest"),
              ("heart-beat", "50,1000"),
-             ("host", "Test-1")], "con-1.1.txt"),
+             ("host", " Test-1")], "con-1.1.txt"),
      (TDesc "Connected 1.1" 
             Connected (Just . id) Pass 
             [("version", "1.1"),
@@ -298,11 +323,19 @@ where
             [("subscription", "sub-1"),
              ("message-id", "1234"),
              ("transaction", "trn-12345")], "ack1-1.1.txt"),
+     (TDesc "Ack 1.2" 
+            Ack (Just . id) Pass 
+            [("id", "1234"),
+             ("transaction", "trn-12345")], "ack1-1.2.txt"),
      (TDesc "Nack 1.1" 
             Nack (Just . id) Pass 
             [("subscription", "sub-1"),
              ("message-id", "1234"),
              ("transaction", "trn-12345")], "nack1-1.1.txt"),
+     (TDesc "Nack 1.2" 
+            Nack (Just . id) Pass 
+            [("id", "1234"),
+             ("transaction", "trn-12345")], "nack1-1.2.txt"),
      (TDesc "Simple Subscription (1.0)" 
             Subscribe (Just . id) Pass 
             [("destination", "/queue/test"),
@@ -342,6 +375,16 @@ where
             Send (Just . id) Pass 
             [("destination", "/queue/test"),
              ("content-length", "23")], "send2.txt"),
+     (TDesc "send with escaped headers" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "23"),
+             ("complex:header", "and \\ comp\rlex\nvalue")], "send2-esc.txt"), 
+     (TDesc "send with dos-style line endings" 
+            Send (Just . id) Pass 
+            [("destination", "/queue/test"),
+             ("content-length", "24"),
+             ("complex:header", "and \\ complex\nvalue")], "send2-dos.txt"),
      (TDesc "send witout content-length" 
             Send (Just . id) Pass 
             [("destination", "/queue/test")], 
@@ -373,7 +416,7 @@ where
              ("content-type", "text/plain"),
              ("receipt", "msg-123")], "send-jap.txt"),
      (TDesc "send to message" 
-            Message (sndToMsg "msg-1" "sub-1") Pass 
+            Message (sndToMsg "msg-1" "sub-1" "ack-1") Pass 
             [("destination", "/queue/test"),
              ("content-length", "13"),
              ("content-type", "text/plain"),
@@ -458,6 +501,7 @@ where
       "host"           -> getHost
       "special1"       -> getSpecial "special1"
       "special2"       -> getSpecial "special2"
+      "complex:header" -> getSpecial "complex:header"
       _                -> (\_ -> "unknown")
     where getSpecial k' f = case lookup k' $ getHeaders f of
                               Nothing -> ""
@@ -469,7 +513,7 @@ where
   -- test parse and transform ------------------------------------------------
   testParse :: String -> TestDesc -> B.ByteString -> Tester (Either Bool Frame)
   testParse _ d m = do
-    let good = "Parse successfull."
+    let good = "Parse successful."
     let bad  = "Parse failed"
     case stompAtOnce m of
       Left  e -> case dscRes d of
@@ -538,7 +582,7 @@ where
         tell bad
         return False
       Right f    -> do
-        ok <- testFrame f d ?> testHeaders f d
+        ok <- testFrame f d ~> testHeaders f d
         if ok then tell good else tell bad
         return ok
 
@@ -547,9 +591,9 @@ where
   applyB f g = f >>= \ok ->
     if ok then g else return False
 
-  infix ?> 
-  (?>) :: Tester Bool -> Tester Bool -> Tester Bool
-  (?>) = applyB
+  infix ~> 
+  (~>) :: Tester Bool -> Tester Bool -> Tester Bool
+  (~>) = applyB
 
   -- read sample and execute test ------------------------------------------------
   execTest :: FilePath -> Test -> IO Bool
@@ -590,8 +634,15 @@ where
     v <- evalTests p ts
     if not v then exitFailure
       else do
-        r <- deepCheck prp_Parse
+        r <- deepCheck prp_RepeatedHdrs 
+          ?> deepCheck prp_Parse 
         case r of
           Success _ _ _ -> exitSuccess
           _             -> do putStrLn "Bad. Some tests failed"
                               exitFailure
+
+  infixr ?>
+  (?>) :: IO Result -> IO Result -> IO Result
+  r1 ?> r2 = r1 >>= \r -> case r of
+                            Success{} -> r2
+                            _         -> return r

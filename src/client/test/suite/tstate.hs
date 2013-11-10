@@ -17,6 +17,7 @@ where
   import State
   import Factory
   import qualified Protocol as P
+  import qualified Network.Mom.Stompl.Frame as F
 
   --------------------------------------------------------
   -- Arbitrary 
@@ -468,7 +469,7 @@ where
   {-# NOINLINE con #-}
   con :: MVar P.Connection
   con = unsafePerformIO $ do
-    c <- P.connect "127.0.0.1" 22222 1024 "guest" "guest" "" 
+    c <- P.connect "127.0.0.1" 22222 1024 "guest" "guest" "" F.Connect
                    [(1,0), (1,1)] (0,0) []
     _ <- P.disc c
     newMVar c

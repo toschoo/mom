@@ -4,7 +4,7 @@ module State (
          Connection(..),
          Copt(..),
          oHeartBeat, oMaxRecv,
-         oAuth, oCliId,
+         oAuth, oCliId, oStomp,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -133,7 +133,11 @@ where
     OAuth String String |
 
     -- | Identification: specifies the JMS Client ID for persistant connections
-    OClientId String
+    OClientId String |
+
+    -- | With this option set, "connect" will use 
+    --   a "STOMP" frame instead of a "CONNECT" frame
+    OStomp 
 
     deriving (Eq, Show)
 
@@ -146,6 +150,7 @@ where
   is (OHeartBeat  _) (OHeartBeat  _) = True
   is (OAuth     _ _) (OAuth     _ _) = True
   is (OClientId   _) (OClientId  _)  = True
+  is (OStomp       ) (OStomp      )  = True
   is _               _               = False
 
   noWait :: Int
@@ -187,6 +192,11 @@ where
   oCliId os = case find (is $ OClientId "") os of
                Just (OClientId i) -> i
                _   -> noCliId
+
+  oStomp :: [Copt] -> Bool
+  oStomp os = case find (is OStomp) os of
+                Just _  -> True
+                Nothing -> False
 
   findCon :: Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)

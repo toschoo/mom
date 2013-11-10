@@ -1,3 +1,4 @@
+{-# Language CPP #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module     : Network/Mom/Stompl/Client/Queue.hs
@@ -52,6 +53,9 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Acknowledgements
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
+#ifdef TEST
+                   frmToMsg, P.msgAck,
+#endif
                    -- * Exceptions
                    module Network.Mom.Stompl.Client.Exception
                    -- * Complete Example
@@ -324,7 +328,7 @@ where
 
   -- The versions, we support
   vers :: [F.Version]
-  vers = [(1,0), (1,1)]
+  vers = [(1,0), (1,1), (1,2)]
 
   ------------------------------------------------------------------------
   -- | Initialises a connection and executes an 'IO' action.
@@ -391,7 +395,9 @@ where
     let mx    = oMaxRecv   os
     let (u,p) = oAuth      os
     let (ci)  = oCliId     os
-    bracket (P.connect host port mx u p ci vers beat hs)
+    let t | oStomp os = F.Stomp
+          | otherwise = F.Connect
+    bracket (P.connect host port mx u p ci t vers beat hs)
             P.disc -- important: At the end, we close the socket!
             (whenConnected os act)
 
@@ -1019,7 +1025,7 @@ where
             let conv = wTo q
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
-            let m = P.mkMessage P.NoMsg NoSub dest
+            let m = P.mkMessage P.NoMsg NoSub dest ""
                                 mime (B.length s) tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
@@ -1089,8 +1095,8 @@ where
     if not $ P.connected (conCon c) 
       then throwIO $ ConnectException $ 
              "Not connected (" ++ show cid ++ ")"
-      else if null (show $ P.msgId msg)
-           then throwIO $ ProtocolException "No message id in message!"
+      else if null (show $ P.msgAck msg)
+           then throwIO $ ProtocolException "No ack in message!"
            else do
              tx <- getCurTx c >>= (\mbT -> 
                        case mbT of
@@ -1285,6 +1291,7 @@ where
     x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
     let m = P.mkMessage (P.MsgId $ F.getId f) sid
                         (F.getDest   f) 
+                        (F.getMsgAck f) 
                         (F.getMime   f)
                         (F.getLength f)
                         NoTx 

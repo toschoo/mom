@@ -4,6 +4,7 @@ where
 
   import Test
 
+  import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Queue
 
   import           Control.Exception (throwIO)
@@ -85,8 +86,10 @@ where
   mkTests :: Int -> TestGroup IO
   mkTests p = 
     let t1    = mkTest "Connect with IP          " $ testIPConnect p
-        t2    = mkTest "Connect with hostname    " $ testNConnect  p
-        t3    = mkTest "Connect with Auth        " $ testAuth      p
+        t2    = mkTest "Connect with hostname    " $ testNConnect  F.Connect p
+        -- stompserver does not support stomp frame!
+        -- t3    = mkTest "Connect with Stomp       " $ testNConnect  F.Stomp   p
+        t4    = mkTest "Connect with Auth        " $ testAuth      p
         t10   = mkTest "Create Reader            " $ testWith p testMkInQueue 
         t20   = mkTest "Create Writer            " $ testWith p testMkOutQueue 
         t30   = mkTest "Create Reader wait Rc    " $ testWith p testMkInQueueWaitRc 
@@ -104,6 +107,8 @@ where
         t150  = mkTest "With Receipt1            " $ testWith p testQWithReceipt
         t160  = mkTest "Wait on Receipt1         " $ testWith p testQWaitReceipt
         t170  = mkTest "ackWith                  " $ testWith p testTxAckWith
+        t175  = mkTest "frmToMsg with ack header " $ testWith p (testFrmToMsg True)
+        t176  = mkTest "frmToMsg w/o  ack header " $ testWith p (testFrmToMsg False)
         -- stompserver and coilmq do not support nack!
         -- t180  = mkTest "Tx all nack'd            " $ testWith p testPendingNacksPass 
         -- t190  = mkTest "nackWith                 " $ testWith p testTxNackWith
@@ -131,9 +136,9 @@ where
         t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t1,   t2,   t3,
+        [ t1,   t2,          t4,
           t10,  t20,  t30,  t40,  t50,  t60,  t70,        t80,  t90, t100,
-         t110, t120, t130, t140, t150, t160, t170,                   t200, t205,
+         t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
 
@@ -151,14 +156,17 @@ where
       Right _ -> return Pass
 
   ------------------------------------------------------------------------
-  -- Connect with Host Name
+  -- Connect with Host Name and either Connect or Stomp frame
   ------------------------------------------------------------------------
   -- Shall connect
   -- Shall not throw an exception
   ------------------------------------------------------------------------
-  testNConnect :: Int -> IO TestResult
-  testNConnect p = do
-    eiC <- try $ withConnection "localhost" p [] [] (\_ -> return ())
+  testNConnect :: F.FrameType -> Int -> IO TestResult
+  testNConnect t p = do
+    let os = case t of 
+               F.Stomp -> [OStomp]
+               _       -> []
+    eiC <- try $ withConnection "localhost" p os [] (\_ -> return ())
     case eiC of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass
@@ -599,6 +607,23 @@ where
             if msgContent m2 == text2 
               then return Pass
               else return $ Fail "Wrong message!"
+
+  testFrmToMsg :: Bool -> Con -> IO TestResult
+  testFrmToMsg a c = 
+    withReader c "IN" tQ1 [] [] (\_ _ _ -> return . U.toString) $ \r ->
+      let frm = F.mkMessage "" tQ1 "msg-1" (if a then "ack-1" else "")
+                            nullType 5 [] (U.fromString "hello")
+       in do m <- frmToMsg r frm
+             case msgAck m of
+               "ack-1" | a         -> return Pass
+                       | otherwise -> return $ 
+                        Fail "there should be no ack header!"
+               "msg-1" | a         -> return $ 
+                           Fail "ack read from message-id!"
+                       | otherwise -> return Pass
+               k                   -> return $
+                           Fail $ "unexpected ack header: '" ++ k ++ "'"
+
 
   ------------------------------------------------------------------------
   -- Pending Nacks with Receipts Pass

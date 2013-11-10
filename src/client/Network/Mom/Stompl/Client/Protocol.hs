@@ -34,7 +34,7 @@ where
   -- Default version, when broker does not send a version
   ---------------------------------------------------------------------
   defVersion :: F.Version
-  defVersion = (1,1)
+  defVersion = (1,2)
 
   ---------------------------------------------------------------------
   -- Connection 
@@ -97,6 +97,8 @@ where
                      msgSub  :: Fac.Sub,
                      -- | The destination
                      msgDest :: String,
+                     -- | The Ack identifier
+                     msgAck  :: String,
                      -- | The Stomp headers
                      --   that came with the message
                      msgHdrs :: [F.Header],
@@ -116,19 +118,20 @@ where
   ---------------------------------------------------------------------
   -- Create a message
   ---------------------------------------------------------------------
-  mkMessage :: MsgId -> Fac.Sub -> String -> 
+  mkMessage :: MsgId -> Fac.Sub -> String -> String ->
                Mime.Type -> Int -> Fac.Tx -> 
                B.ByteString -> a -> Message a
-  mkMessage mid sub dst typ len tx raw cont = Msg {
-                                          msgId   = mid,
-                                          msgSub  = sub,
-                                          msgDest = dst,
-                                          msgHdrs = [], 
-                                          msgType = typ, 
-                                          msgLen  = len, 
-                                          msgTx   = tx,
-                                          msgRaw  = raw,
-                                          msgCont = cont}
+  mkMessage mid sub dst ak typ len tx raw cont = Msg {
+                                             msgId   = mid,
+                                             msgSub  = sub,
+                                             msgDest = dst,
+                                             msgAck  = ak,
+                                             msgHdrs = [], 
+                                             msgType = typ, 
+                                             msgLen  = len, 
+                                             msgTx   = tx,
+                                             msgRaw  = raw,
+                                             msgCont = cont}
 
   ---------------------------------------------------------------------
   -- Make a connection
@@ -188,15 +191,15 @@ where
   -- connect
   ---------------------------------------------------------------------
   connect :: String -> Int -> Int -> 
-             String -> String -> String -> 
+             String -> String -> String -> F.FrameType -> 
              [F.Version] -> F.Heart -> [F.Header] -> IO Connection
-  connect host port mx usr pwd cli vers beat hs = 
+  connect host port mx usr pwd cli t vers beat hs = 
     bracketOnError (do s <- S.connect host port
                        let c = mkConnection host port mx 
                                             usr  pwd cli vers beat
                        return c {conSock = Just s, conTcp = True}) 
                    disc
-                   (connectBroker mx vers beat hs) 
+                   (connectBroker mx t vers beat hs) 
 
   ---------------------------------------------------------------------
   -- disconnect either on broker level or on tcp/ip level
@@ -282,10 +285,10 @@ where
                           "Cannot create Frame: " ++ e
              Right f -> 
 #ifdef _DEBUG
-               do when (not $ F.complies (1,1) f) $
-                    putStrLn $ "Frame does not comply with 1.1: " ++ show f 
+               do when (not $ F.complies (1,2) f) $
+                    putStrLn $ "Frame does not comply with 1.2: " ++ show f 
 #endif
-               S.send (getWr c) (getSock c) f
+                  S.send (getWr c) (getSock c) f
 
   ---------------------------------------------------------------------
   -- hard disconnect (on tcp/ip) level
@@ -303,28 +306,34 @@ where
   ---------------------------------------------------------------------
   -- the hard work on connecting to a broker
   ---------------------------------------------------------------------
-  connectBroker :: Int -> [F.Version] -> F.Heart -> [F.Header] ->
+  connectBroker :: Int -> F.FrameType -> 
+                   [F.Version] -> F.Heart -> [F.Header] ->
                    Connection -> IO Connection
-  connectBroker mx vers beat hs c = 
-    case mkConF (conAddr c) 
+  connectBroker mx t vers beat hs c = 
+    let mk = case t of
+               F.Connect -> F.mkConFrame
+               F.Stomp   -> F.mkStmpFrame
+               _         -> error "Ouch: Unknown Connect-type"
+     in case mkConF mk
+                (conAddr c) 
                 (conUsr  c) (conPwd c) 
                 (conCli  c) vers beat hs of
-      Left e  -> return c {conErrM = e}
-      Right f -> do
-        rc  <- S.initReceiver
-        wr  <- S.initWriter
-        S.send wr (getSock c) f 
-        eiC <- catch (S.receive rc (getSock c) mx) -- no timeout?
-                     (\e -> return $ Left $ show (e::SomeException)) 
-        case eiC of
-          Left  e -> return c {conErrM = e}
-          Right r -> do
-            let c' = handleConnected r c
-            if period c' > 0 && period c' < fst beat
-              then return c  {conErrM = "Beat frequency too high"}
-              else return c' {conBrk = True,
-                              conRcv = Just rc,
-                              conWrt = Just wr}
+          Left e  -> return c {conErrM = e}
+          Right f -> do
+            rc  <- S.initReceiver
+            wr  <- S.initWriter
+            S.send wr (getSock c) f 
+            eiC <- catch (S.receive rc (getSock c) mx) -- no timeout?
+                         (\e -> return $ Left $ show (e::SomeException)) 
+            case eiC of
+              Left  e -> return c {conErrM = e}
+              Right r -> 
+                let c' = handleConnected r c
+                 in if period c' > 0 && period c' < fst beat
+                      then return c  {conErrM = "Beat frequency too high"}
+                      else return c' {conBrk = True,
+                                  conRcv = Just rc,
+                                  conWrt = Just wr}
     where period = snd . conBeat
 
   ---------------------------------------------------------------------
@@ -360,17 +369,17 @@ where
   mkReceipt :: String -> [F.Header]
   mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
 
-
-  mkConF :: String -> String -> String -> String -> 
-            [F.Version] -> F.Heart -> [F.Header] -> Either String F.Frame
-  mkConF host usr pwd cli vers beat hs = 
+  mkConF :: ([F.Header] -> Either String F.Frame) ->
+            String -> String -> String -> String  -> 
+            [F.Version] -> F.Heart -> [F.Header]  -> Either String F.Frame
+  mkConF mk host usr pwd cli vers beat hs = 
     let uHdr = if null usr then [] else [F.mkLogHdr  usr]
         pHdr = if null pwd then [] else [F.mkPassHdr pwd]
         cHdr = if null cli then [] else [F.mkCliIdHdr cli]
-     in F.mkConFrame $ [F.mkHostHdr host,
-                        F.mkAcVerHdr $ F.versToVal vers, 
-                        F.mkBeatHdr  $ F.beatToVal beat] ++
-                       uHdr ++ pHdr ++ cHdr ++ hs
+     in mk $ [F.mkHostHdr host,
+              F.mkAcVerHdr $ F.versToVal vers, 
+              F.mkBeatHdr  $ F.beatToVal beat] ++
+             uHdr ++ pHdr ++ cHdr ++ hs
 
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =
@@ -403,7 +412,7 @@ where
                then [] else [F.mkTrnHdr $ show $ msgTx msg]
         rh = mkReceipt receipt
         mk = if ok then F.mkAckFrame else F.mkNackFrame
-    in mk $ F.mkMIdHdr (show $ msgId msg) : (sh ++ rh ++ th)
+    in mk $ F.mkIdHdr (msgAck msg) : (sh ++ rh ++ th)
 
   mkBeginF :: String -> String -> [F.Header] -> Either String F.Frame
   mkBeginF tx receipt _ = 

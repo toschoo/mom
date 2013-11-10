@@ -29,7 +29,7 @@ where
   port = 22222
 
   vers :: [F.Version]
-  vers = [(1,0), (1,1)]
+  vers = [(1,0), (1,1), (1,2)]
 
   beat :: F.Heart
   beat = (0,0)
@@ -60,7 +60,8 @@ where
   mkTests :: TestGroup IO
   mkTests = 
     let t10  = mkTest "Socket   Connect" testConFrame
-        t20  = mkTest "Protocol Connect" testConnect
+        t20  = mkTest "Protocol Connect" $ testConnect F.Connect
+        t25  = mkTest "Protocol Stomp  " $ testConnect F.Stomp
         t30  = mkTest "Begin           " $ testWith (\c -> P.begin  c (show tx1) 
                                                                       (show Fac.NoRec)) 
                                                     (F.mkBegin  (show tx1) 
@@ -81,52 +82,60 @@ where
                                                     (F.mkAbort  (show tx1) (show rc1) [])
         t100 = mkTest "Ack             " $ testWith (testAck True  
                                                              Fac.NoTx 
-                                                             Fac.NoSub 
+                                                             Fac.NoSub
+                                                             "ack-1" 
                                                              text1 
                                                              Fac.NoRec)
-                                                    (F.mkAck  msg1 "" "" "" [])
+                                                    (F.mkAck "ack-1" "" "" "" [])
         t110 = mkTest "Nack            " $ testWith (testAck False 
                                                              Fac.NoTx 
                                                              Fac.NoSub 
+                                                             "ack-1" 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkNack msg1 "" "" "" [])
+                                                    (F.mkNack "ack-1" "" "" "" [])
         t120 = mkTest "Ack with Tx     " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
+                                                             "ack-1" 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkAck  msg1 "" (show tx1) "" [])
+                                                    (F.mkAck  "ack-1" "" (show tx1) "" [])
         t130 = mkTest "Nack with Tx    " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
+                                                             "ack-1" 
                                                              text1 
                                                              Fac.NoRec) 
-                                                    (F.mkNack msg1 "" (show tx1) "" [])
+                                                    (F.mkNack "ack-1" "" (show tx1) "" [])
         t140 = mkTest "Ack with Rc     " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
+                                                             "ack-1" 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkAck  msg1 "" (show tx1) (show rc1) [])
+                                                    (F.mkAck  "ack-1" "" (show tx1) (show rc1) [])
         t150 = mkTest "Nack with Rc    " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              Fac.NoSub 
+                                                             "ack-1" 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkNack msg1 "" (show tx1) (show rc1) [])
+                                                    (F.mkNack "ack-1" "" (show tx1) (show rc1) [])
         t160 = mkTest "Ack with Sub    " $ testWith (testAck True  
                                                              (Fac.Tx tx1) 
                                                              (Fac.Sub sub1)
+                                                             "ack-1" 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkAck  msg1 (show sub1) (show tx1) (show rc1) [])
+                                                    (F.mkAck  "ack-1" (show sub1) (show tx1) (show rc1) [])
         t170 = mkTest "Nack with Sub   " $ testWith (testAck False 
                                                              (Fac.Tx tx1) 
                                                              (Fac.Sub sub1)
+                                                             "ack-1" 
                                                              text1 
                                                              (Fac.Rec rc1)) 
-                                                    (F.mkNack msg1 (show sub1) (show tx1) (show rc1) [])
+                                                    (F.mkNack "ack-1" (show sub1) (show tx1) (show rc1) [])
         t180 = mkTest "Send            " $ testWith (testSend 
                                                        Fac.NoTx Fac.NoRec text1 [])
                                                     (mkSend
@@ -211,9 +220,9 @@ where
         t300 = mkTest "HeartBeat       " $ testWith P.sendBeat 
                                                     F.mkBeat
     in  mkGroup "Protocol Tests" (Stop (Fail "")) [
-            t10,  t20,  t30,  t40,  t50,  t60,  t70,  t80,       t100,
-           t110, t120, t130, t140, t150, t160, t170, t180, t190, t200,
-           t210, t220, t230, t240, t250, t260, t270, t280, t290, t300] 
+            t10,  t20,  t25,  t30,  t40,  t50,  t60,  t70,  t80, t100,
+           t110, t120, t130,       t140, t150, t160, t170, t180, t190, 
+           t200, t210, t220, t230, t240, t250, t260, t270, t280, t290, t300] 
 
   testConFrame :: IO TestResult
   testConFrame = 
@@ -237,9 +246,9 @@ where
                               _           -> return $ Fail $ 
                                                "Unexpected Frame: " ++ show f
 
-  testConnect :: IO TestResult
-  testConnect = do
-    c <- P.connect host port maxRcv "guest" "guest" "" vers beat []
+  testConnect :: F.FrameType -> IO TestResult
+  testConnect t = do
+    c <- P.connect host port maxRcv "guest" "guest" "" t vers beat []
     let r = if P.connected c 
               then Pass
               else Fail $ "Not connected: " ++ P.getErr c
@@ -247,10 +256,11 @@ where
     S.sClose (P.getSock c)
     return r
 
-  testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> Fac.Rec -> P.Connection -> IO ()
-  testAck ok tx sub m rc c = do
+  testAck :: Bool -> Fac.Tx -> Fac.Sub -> String -> String -> 
+             Fac.Rec -> P.Connection -> IO ()
+  testAck ok tx sub ak m rc c = do
     let b   = U.fromString m
-    let msg = P.mkMessage (P.MsgId msg1) sub q1 
+    let msg = P.mkMessage (P.MsgId msg1) sub q1 ak
                           nullType (B.length b) 
                           tx b m
     if ok then P.ack  c msg (show rc)
@@ -259,7 +269,8 @@ where
   testSend :: Fac.Tx -> Fac.Rec -> String -> [F.Header] -> P.Connection -> IO ()
   testSend tx rc m hs c = do
     let b   = U.fromString m
-    let msg = P.mkMessage P.NoMsg Fac.NoSub q1 nullType (B.length b) tx b m
+    let msg = P.mkMessage P.NoMsg Fac.NoSub q1 "ack-1" 
+                nullType (B.length b) tx b m
     P.send c msg (show rc) hs
 
   mkSend :: Fac.Tx -> Fac.Rec -> String -> [F.Header] -> F.Frame
@@ -271,7 +282,7 @@ where
     
   testWith :: (P.Connection -> IO ()) -> F.Frame -> IO TestResult
   testWith act tertium = do
-    c <- P.connect host port maxRcv "guest" "guest" "" vers beat []
+    c <- P.connect host port maxRcv "guest" "guest" "" F.Connect vers beat []
     if not (P.connected c)
       then return $ Fail $ P.getErr c
       else do

@@ -20,7 +20,7 @@ module Network.Mom.Stompl.Frame (
                        -- $stomp_constructors
 
                        -- ** Basic Frame Constructors
-                       mkConnect, mkConnected, 
+                       mkConnect, mkStomp, mkConnected, 
                        mkSubscribe, mkUnsubscribe, 
                        mkSend, mkMessage, mkErr,
                        mkBegin, mkCommit,  mkAbort,
@@ -28,7 +28,7 @@ module Network.Mom.Stompl.Frame (
                        mkDisconnect,  
                        mkBeat, mkReceipt,
                        -- ** Header-based Frame Constructors
-                       mkConFrame, mkCondFrame, mkDisFrame,
+                       mkConFrame, mkStmpFrame, mkCondFrame, mkDisFrame,
                        mkSubFrame, mkUSubFrame, 
                        mkSndFrame, mkMsgFrame, mkErrFrame,
                        mkBgnFrame, mkCmtFrame,  mkAbrtFrame,
@@ -60,7 +60,7 @@ module Network.Mom.Stompl.Frame (
                        getHost, getVersions, getVersion,
                        getBeat, 
                        getSession, getServer, 
-                       getSub, getSelector, getId, getAcknow,
+                       getSub, getSelector, getId, getAcknow, getMsgAck,
                        getBody, getMime, getLength, 
                        getMsg, getHeaders,
                        -- * Sequence Operators to work on 'ByteString'
@@ -154,7 +154,7 @@ where
   noSrvDesc = ("","","")
 
   hdrLog, hdrPass, hdrDest, hdrSub, hdrLen, hdrTrn, hdrRec, hdrRecId,
-    hdrSel, hdrId, hdrAck, hdrSes, hdrMsg, hdrMId, hdrSrv,
+    hdrSel, hdrId, hdrAck, hdrAckId, hdrSes, hdrMsg, hdrMId, hdrSrv,
     hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime, hdrCliId :: String
   hdrLog   = "login"
   hdrPass  = "passcode"
@@ -169,6 +169,7 @@ where
   hdrSel   = "selector"
   hdrId    = "id"
   hdrAck   = "ack"
+  hdrAckId = "ack"
   hdrSes   = "session-id"
   hdrMsg   = "message"
   hdrMId   = "message-id"
@@ -307,14 +308,23 @@ where
                    frmPass  :: String,
                    frmHost  :: String,
                    frmBeat  :: Heart,
-                   frmAcVer :: [Version], -- 1.1
+                   frmAcVer :: [Version], -- 1.2
+                   frmCliId :: String,
+                   frmHdrs  :: [Header]
+                 }
+               | StompFrame {
+                   frmLogin :: String,
+                   frmPass  :: String,
+                   frmHost  :: String,
+                   frmBeat  :: Heart,
+                   frmAcVer :: [Version], -- 1.2
                    frmCliId :: String,
                    frmHdrs  :: [Header]
                  }
                | CondFrame {
                    frmSes   :: String,
                    frmBeat  :: Heart,
-                   frmVer   :: Version, -- 1.1
+                   frmVer   :: Version, -- 1.2
                    frmSrv   :: SrvDesc,
                    frmHdrs  :: [Header]
                  }
@@ -378,6 +388,7 @@ where
                    frmSub   :: String,
                    frmDest  :: String,
                    frmId    :: String,
+                   frmAckId :: String,
                    frmLen   :: Int,
                    frmMime  :: Mime.Type,
                    frmBody  :: Body}
@@ -449,10 +460,26 @@ where
   --
   --   * 'Header': List of additional, broker-specific headers
   ----------------------------------------------------------------------
-  mkConnect :: String -> String -> String -> Heart -> [Version] -> 
-               String -> [Header] -> Frame
-  mkConnect usr pwd hst beat vers cli hs =
-    ConFrame {
+  mkConnect :: String -> String -> String -> 
+               Heart -> [Version] -> String -> [Header] -> Frame
+  mkConnect = mkConStmp ConFrame 
+
+  ----------------------------------------------------------------------
+  -- | Same as 'mkConnect', but the result is a \"STOMP\" frame
+  --   rather than a \"CONNECT\" frame
+  ----------------------------------------------------------------------
+  mkStomp :: String -> String -> String -> 
+               Heart -> [Version] -> String -> [Header] -> Frame
+  mkStomp = mkConStmp StompFrame 
+
+  mkConStmp :: (String -> String -> String -> 
+                Heart -> [Version] -> String -> [Header] -> Frame) ->
+               String -> String -> String -> 
+               Heart -> [Version] -> String -> [Header] -> Frame
+  mkConStmp mk usr pwd hst beat vers cli hs =
+    mk usr pwd hst beat vers cli hs 
+    {-
+    mk {
        frmLogin = usr,
        frmPass  = pwd,
        frmHost  = hst,
@@ -460,6 +487,7 @@ where
        frmAcVer = vers,
        frmHdrs  = hs,
        frmCliId = cli}
+    -}
 
   ----------------------------------------------------------------------
   -- | make a 'Connect' frame (Broker -> Application).
@@ -613,14 +641,15 @@ where
   --
   --   * 'Body': The payload
   ----------------------------------------------------------------------
-  mkMessage :: String    -> String -> String   ->
+  mkMessage :: String    -> String -> String   -> String ->
                Mime.Type -> Int    -> [Header] -> 
                Body      -> Frame
-  mkMessage sub dst mid mime len hs bdy =
+  mkMessage sub dst mid ack mime len hs bdy =
     MsgFrame {
       frmHdrs  = hs,
       frmSub   = sub,
       frmDest  = dst,
+      frmAckId = ack,
       frmId    = mid,
       frmLen   = len,
       frmMime  = mime,
@@ -850,6 +879,12 @@ where
   getSub :: Frame -> String
   getSub = frmSub
   ------------------------------------------------------------------------
+  -- | get /ack/ or /message-id/ from 'Message'
+  ------------------------------------------------------------------------
+  getMsgAck :: Frame -> String
+  getMsgAck f | null (frmAckId f) = frmId    f
+              | otherwise         = frmAckId f
+  ------------------------------------------------------------------------
   -- | get /body/ from 'Send', 'Message', 'Error'
   ------------------------------------------------------------------------
   getBody :: Frame -> B.ByteString
@@ -888,6 +923,8 @@ where
   data FrameType = 
     -- | Sent by the application to initiate a connection
     Connect   
+    -- | Same as Connect, but with "STOMP" instead of "CONNECT"
+    | Stomp
     -- | Sent by the broker to confirm the connection
     | Connected   
     -- | Sent by the application to end the connection
@@ -925,21 +962,22 @@ where
   ------------------------------------------------------------------------
   typeOf :: Frame -> FrameType
   typeOf f = case f of
-              ConFrame  {} -> Connect
-              CondFrame {} -> Connected
-              DisFrame  {} -> Disconnect
-              SubFrame  {} -> Subscribe
-              USubFrame {} -> Unsubscribe
-              SndFrame  {} -> Send
-              BgnFrame  {} -> Begin
-              CmtFrame  {} -> Commit
-              AbrtFrame {} -> Abort
-              AckFrame  {} -> Ack
-              NackFrame {} -> Nack
-              MsgFrame  {} -> Message
-              RecFrame  {} -> Receipt
-              ErrFrame  {} -> Error
-              BeatFrame {} -> HeartBeat
+              ConFrame   {} -> Connect
+              StompFrame {} -> Stomp
+              CondFrame  {} -> Connected
+              DisFrame   {} -> Disconnect
+              SubFrame   {} -> Subscribe
+              USubFrame  {} -> Unsubscribe
+              SndFrame   {} -> Send
+              BgnFrame   {} -> Begin
+              CmtFrame   {} -> Commit
+              AbrtFrame  {} -> Abort
+              AckFrame   {} -> Ack
+              NackFrame  {} -> Nack
+              MsgFrame   {} -> Message
+              RecFrame   {} -> Receipt
+              ErrFrame   {} -> Error
+              BeatFrame  {} -> HeartBeat
 
   ------------------------------------------------------------------------
   -- The AckMode of a Subscription
@@ -978,9 +1016,9 @@ where
   -- | append
   (>|<) :: B.ByteString -> B.ByteString -> B.ByteString
   -- | snoc
-  (|>)  :: B.ByteString ->   Char       -> B.ByteString
+  (|>)  :: B.ByteString -> Char         -> B.ByteString
   -- | cons
-  (<|)  ::   Char       -> B.ByteString -> B.ByteString
+  (<|)  :: Char         -> B.ByteString -> B.ByteString
   x >|< y = x `B.append` y
   x <|  y = x `B.cons` y
   x  |> y = x `B.snoc` y
@@ -1169,6 +1207,7 @@ where
   putCommand f = 
     let s = case typeOf f of
               Connect     -> "CONNECT"
+              Stomp       -> "STOMP"
               Connected   -> "CONNECTED"
               Disconnect  -> "DISCONNECT"
               Send        -> "SEND"
@@ -1192,16 +1231,23 @@ where
   putHeaders f = 
     let hs = toHeaders f 
         s  = B.concat $ map putHeader hs
-    in  s |> '\n'
+     in s |> '\n'
 
   ------------------------------------------------------------------------
   -- Convert header to ByteString
   ------------------------------------------------------------------------
   putHeader :: Header -> B.ByteString
   putHeader h =
-    let k = fst h
-        v = snd h
+    let k = esc $ fst h
+        v = esc $ snd h
     in U.fromString $ k ++ ":" ++ v ++ "\n"
+    where esc    = foldl' (\l -> (++) l . conv) []
+          conv c = case c of 
+                     '\n' -> "\\n"
+                     '\r' -> "\\r"
+                     '\\' -> "\\\\"
+                     ':'  -> "\\c"
+                     _    -> [c]
 
   ------------------------------------------------------------------------
   -- Convert Frame attributes to headers
@@ -1209,6 +1255,13 @@ where
   toHeaders :: Frame -> [Header]
   -- Connect Frame -------------------------------------------------------
   toHeaders (ConFrame l p h b v i hs) =
+    let lh = if null l     then [] else [mkLogHdr l]
+        ph = if null p     then [] else [mkPassHdr p]
+        bh = if b == (0,0) then [] else [mkBeatHdr $ beatToVal b]
+        ih = if null i     then [] else [mkCliIdHdr i]
+     in normalise $ [mkAcVerHdr $ versToVal v, 
+                     mkHostHdr h] ++ lh ++ ph ++ bh ++ ih ++ hs 
+  toHeaders (StompFrame l p h b v i hs) =
     let lh = if null l     then [] else [mkLogHdr l]
         ph = if null p     then [] else [mkPassHdr p]
         bh = if b == (0,0) then [] else [mkBeatHdr $ beatToVal b]
@@ -1258,19 +1311,20 @@ where
     let rh = if null r then [] else [mkRecHdr r]
     in  normalise $ [mkTrnHdr t] ++ rh ++ hs
   -- Ack Frame --------------------------------------------------------------
-  toHeaders (AckFrame i s t r hs) = 
-    normalise ([mkMIdHdr i] ++ hs ++ subRecTrn s r t)
+  toHeaders (AckFrame i s t r hs) =
+    normalise ([mkMIdHdr i, mkIdHdr i] ++ hs ++ subRecTrn s r t)
   -- Nack Frame -------------------------------------------------------------
   toHeaders (NackFrame i s t r hs) = 
-    normalise ([mkMIdHdr i] ++ hs ++ subRecTrn s r t)
+    normalise ([mkMIdHdr i, mkIdHdr i] ++ hs ++ subRecTrn s r t)
   -- Message Frame ----------------------------------------------------------
-  toHeaders (MsgFrame hs s d i l m _)  = 
+  toHeaders (MsgFrame hs s d i a l m _)  = 
     let sh = if null s then [] else [mkSubHdr  s]
         dh = if null d then [] else [mkDestHdr d]
+        ah = if null a then [] else [mkAckHdr  a]
         lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in normalise $ [mkMIdHdr i,
                     mkMimeHdr (showType m)] 
-                    ++ sh ++ dh ++ lh ++ hs
+                    ++ sh ++ dh ++ ah ++ lh ++ hs
   -- Receipt Frame ----------------------------------------------------------
   toHeaders (RecFrame  r hs) = normalise $ mkRecIdHdr r : hs
   -- Error Frame ------------------------------------------------------------
@@ -1316,7 +1370,18 @@ where
   -- | make 'Connect' frame
   ------------------------------------------------------------------------
   mkConFrame :: [Header] -> Either String Frame
-  mkConFrame hs = 
+  mkConFrame = mkConTypeFrame ConFrame
+
+  ------------------------------------------------------------------------
+  -- | make 'Stomp' frame
+  ------------------------------------------------------------------------
+  mkStmpFrame :: [Header] -> Either String Frame
+  mkStmpFrame = mkConTypeFrame StompFrame
+
+  mkConTypeFrame :: (String -> String    -> String -> 
+                     Heart  -> [Version] -> String -> [Header] -> Frame) ->
+                    [Header] -> Either String Frame
+  mkConTypeFrame mk hs = 
     let l   = findStrHdr hdrLog   "" hs
         p   = findStrHdr hdrPass  "" hs
         h   = findStrHdr hdrHost  "" hs
@@ -1336,8 +1401,8 @@ where
           Left  e  -> Left e
           Right vs -> 
             case eiB of
-              Left e  -> Left e
-              Right b -> Right $ ConFrame l p h b vs i $ 
+              Left  e -> Left e
+              Right b -> Right $ mk l p h b vs i $ 
                            rmHdrs hs [hdrLog, hdrPass, hdrHost, hdrCliId]
 
   ------------------------------------------------------------------------
@@ -1401,17 +1466,18 @@ where
                    Nothing -> Left "No message id in MESSAGE Frame"
                    Just i  ->
                      Right MsgFrame {
-                             frmHdrs = rmHdrs hs [hdrSub, hdrMime, 
-                                                  hdrLen, hdrDest,
-                                                  hdrMId],
-                             frmDest = d,
-                             frmSub  = findStrHdr hdrSub "" hs,
-                             frmId   = i, 
-                             frmLen  = l,
-                             frmMime = case lookup hdrMime hs of
-                                         Nothing -> defMime
-                                         Just t  -> 
-                                           fromMaybe defMime (parseMIMEType t),
+                             frmHdrs  = rmHdrs hs [hdrSub, hdrMime, 
+                                                   hdrLen, hdrDest,
+                                                   hdrMId, hdrAckId],
+                             frmDest  = d,
+                             frmSub   = findStrHdr hdrSub   "" hs,
+                             frmAckId = findStrHdr hdrAckId "" hs, 
+                             frmId    = i, 
+                             frmLen   = l,
+                             frmMime  = case lookup hdrMime hs of
+                                          Nothing -> defMime
+                                          Just t  -> 
+                                            fromMaybe defMime (parseMIMEType t),
                              frmBody = b}
 
   ------------------------------------------------------------------------
@@ -1426,8 +1492,11 @@ where
                    Right a -> Right SubFrame {
                                       frmDest = d,
                                       frmAck  = a,
-                                      frmSel  = findStrHdr hdrSel "" hs,
+                                      -- id is mandatory, but we don't
+                                      -- penalise when it's missing
+                                      -- to maintain compatibility with 1.0
                                       frmId   = findStrHdr hdrId  "" hs,
+                                      frmSel  = findStrHdr hdrSel "" hs,
                                       frmRec  = findStrHdr hdrRec "" hs,
                                       frmHdrs = rmHdrs hs [hdrDest, hdrAck,
                                                            hdrSel, hdrId, 
@@ -1448,6 +1517,9 @@ where
                                       frmRec  = findStrHdr hdrRec "" hs,
                                       frmHdrs = rmHdrs hs [hdrId, hdrRec]}
       Just d  -> Right USubFrame {
+                          -- id is mandatory, but we don't
+                          -- penalise when it's missing
+                          -- to maintain compatibility with 1.0
                           frmId   = findStrHdr hdrId "" hs,
                           frmDest = d,
                           frmRec  = findStrHdr hdrRec "" hs,
@@ -1494,32 +1566,45 @@ where
   ------------------------------------------------------------------------
   mkAckFrame :: [Header] -> Either String Frame
   mkAckFrame hs =
-    case lookup hdrMId hs of
-      Nothing -> Left "No message-id header in Ack Frame"
-      Just i  -> let (t,s,r) = findSubRecTrn hs
-                  in Right AckFrame {
-                              frmId    = i,
-                              frmSub   = s,
-                              frmTrans = t,
-                              frmRec   = r,
-                              frmHdrs  = rmHdrs hs [hdrMId, hdrTrn, 
-                                                    hdrSub, hdrRec]}
+    let mbI = case lookup hdrId hs of
+                  Nothing -> 
+                    case lookup hdrMId hs of
+                      Nothing -> Nothing
+                      Just i  -> Just i
+                  Just i  -> Just i
+        (t,s,r) = findSubRecTrn hs
+     in case mbI of 
+          Nothing -> Left "No id header in Ack Frame"
+          Just i  -> Right AckFrame {
+                            frmId    = i,
+                            frmSub   = s,
+                            frmTrans = t,
+                            frmRec   = r,
+                            frmHdrs  = rmHdrs hs [hdrMId, hdrId, hdrTrn, 
+                                                  hdrSub, hdrRec]}
 
   ------------------------------------------------------------------------
   -- | make 'Nack' frame
   ------------------------------------------------------------------------
   mkNackFrame :: [Header] -> Either String Frame
   mkNackFrame hs =
-    case lookup hdrMId hs of
-      Nothing -> Left "No message-id header in Ack Frame"
-      Just i  -> let (t,s,r) = findSubRecTrn hs
-                  in Right NackFrame {
-                              frmId    = i,
-                              frmSub   = s,
-                              frmTrans = t,
-                              frmRec   = r,
-                              frmHdrs  = rmHdrs hs [hdrMId, hdrTrn,
-                                                    hdrSub, hdrRec]}
+    let mbI = case lookup hdrId hs of
+                  Nothing -> 
+                    case lookup hdrMId hs of
+                      Nothing -> Nothing
+                      Just i  -> Just i
+                  Just i  -> Just i
+        (t,s,r) = findSubRecTrn hs
+     in case mbI of 
+          Nothing -> Left "No id header in Ack Frame"
+          Just i  -> Right NackFrame {
+                            frmId    = i,
+                            frmSub   = s,
+                            frmTrans = t,
+                            frmRec   = r,
+                            frmHdrs  = rmHdrs hs [hdrMId, hdrId, hdrTrn, 
+                                                  hdrSub, hdrRec]}
+
 
   findSubRecTrn :: [Header] -> (String, String, String)
   findSubRecTrn hs = 
@@ -1563,19 +1648,20 @@ where
   --
   --   * The original 'Send' frame
   ------------------------------------------------------------------------
-  sndToMsg :: String -> String -> Frame -> Maybe Frame
-  sndToMsg i sub f = case typeOf f of
-                       Send ->
-                         Just MsgFrame {
-                               frmHdrs = frmHdrs f,
-                               frmDest = frmDest f,
-                               frmSub  = sub, 
-                               frmLen  = frmLen  f,
-                               frmMime = frmMime f,
-                               frmId   = i,
-                               frmBody = frmBody f
-                             }
-                       _ -> Nothing
+  sndToMsg :: String -> String -> String -> Frame -> Maybe Frame
+  sndToMsg i sub a f = case typeOf f of
+                         Send ->
+                           Just MsgFrame {
+                                 frmHdrs  = frmHdrs f,
+                                 frmDest  = frmDest f,
+                                 frmSub   = sub, 
+                                 frmLen   = frmLen  f,
+                                 frmMime  = frmMime f,
+                                 frmId    = i,
+                                 frmAckId = a,
+                                 frmBody  = frmBody f
+                               }
+                         _ -> Nothing
 
   ------------------------------------------------------------------------
   -- | converts a 'Connect' frame into a 'Connected' frame,
@@ -1616,47 +1702,120 @@ where
                         Just _  -> True
 
   ------------------------------------------------------------------------
-  -- Mandatory headers 
+  -- Compliance Test: Mandatory headers 
   ------------------------------------------------------------------------
   getHdrs :: FrameType -> Version -> [String]
   getHdrs t v =
     case t of
+
+       -- CONNECT or STOMP
+       -- ================
+       -- REQUIRED: accept-version, host
+       -- OPTIONAL: login, passcode, heart-beat
+       --
        Connect     -> case v of
                         (1,0) -> []
                         (1,1) -> ["host", "accept-version"]
+                        (1,2) -> ["host", "accept-version"]
                         _     -> []
+       Stomp       -> case v of
+                        (1,0) -> []
+                        (1,1) -> ["host", "accept-version"]
+                        (1,2) -> ["host", "accept-version"]
+                        _     -> []
+       -- CONNECTED
+       -- =========
+       -- REQUIRED: version
+       -- OPTIONAL: session, server, heart-beat
+       --
        Connected   -> case v of
                         (1,0) -> ["session-id"]
                         (1,1) -> ["version"]
+                        (1,2) -> ["version"]
                         _     -> []
+       -- DISCONNECT
+       -- ==========
+       -- REQUIRED: none
+       -- OPTIONAL: receipt
+       --
        Disconnect  -> []
+
+       -- SUBSCRIBE
+       -- =========
+       -- REQUIRED: destination, id
+       -- OPTIONAL: ack
        Subscribe   -> case v of
                         (1,0) -> ["destination"]
                         (1,1) -> ["id", "destination"]
+                        (1,2) -> ["id", "destination"]
                         _     -> []
+
+       -- UNSUBSCRIBE
+       -- ===========
+       -- REQUIRED: id
+       -- OPTIONAL: none
+       --
        Unsubscribe -> case v of 
                         (1,0) -> ["destination"] -- either dest or id
                         (1,1) -> ["id"] 
+                        (1,2) -> ["id"] 
                         _     -> []
+       -- SEND
+       -- ====
+       -- REQUIRED: destination
+       -- OPTIONAL: transaction
+       --
        Send        -> case v of
                         (1,0) -> ["destination"]
                         (1,1) -> ["destination"]
+                        (1,2) -> ["destination"]
                         _     -> []
+  
+       -- MESSAGE
+       -- =======
+       -- REQUIRED: destination, message-id, subscription
+       -- OPTIONAL: ack
+       --
        Message     -> case v of
                         (1,0) -> ["message-id", "destination"]
                         (1,1) -> ["message-id", "subscription", "destination"]
+                        (1,2) -> ["message-id", "subscription", "destination"]
                         _     -> []
+
+       -- BEGIN or COMMIT or ABORT
+       -- ========================
+       -- REQUIRED: transaction
+       -- OPTIONAL: none
+       --
        Begin       -> ["transaction"] 
        Commit      -> ["transaction"] 
        Abort       -> ["transaction"] 
+
+       -- ACK or NACK
+       -- ===========
+       -- REQUIRED: id
+       -- OPTIONAL: transaction
+       --
        Ack         -> case v of
                         (1,0) -> ["message-id"]
                         (1,1) -> ["message-id", "subscription"]
+                        (1,2) -> ["id"]
                         _     -> []
        Nack        -> case v of 
                         (1,1) -> ["message-id", "subscription"]
                         _     -> []
+       -- ERROR
+       -- =====
+       -- REQUIRED: none
+       -- OPTIONAL: message
+       --
        Error       -> [] 
+
+       -- RECEIPT
+       -- =======
+       -- REQUIRED: receipt-id
+       -- OPTIONAL: none
+       --
        Receipt     -> ["receipt-id"] 
        HeartBeat   -> []
 
