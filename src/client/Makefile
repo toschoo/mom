@@ -19,7 +19,7 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
 	 $(SUTDIR)/Client/Patterns.hs
 
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
+FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all -fforce-recomp
 #-fforce-recomp
 # -D_DEBUG
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \

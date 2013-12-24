@@ -1,0 +1,704 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Client.Queue</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Client-Queue.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-queue-0.1.1: Stompl Client Library</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Client.Queue</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Connections
+</a></li><li><a href="#g:2">Queues
+</a></li><li><a href="#g:3">Messages
+</a></li><li><a href="#g:4">Receipts
+</a></li><li><a href="#g:5">Transactions
+</a></li><li><a href="#g:6">Acknowledgements
+</a></li><li><a href="#g:7">Exceptions
+</a></li><li><a href="#g:8">Complete Example
+</a></li></ul></div><div id="description"><p class="caption">Description</p><div class="doc"><p>The Stomp Protocol specifies message-oriented interoperability.
+ Applications connect to a message broker to send (publish)
+ or receive (subscribe) messages through queues. 
+ Interoperating applications do not know 
+ the location or internal structure of each other.
+ They only see interfaces, <em>i.e.</em> the messages
+ published and subscribed through the broker.
+</p><p>The Stompl Client library implements
+ a Stomp client using abstractions like
+ <code>Connection</code>, <code>Transaction</code> and
+ queues in terms of <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code>.
+</p></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><a href="#v:withConnection">withConnection</a> ::  String -&gt; Int -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Copt">Copt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; IO a) -&gt; IO a</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Con">Con</a> </li><li class="src short"><span class="keyword">type</span> <a href="#t:Heart">Heart</a> = (Int, Int)</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Copt">Copt</a> <ul class="subs"><li>= <a href="#v:OWaitBroker">OWaitBroker</a> Int  </li><li>| <a href="#v:OMaxRecv">OMaxRecv</a> Int  </li><li>| <a href="#v:OHeartBeat">OHeartBeat</a> <a href="Network-Mom-Stompl-Client-Queue.html#t:Heart">Heart</a>  </li><li>| <a href="#v:OAuth">OAuth</a> String String  </li><li>| <a href="#v:OClientId">OClientId</a> String  </li><li>| <a href="#v:OStomp">OStomp</a>  </li></ul></li><li class="src short"><span class="keyword">data</span>  <a href="#t:Reader">Reader</a> a</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Writer">Writer</a> a</li><li class="src short"><a href="#v:newReader">newReader</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> a)</li><li class="src short"><a href="#v:newWriter">newWriter</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a)</li><li class="src short"><a href="#v:withReader">withReader</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> i -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> i -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:withWriter">withWriter</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:withPair">withPair</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; ((<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> i, <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> o) -&gt; IO r) -&gt; IO r</li><li class="src short"><span class="keyword">type</span> <a href="#t:ReaderDesc">ReaderDesc</a> i = (String, [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>], [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>], <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> i)</li><li class="src short"><span class="keyword">type</span> <a href="#t:WriterDesc">WriterDesc</a> o = (String, [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>], [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>], <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> o)</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Qopt">Qopt</a> <ul class="subs"><li>= <a href="#v:OWithReceipt">OWithReceipt</a>  </li><li>| <a href="#v:OWaitReceipt">OWaitReceipt</a>  </li><li>| <a href="#v:OMode">OMode</a> <a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a>  </li><li>| <a href="#v:OAck">OAck</a>  </li><li>| <a href="#v:OForceTx">OForceTx</a>  </li></ul></li><li class="src short"><span class="keyword">data</span>  <a href="#t:AckMode">AckMode</a> <ul class="subs"><li>= <a href="#v:Auto">Auto</a>  </li><li>| <a href="#v:Client">Client</a>  </li><li>| <a href="#v:ClientIndi">ClientIndi</a>  </li></ul></li><li class="src short"><span class="keyword">type</span> <a href="#t:InBound">InBound</a> a = Type -&gt; Int -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; ByteString -&gt; IO a</li><li class="src short"><span class="keyword">type</span> <a href="#t:OutBound">OutBound</a> a = a -&gt; IO ByteString</li><li class="src short"><a href="#v:readQ">readQ</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a)</li><li class="src short"><a href="#v:writeQ">writeQ</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO ()</li><li class="src short"><a href="#v:writeQWith">writeQWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></li><li class="src short"><a href="#v:writeAdHoc">writeAdHoc</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; String -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO ()</li><li class="src short"><a href="#v:writeAdHocWith">writeAdHocWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; String -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></li><li class="src short"><span class="keyword">data</span>  <a href="#t:Message">Message</a> a</li><li class="src short"><a href="#v:msgContent">msgContent</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; a</li><li class="src short"><a href="#v:msgRaw">msgRaw</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; ByteString</li><li class="src short"><a href="#v:msgType">msgType</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; Type</li><li class="src short"><a href="#v:msgLen">msgLen</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; Int</li><li class="src short"><a href="#v:msgHdrs">msgHdrs</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>]</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Rec">Rec</a> <ul class="subs"><li>= <a href="#v:Rec">Rec</a> Int  </li><li>| <a href="#v:NoRec">NoRec</a>  </li></ul></li><li class="src short"><span class="keyword">type</span> <a href="#t:Receipt">Receipt</a> = <a href="Network-Mom-Stompl-Client-Queue.html#t:Rec">Rec</a></li><li class="src short"><a href="#v:waitReceipt">waitReceipt</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a> -&gt; IO ()</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Tx">Tx</a> </li><li class="src short"><a href="#v:withTransaction">withTransaction</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Tx">Tx</a> -&gt; IO a) -&gt; IO a</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Topt">Topt</a> <ul class="subs"><li>= <a href="#v:OTimeout">OTimeout</a> Int  </li><li>| <a href="#v:OWithReceipts">OWithReceipts</a>  </li><li>| <a href="#v:OAbortMissingAcks">OAbortMissingAcks</a>  </li></ul></li><li class="src short"><a href="#v:abort">abort</a> :: String -&gt; IO ()</li><li class="src short"><a href="#v:ack">ack</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</li><li class="src short"><a href="#v:ackWith">ackWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</li><li class="src short"><a href="#v:nack">nack</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</li><li class="src short"><a href="#v:nackWith">nackWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</li><li class="src short">module <a href="Network-Mom-Stompl-Client-Exception.html">Network.Mom.Stompl.Client.Exception</a></li></ul></div><div id="interface"><h1 id="g:1">Connections
+</h1><div class="doc"><p>The Stomp protocol is connection-oriented and
+     usually implemented on top of <em>TCP</em>/<em>IP</em>.
+     The client initialises the connection
+     by sending a <em>connect</em> message which is answered
+     by the broker by confirming or rejecting the connection.
+     The connection is authenticated by user and passcode.
+     The authentication mechanism, however, 
+     varies among brokers.
+</p><p>During the connection phase,
+     the protocol version and a heartbeat 
+     that defines the frequency of <em>alive</em> messages
+     exchanged between broker and client
+     are negotiated.
+</p><p>The connection remains active until either the client
+     disconnects voluntarily or the broker disconnects
+     in consequence of a protocol error.
+</p><p>The details of the connection, including 
+     protocol version and heartbeats are handled
+     internally by the Stompl Client library.
+</p></div><div class="top"><p class="src"><a name="v:withConnection" class="def">withConnection</a> ::  String -&gt; Int -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Copt">Copt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; IO a) -&gt; IO a</p><div class="doc"><p>Initialises a connection and executes an <code>IO</code> action.
+   The connection life time is the scope of this action.
+   The connection handle, <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>, that is passed to the action
+   should not be returned from <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withConnection">withConnection</a></code>.
+   Connections, however, can be shared among threads.
+   In this case, the programmer has to take care
+   not to terminate the action before all other threads
+   working on the connection have finished.
+</p><p>Since <code>Connection</code> is a heavy data type,
+   you should try to reduce the number of connections
+   to the same broker within the same process - 
+   there is ideally only one connection per broker
+   in one process.
+</p><p>Paramter:
+</p><ul><li> <code>String</code>: The broker's hostname or IP-address
+</li><li> <code>Int</code>: The broker's port
+</li><li> <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Copt">Copt</a></code>: Control options passed to the connection
+             (including user/password)
+</li><li> <code>Header</code>: List of additional, broker-specific headers
+</li><li> (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code> -&gt; <code>IO</code> a): The action to execute.
+                        The action receives the connection handle
+                        and returns a value of type <em>a</em> 
+                        in the <code>IO</code> monad.
+</li></ul><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withConnection">withConnection</a></code> returns the result of the action passed into it.
+</p><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withConnection">withConnection</a></code> will always disconnect from the broker 
+ when the action has terminated, even if an exception is raised.
+</p><p>Example:
+</p><pre> withConnection &quot;localhost&quot; 61613 [] [] $ \c -&gt; do
+</pre><p>This would connect to a broker listening to the loopback interface,
+ port number 61613.
+ The action is defined after the <em>hanging do</em>.
+</p><p>Internally, connections use concurrent threads;
+ errors are communicated by throwing exceptions
+ to the owner of the connection, where
+ the owner is the thread that created the connection
+ by calling <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withConnection">withConnection</a></code>.
+ It is therefore advisable to start different connections
+ in different threads, so that each thread will receive
+ only exceptions related to the connection it has opened.
+</p><p>Example:
+</p><pre> t &lt;- forkIO $ withConnection &quot;127.0.0.1&quot; 61613 [] [] $ \c -&gt; do
+</pre></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Con" class="def">Con</a>  </p><div class="doc"><p>Opaque Connection handle.
+   Only valid within the action passed to <em>withConnection</em>. 
+</p></div><div class="subs instances"><p id="control.i:Con" class="caption collapser" onclick="toggleSection('i:Con')">Instances</p><div id="section.i:Con" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:Heart" class="def">Heart</a> = (Int, Int)</p><div class="doc"><p>Heart-beat configuration;
+   the first <code>Int</code> of the pair represents the frequency 
+   in which the sender wants to send heart-beats; 
+   the second represents the highest frequency
+   in which the sender can accept heart-beats.
+   The frequency is expressed as 
+   the period in milliseconds between two heart-beats.
+   For details on negotiating heart-beats, 
+   please refer to the Stomp specification.
+</p></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Copt" class="def">Copt</a>  </p><div class="doc"><p>Options passed to a connection
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:OWaitBroker" class="def">OWaitBroker</a> Int</td><td class="doc"><p>Tells the connection to wait <em>n</em> milliseconds for the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></code> 
+   sent with <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Disconnect">Disconnect</a></code> at the end of the session.
+   The <em>Stomp</em> protocol advises to request a receipt 
+   and to wait for it before actually closing the 
+   socket. Many brokers, however, do not 
+   implement this feature (or implement it inappropriately,
+   closing the connection immediately after having sent
+   the receipt).
+   <code>withConnection</code>, for this reason, ignores 
+   the receipt by default and simply closes the socket
+   after having sent the <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Disconnect">Disconnect</a></code> frame.
+   If your broker shows a correct behaviour, 
+   it is advisable to use this option.
+</p></td></tr><tr><td class="src"><a name="v:OMaxRecv" class="def">OMaxRecv</a> Int</td><td class="doc"><p>The maximum size of TCP/IP packets.
+   Indirectly, this options also defines the
+   maximum message size which is <em>10 * maxReceive</em>.
+   By default, the maximum packet size is 1024 bytes.
+</p></td></tr><tr><td class="src"><a name="v:OHeartBeat" class="def">OHeartBeat</a> <a href="Network-Mom-Stompl-Client-Queue.html#t:Heart">Heart</a></td><td class="doc"><p>This option defines the client's bid
+   for negotiating heart beats (see <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:HeartBeat">HeartBeat</a></code>). 
+   By default, no heart beats are sent or accepted
+</p></td></tr><tr><td class="src"><a name="v:OAuth" class="def">OAuth</a> String String</td><td class="doc"><p>Authentication: user and password
+</p></td></tr><tr><td class="src"><a name="v:OClientId" class="def">OClientId</a> String</td><td class="doc"><p>Identification: specifies the JMS Client ID for persistant connections
+</p></td></tr><tr><td class="src"><a name="v:OStomp" class="def">OStomp</a></td><td class="doc"><p>With this option set, <a href="connect.html">connect</a> will use 
+   a <a href="STOMP.html">STOMP</a> frame instead of a <a href="CONNECT.html">CONNECT</a> frame
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:Copt" class="caption collapser" onclick="toggleSection('i:Copt')">Instances</p><div id="section.i:Copt" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Copt">Copt</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Copt">Copt</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><h1 id="g:2">Queues
+</h1><div class="doc"><p>Stomp program interoperability is based on queues.
+     Queues are communication channels of arbitrary size
+     that may be written by any client 
+     currently connected to the broker.
+     Messages in the queue are stored in <em>FIFO</em> order.
+     The process of adding messages to the queue is called <em>send</em>.
+     In order to read from a queue, a client has to <em>subscribe</em> to it.
+     After having subscribed to a queue, 
+     a client will receive all message sent to it.
+     Brokers may implement additional selection criteria
+     by means of <em>selectors</em> that are expressed in some
+     query language, such as <em>SQL</em> or <em>XPath</em>.
+</p><p>There are two different flavours of queues
+     distinguished by their communication pattern:
+     Queues are either one-to-one channels,
+     this is, a message published in this queue
+     is sent to exactly one subscriber
+     and then removed from it; 
+     or queues may be one-to-many,
+     <em>i.e.</em>, a message published in this queue
+     is sent to all current subscribers of the queue.
+     This type of queues is sometimes called <em>topic</em>.
+     Which pattern is supported 
+     and how patterns are controlled, depends on the broker. 
+</p><p>From the perspective of the Stomp protocol,
+     the content of messages in a queue
+     has no format.
+     The Protocol describes only those aspects of messages
+     that are related to their handling;
+     this can be seen as a <em>syntactic</em> level of interoperability.
+     Introducing meaning to message contents
+     is entirely left to applications.
+     Message- or service-oriented frameworks,
+     usually, define formats and encodings 
+     to describe messages and higher-level
+     communication patterns built on top of them,
+     to add more <em>syntactic</em> formalism or
+     to raise interoperability
+     to a <em>semantic</em> or even <em>pragmatic</em> level.
+</p><p>The Stompl library stresses the importance
+     of adding meaning to the message content
+     by adding types to queues. 
+     From the perspective of the client Haskell program,
+     a queue is a communication channel
+     that allows sending and receiving messages of a given type.
+     This adds type-safety to Stompl queues, which,
+     otherwise, would just return plain bytes.
+     It is, on the other hand, always possible
+     to ignore this feature by declaring queues
+     as '()' or <code>ByteString</code>.
+     In the first case, the <em>raw</em> bytestring
+     may be read from the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code>;
+     in the second case, the contents of the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code>
+     will be a <code>ByteString</code>.
+</p><p>In the Stompl library, queues 
+     are unidirectional communication channels
+     either for reading or writing.
+     This is captured by implementing queues
+     with two different data types,
+     a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> and a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code>.
+     On creating a queue a set of parameters can be defined
+     to control the behaviour of the queue.
+</p></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Reader" class="def">Reader</a> a </p><div class="doc"><p>A Queue for receiving messages
+</p></div><div class="subs instances"><p id="control.i:Reader" class="caption collapser" onclick="toggleSection('i:Reader')">Instances</p><div id="section.i:Reader" class="show"><table><tr><td class="src">Eq (<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> a)</td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Writer" class="def">Writer</a> a </p><div class="doc"><p>A Queue for sending messages.
+</p></div><div class="subs instances"><p id="control.i:Writer" class="caption collapser" onclick="toggleSection('i:Writer')">Instances</p><div id="section.i:Writer" class="show"><table><tr><td class="src">Eq (<a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a)</td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:newReader" class="def">newReader</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> a)</p><div class="doc"><p>Creates a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> with the life time of the connection <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>.
+   Creating a receiving queue involves interaction with the broker;
+   this may result in preempting the calling thread, 
+   depending on the options [<code><a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></code>].
+</p><p>Parameters:
+</p><ul><li> The connection handle <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>
+</li><li> A queue name that should be unique in your application.
+     The queue name is useful for debugging, since it appears
+     in error messages.
+</li><li> The Stomp destination, <em>i.e.</em> the name of the queue
+     as it is known to the broker and other applications.
+</li><li> A list of options (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></code>).
+</li><li> A list of headers (<code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a></code>), 
+     which will be passed to the broker.
+     the <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a></code> parameter is actually a breach in the abstraction
+     from the Stomp protocol. A header may be, for instance,
+     a selector that restricts the subscription to this queue,
+     such that only messages with certain attributes 
+     (<em>i.e.</em> specific headers) are sent to the subscribing client.
+     Selectors are broker-specific and typically expressed
+     as SQL or XPath.
+</li><li> An in-bound converter.
+</li></ul><p>A usage example to create a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code>
+   with <code>Connection</code> <em>c</em> and the in-bound converter
+   <em>iconv</em> would be:
+</p><pre> q &lt;- newReader c &quot;TestQ&quot; &quot;/queue/test&quot; [] [] iconv
+</pre><p>A call to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code> may result in preemption when
+   one of the options <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code> or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> are given;
+   an example for such a call 
+   with <em>tmo</em> an <code>Int</code> value representing a <em>timeout</em>
+   in microseconds and 
+   the result <em>mbQ</em> of type <code>Maybe</code> is:
+</p><pre> mbQ &lt;- timeout tmo $ newReader c &quot;TestQ&quot; &quot;/queue/test&quot; [OWaitReceipt] [] oconv
+ case mbQ of
+   Nothing -&gt; -- handle error
+   Just q  -&gt; do -- ...
+</pre></div></div><div class="top"><p class="src"><a name="v:newWriter" class="def">newWriter</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a)</p><div class="doc"><p>Creates a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> with the life time of the connection <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>.
+   Creating a sending queue does not involve interaction with the broker
+   and will not preempt the calling thread.
+</p><p>A sending queue may be created like in the following
+   code fragment, where <em>oconv</em> is 
+   an already defined out-bound converter:
+</p><pre> q &lt;- newWriter c &quot;TestQ&quot; &quot;/queue/test&quot; [] [] oconv
+</pre></div></div><div class="top"><p class="src"><a name="v:withReader" class="def">withReader</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> i -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> i -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Creates a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> with limited life time. 
+   The queue will live only in the scope of the action
+   that is passed as last parameter. 
+   The function is useful for readers
+   that are used only temporarly, <em>e.g.</em> during initialisation.
+   When the action terminates, the client unsubscribes from 
+   the broker queue - even if an exception is raised.
+</p><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withReader">withReader</a></code> returns the result of the action.
+   Since the life time of the queue is limited to the action,
+   it should not be returned.
+   Any operation on a reader created by <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withReader">withReader</a></code>
+   outside the action will raise <code><a href="Network-Mom-Stompl-Client-Exception.html#v:QueueException">QueueException</a></code>.
+</p><p>A usage example is: 
+</p><pre> x &lt;- withReader c &quot;TestQ&quot; &quot;/queue/test&quot; [] [] iconv $ \q -&gt; do
+</pre></div></div><div class="top"><p class="src"><a name="v:withWriter" class="def">withWriter</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; String -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>] -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> o -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Creates a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> with limited life time. 
+   The queue will live only in the scope of the action
+   that is passed as last parameter. 
+   The function is useful for writers
+   that are used only temporarly, <em>e.g.</em> during initialisation.
+</p><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withWriter">withWriter</a></code> returns the result of the action.
+   Since the life time of the queue is limited to the action,
+   it should not be returned.
+   Any operation on a writer created by <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withWriter">withWriter</a></code>
+   outside the action will raise a <code><a href="Network-Mom-Stompl-Client-Exception.html#v:QueueException">QueueException</a></code>.
+</p></div></div><div class="top"><p class="src"><a name="v:withPair" class="def">withPair</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; String -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a> i -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a> o -&gt; ((<a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> i, <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> o) -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Creates a pair of (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> i, <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> o) with limited lifetime. 
+   The pair will live only in the scope of the action
+   that is passed as last parameter. 
+   The function is useful for readers/writers
+   used in combination, <em>e.g.</em> to emulate a client/server
+   kind of communication.
+</p><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withPair">withPair</a></code> returns the result of the action passed in.
+</p><p>The parameters are:
+</p><ul><li> The connection handle <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a></code>
+</li><li> The name of the pair; 
+     the reader will be identified by a string
+                with &quot;_r&quot; added to this name,
+     the writer by a string with &quot;_w&quot; added to this name.
+</li><li> The description of the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code>, <code><a href="Network-Mom-Stompl-Client-Queue.html#t:ReaderDesc">ReaderDesc</a></code>
+</li><li> The description of the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code>, <code><a href="Network-Mom-Stompl-Client-Queue.html#t:WriterDesc">WriterDesc</a></code>
+</li><li> The application-defined action
+</li></ul><p>The reason for introducing the reader and writer description
+  is to provide error detection at compile time:
+  It is this way much more difficult to accidently confuse
+  the writer's and the reader's parameters (<em>e.g.</em> 
+  passing the writer's <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></code>s to the reader).
+</p></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:ReaderDesc" class="def">ReaderDesc</a> i = (String, [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>], [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>], <a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a> i)</p><div class="doc"><p>The <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> parameters of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withPair">withPair</a></code>:
+</p><ul><li> The reader's queue name 
+</li><li> The reader's <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></code>s
+</li><li> The reader's <code>Header</code>s
+</li><li> The reader's (inbound) converter
+</li></ul></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:WriterDesc" class="def">WriterDesc</a> o = (String, [<a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a>], [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>], <a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a> o)</p><div class="doc"><p>The <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> parameters of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withPair">withPair</a></code>
+</p><ul><li> The writer's queue name
+</li><li> The writer's <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></code>s
+</li><li> The writer's <code>Header</code>s
+</li><li> The writer's (outbound) converter
+</li></ul></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Qopt" class="def">Qopt</a>  </p><div class="doc"><p>Options that may be passed 
+   to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newWriter">newWriter</a></code> and their variants.
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:OWithReceipt" class="def">OWithReceipt</a></td><td class="doc"><p>A queue created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> will request a receipt
+   on all interactions with the broker.
+   The handling of receipts is usually transparent to applications, 
+   but, in the case of sending message, may be made visible 
+   by using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code> instead of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code>.
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code> return the receipt identifier
+   and the application can later invoke <code><a href="Network-Mom-Stompl-Client-Queue.html#v:waitReceipt">waitReceipt</a></code>
+   to wait for the broker confirming this receipt.
+   Note that a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> will 
+   issue a request for receipt when subscribing to a Stomp queue.
+</p></td></tr><tr><td class="src"><a name="v:OWaitReceipt" class="def">OWaitReceipt</a></td><td class="doc"><p>A queue created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code> will wait for the receipt
+   before returning from a call that has issued a request for receipt.
+   This implies that the current thread will yield the processor.
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> will internally create a request for receipt and 
+   wait for the broker to confirm the receipt before returning.
+   Note that, for <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code>, there is no difference between
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code>. Either option will cause
+   the thread to preempt until the receipt is confirmed.
+</p><p>On writing a message, this is not always the preferred
+   method. You may want to fire and forget - and check 
+   for the confirmation of the receipt only later.
+   In this case, you will create the
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> only and, later, after having
+   sent a message with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code>, wait for the receipt using
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:waitReceipt">waitReceipt</a></code>. Note that <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code> without <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code>
+   has no meaning with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code>. 
+   If you want to request a receipt with a message
+   and wait for the broker to confirm it, you have to use 
+   both options.
+</p><p>It is good practice to use <em>timeout</em> with all calls
+   that may wait for receipts, 
+   <em>ie</em> <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withReader">withReader</a></code> 
+   with options <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>,
+   or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code> with options <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>,
+   or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ackWith">ackWith</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:nackWith">nackWith</a></code>.
+</p></td></tr><tr><td class="src"><a name="v:OMode" class="def">OMode</a> <a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></td><td class="doc"><p>The option defines the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></code> of the queue,
+   which is relevant for <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a></code> only.
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></code> is one of: 
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Auto">Auto</a></code>, <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Client">Client</a></code>, <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ClientIndi">ClientIndi</a></code>.
+</p><p>If <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OMode">OMode</a></code> is not given, <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Auto">Auto</a></code> is assumed as default.
+</p><p>For more details, see <code><a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></code>.
+</p></td></tr><tr><td class="src"><a name="v:OAck" class="def">OAck</a></td><td class="doc"><p>Expression often used by Ren&#233; Artois.
+   Furthermore, if <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OMode">OMode</a></code> is either
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Client">Client</a></code> or <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ClientIndi">ClientIndi</a></code>, then 
+   this option forces <code><a href="Network-Mom-Stompl-Client-Queue.html#v:readQ">readQ</a></code> to send an acknowledgement
+   automatically when a message has been read from the queue. 
+</p></td></tr><tr><td class="src"><a name="v:OForceTx" class="def">OForceTx</a></td><td class="doc"><p>A queue created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OForceTx">OForceTx</a></code> will throw 
+   <code><a href="Network-Mom-Stompl-Client-Exception.html#v:QueueException">QueueException</a></code> when used outside a <code>Transaction</code>.
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:Qopt" class="caption collapser" onclick="toggleSection('i:Qopt')">Instances</p><div id="section.i:Qopt" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Read <a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Qopt">Qopt</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:AckMode" class="def">AckMode</a>  </p><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:Auto" class="def">Auto</a></td><td class="doc"><p>A successfully sent message is automatically considered ack'd
+</p></td></tr><tr><td class="src"><a name="v:Client" class="def">Client</a></td><td class="doc"><p>The client is expected to explicitly confirm the receipt
+   of a message by sending an <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Ack">Ack</a></code> frame;
+   all message older than the ack'd message
+   since the last <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Ack">Ack</a></code> (or the beginning of the session)
+   are implicitly ack'd as well.
+   This is called <em>cumulative</em> ack.
+</p></td></tr><tr><td class="src"><a name="v:ClientIndi" class="def">ClientIndi</a></td><td class="doc"><p>Non-cumulative ack:
+   The client is expected to explicitly confirm the receipt
+   of a message by sending an <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Ack">Ack</a></code> frame;
+   only the message with the msg-id in the <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#v:Ack">Ack</a></code> frame
+   is actually ack'd
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:AckMode" class="caption collapser" onclick="toggleSection('i:AckMode')">Instances</p><div id="section.i:AckMode" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Read <a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:AckMode">AckMode</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:InBound" class="def">InBound</a> a = Type -&gt; Int -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; ByteString -&gt; IO a</p><div class="doc"><p>Converters are user-defined actions passed to 
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code> (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a></code>) and
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newWriter">newWriter</a></code> (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a></code>)
+   that convert a <code>ByteString</code> to a value of type <em>a</em> (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a></code>) or
+                a value of type <em>a</em> to <code>ByteString</code> (<code><a href="Network-Mom-Stompl-Client-Queue.html#t:OutBound">OutBound</a></code>). 
+   Converters are, hence, similar to <em>put</em> and <em>get</em> in the <em>Binary</em>
+   monad. 
+</p><p>The reason for using explicit, user-defined converters 
+   instead of <em>Binary</em> <em>encode</em> and <em>decode</em>
+   is that the conversion with queues
+   may be much more complex, involving reading configurations 
+   or other <code>IO</code> actions.
+   Furthermore, we have to distinguish between data types and 
+   there binary encoding when sent over the network.
+   This distinction is made by <em>MIME</em> types.
+   Two applications may send the same data type,
+   but one encodes this type as &quot;text/plain&quot;,
+   the other as &quot;text/xml&quot;.
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a></code> conversions have to consider the <em>MIME</em> type
+   and, hence, need more input parameters than provided by <em>decode</em>.
+   <em>encode</em> and <em>decode</em>, however,
+   can be used internally by user-defined converters.
+</p><p>The parameters expected by an <code><a href="Network-Mom-Stompl-Client-Queue.html#t:InBound">InBound</a></code> converter are:
+</p><ul><li> the <em>MIME</em> type of the content
+</li><li> the content size 
+</li><li> the list of <code><a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a></code> coming with the message
+</li><li> the contents encoded as <code>ByteString</code>.
+</li></ul><p>The simplest possible in-bound converter for plain strings
+   may be created like this:
+</p><pre> let iconv _ _ _ = return . toString
+</pre></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:OutBound" class="def">OutBound</a> a = a -&gt; IO ByteString</p><div class="doc"><p>Out-bound converters are much simpler.
+   Since the application developer knows,
+   which encoding to use, the <em>MIME</em> type is not needed.
+   The converter receives only the value of type <em>a</em>
+   and converts it into a <code>ByteString</code>.
+   A simple example to create an out-bound converter 
+   for plain strings could be:
+</p><pre> let oconv = return . fromString
+</pre></div></div><div class="top"><p class="src"><a name="v:readQ" class="def">readQ</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Reader">Reader</a> a -&gt; IO (<a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a)</p><div class="doc"><p>Removes the oldest message from the queue
+   and returns it as <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code>.
+   The message cannot be read from the queue
+   by another call to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:readQ">readQ</a></code> within the same connection.
+   Wether other connections will receive the message as well
+   depends on the broker and the queue patterns it implements.
+   If the queue is currently empty,
+   the thread will preempt until a message arrives.
+</p><p>If the queue was created with 
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OMode">OMode</a></code> other than <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Auto">Auto</a></code> 
+   and with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OAck">OAck</a></code>, then an <em>ack</em> 
+   will be automatically sent to the broker;
+   if <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OAck">OAck</a></code> was not set,
+   the message will be registered as pending <em>ack</em>.
+</p><p>Note that, when <code><a href="Network-Mom-Stompl-Client-Queue.html#v:readQ">readQ</a></code> sends an <em>ack</em> internally,
+   it will not request a receipt from the broker.
+   The rationale for this design is simplicity.
+   If the function expected a receipt, 
+   it would have to either wait for the receipt
+   or return it.
+   In the first case, it would be difficult
+   for the programmer to distinguish, on a timeout, between
+   <em>no message available</em> and
+   <em>no receipt arrived</em>.
+   In the second case, the receipt
+   would need to be returned.
+   This would unnecessarily blow up the interface.
+   If you need the reliability of receipts,
+   you should create the queue without <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OAck">OAck</a></code>
+   and use <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ackWith">ackWith</a></code> to acknowledge 
+   the message explicitly.
+</p></div></div><div class="top"><p class="src"><a name="v:writeQ" class="def">writeQ</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO ()</p><div class="doc"><p>Adds the value <em>a</em> as message at the end of the queue.
+   The Mime type as well as the headers 
+   are added to the message.
+</p><p>If the queue was created with the option
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code>,
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> will request a receipt from the broker.
+   If the queue was additionally created with
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>,
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> will preempt until the receipt is confirmed.
+</p><p>The Stomp headers are useful for brokers
+   that provide selectors on <em>subscribe</em>,
+   see <code><a href="Network-Mom-Stompl-Client-Queue.html#v:newReader">newReader</a></code> for details.
+</p><p>A usage example for a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> <em>q</em> of type <code>String</code>
+   may be (<em>nullType</em> is defined as <em>text</em>/<em>plain</em> in Codec.MIME):
+</p><pre> writeQ q nullType [] &quot;hello world!&quot;
+</pre><p>For a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a></code> that was created 
+   with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>,
+   the function should be called with <em>timeout</em>:
+</p><pre> mbR &lt;- timeout tmo $ writeQ q nullType [] &quot;hello world!&quot;
+ case mbR of
+   Nothing -&gt; -- error handling
+   Just r  -&gt; do -- ...
+</pre></div></div><div class="top"><p class="src"><a name="v:writeQWith" class="def">writeQWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></p><div class="doc"><p>This is a variant of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code> 
+   that is particularly useful for queues 
+   created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code>, but without <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>.
+   It returns the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></code>, so that it can be waited for
+   later, using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:waitReceipt">waitReceipt</a></code>.
+</p><p>Note that the behaviour of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code>, 
+   besides of returning the receipt, is the same as <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code>,
+   <em>i.e.</em>, on a queue with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code> and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code> will wait for the receipt being confirmed.
+   In this case, the returned receipt is, in fact, 
+   of no further use for the application.
+</p><p>The function is used like:
+</p><pre> r &lt;- writeQWith q nullType [] &quot;hello world!&quot;
+</pre></div></div><div class="top"><p class="src"><a name="v:writeAdHoc" class="def">writeAdHoc</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; String -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO ()</p><div class="doc"><p>This is a variant of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQ">writeQ</a></code>
+   that overwrites the destination queue defined in the writer queue.
+   It can be used for <em>ad hoc</em> communication and
+   for emulations of client/server-like protocols:
+   the client would pass the name of the queue
+   where it expects the server response in a header;
+   the server would send the resply to the queue
+   indicated in the header using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeAdHoc">writeAdHoc</a></code>.
+   The additional <code>String</code> parameter contains the destination.
+</p></div></div><div class="top"><p class="src"><a name="v:writeAdHocWith" class="def">writeAdHocWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Writer">Writer</a> a -&gt; String -&gt; Type -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>] -&gt; a -&gt; IO <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></p><div class="doc"><p>This is a variant of <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeAdHoc">writeAdHoc</a></code> 
+   that is particularly useful for queues 
+   created with <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipt">OWithReceipt</a></code>, but without <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWaitReceipt">OWaitReceipt</a></code>.
+   It returns the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></code>, so that it can be waited for
+   later, using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:waitReceipt">waitReceipt</a></code>.
+   Please refer to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code> for more details.
+</p></div></div><h1 id="g:3">Messages
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Message" class="def">Message</a> a </p><div class="doc"><p>Any content received from a queue
+   is wrapped in a message.
+   It is, in particular, the return value of <em>readQ</em>.
+</p></div></div><div class="top"><p class="src"><a name="v:msgContent" class="def">msgContent</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; a</p><div class="doc"><p>Returns the content of the message in the format 
+   produced by an in-bound converter
+</p></div></div><div class="top"><p class="src"><a name="v:msgRaw" class="def">msgRaw</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; ByteString</p><div class="doc"><p>The encoded content             
+</p></div></div><div class="top"><p class="src"><a name="v:msgType" class="def">msgType</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; Type</p><div class="doc"><p>The <em>MIME</em> type of the content
+</p></div></div><div class="top"><p class="src"><a name="v:msgLen" class="def">msgLen</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; Int</p><div class="doc"><p>The length of the 
+   encoded content
+</p></div></div><div class="top"><p class="src"><a name="v:msgHdrs" class="def">msgHdrs</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; [<a href="/home/ts/.cabal/share/doc/stompl-0.1.0/html/Network-Mom-Stompl-Frame.html#t:Header">Header</a>]</p><div class="doc"><p>The Stomp headers
+   that came with the message
+</p></div></div><h1 id="g:4">Receipts
+</h1><div class="doc"><p>Receipts are identifiers unique during the life time
+     of an application; receipts can be added to all kinds of
+     messages sent to the broker.
+     The broker, in its turn, uses receipts to acknowledge received messages.
+     Receipts, hence, are useful to make a session more reliable.
+     When the broker has confirmed the receipt of a frame sent to it,
+     the client application can be sure that it has arrived.
+     What kind of additional guarantees are made,
+     <em>e.g.</em> that the frame is saved to disk or has already been sent
+     to the subscriber(s), depends on the broker.
+</p><p>Receipts are handled internally by the library.
+     The application, however, decides where receipts should
+     be requested, <em>i.e.</em> on subcribing to a queue,
+     on sending a message, on sending <em>acks</em> and on
+     starting and ending transactions.
+     On sending messages, 
+     receipt handling can be made explict.
+     The function <code><a href="Network-Mom-Stompl-Client-Queue.html#v:writeQWith">writeQWith</a></code>
+     requests a receipt to the message
+     and returns it to the caller.
+     The application can then, later,
+     explicitly wait for the receipt, using <code><a href="Network-Mom-Stompl-Client-Queue.html#v:waitReceipt">waitReceipt</a></code>.
+     Otherwise, receipt handling remains
+     inivisible in the application code.
+</p></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Rec" class="def">Rec</a>  </p><div class="doc"><p>This is a receipt.
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:Rec" class="def">Rec</a> Int</td><td class="doc"><p>A valid receipt
+</p></td></tr><tr><td class="src"><a name="v:NoRec" class="def">NoRec</a></td><td class="doc"><p>No receipt was sent with this interaction.
+   Receiving a <code><a href="Network-Mom-Stompl-Client-Queue.html#v:NoRec">NoRec</a></code> is not an error,
+   but the result of an inconsistent - but harmless -
+   use of <em>writeQWith</em> on a queue that does not
+   send receipts. An application should, of course,
+   not try to wait for a <code><a href="Network-Mom-Stompl-Client-Queue.html#v:NoRec">NoRec</a></code>. It will never be confirmed.
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:Rec" class="caption collapser" onclick="toggleSection('i:Rec')">Instances</p><div id="section.i:Rec" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Rec">Rec</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Rec">Rec</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:Receipt" class="def">Receipt</a> = <a href="Network-Mom-Stompl-Client-Queue.html#t:Rec">Rec</a></p><div class="doc"><p>Just a nicer word for <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Rec">Rec</a></code>
+</p></div></div><div class="top"><p class="src"><a name="v:waitReceipt" class="def">waitReceipt</a> :: <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a> -&gt; IO ()</p><div class="doc"><p>Waits for the <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Receipt">Receipt</a></code> to be confirmed by the broker.
+   Since the thread will preempt, the call should be protected
+   with <em>timeout</em>, <em>e.g.</em>:
+</p><pre> mb_ &lt;- timeout tmo $ waitReceipt c r
+ case mb_ of
+  Nothing -&gt; -- error handling
+  Just _  -&gt; do -- ...
+</pre></div></div><h1 id="g:5">Transactions
+</h1><div class="doc"><p>Transactions are units of interactions with
+     a Stomp broker, including sending messages to queues
+     and acknowledging the receipt of messages.
+     All messages sent during a transaction
+     are buffered in the broker.
+     Only when the application terminates the transaction
+     with <em>commit</em> the messages will be eventually processed.
+     If an error occurs during the transaction,
+     it can be <em>aborted</em> by the client. 
+     Transactions, in consequence, can be used
+     to ensure atomicity,
+     <em>i.e.</em> either all single steps are performed or 
+     no step is performed.
+</p><p>In the Stompl Client library, transactions
+     are sequences of Stompl actions, 
+     queue operations as well as nested transactions,
+     that are committed at the end or aborted,
+     whenever an error condition becomes true.
+     Error conditions are uncaught exceptions
+     and conditions defined by options passed
+     to the transaction, for example
+     that all receipts requested during the transaction,
+     have been confirmed by the broker.
+</p><p>To enforce atomicity, 
+     threads are not allowed to share transactions.
+</p></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Tx" class="def">Tx</a>  </p><div class="subs instances"><p id="control.i:Tx" class="caption collapser" onclick="toggleSection('i:Tx')">Instances</p><div id="section.i:Tx" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Tx">Tx</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Tx">Tx</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:withTransaction" class="def">withTransaction</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; [<a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a>] -&gt; (<a href="Network-Mom-Stompl-Client-Queue.html#t:Tx">Tx</a> -&gt; IO a) -&gt; IO a</p><div class="doc"><p>Starts a transaction and executes the action
+   in the last parameter.
+   After the action has finished, 
+   the transaction will be either committed or aborted
+   even if an exception has been raised.
+   Note that, depending on the options,
+   the way a transaction is terminated may vary,
+   refer to <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a></code> for details.
+</p><p>Transactions cannot be shared among threads.
+   Transactions are internally protected against
+   access from any thread but the one
+   that has actually started the transaction.
+</p><p>It is <em>not</em> advisable to use <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withTransaction">withTransaction</a></code> with <em>timeout</em>.
+   It is preferred to use <em>timeout</em> on the 
+   the actions executed within this transaction.
+   Whether and how much time the transaction itself
+   shall wait for the completion of on-going interactions with the broker,
+   in particular pending receipts,
+   shall be controlled
+   by the <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OTimeout">OTimeout</a></code> option.
+</p><p><code><a href="Network-Mom-Stompl-Client-Queue.html#v:withTransaction">withTransaction</a></code> returns the result of the action.
+</p><p>The simplest usage example with a <code>Connection</code> <em>c</em> is:
+</p><pre> r &lt;- withTransaction c [] $ \_ -&gt; do
+</pre><p>If the transaction shall use receipts and, before terminating, wait 100<em>ms</em>
+   for all receipts to be confirmed by the broker
+   <code><a href="Network-Mom-Stompl-Client-Queue.html#v:withTransaction">withTransaction</a></code> is called like:
+</p><pre> eiR &lt;- try $ withTransaction c [OTimeout 100, OWithReceipts] \_ -&gt; do
+ case eiR of
+   Left e  -&gt; -- error handling
+   Right x -&gt; do -- ..
+</pre><p>Note that <code><a href="Network-Mom-Stompl-Client-Exception.html#v:try">try</a></code> is used to catch any <code><a href="Network-Mom-Stompl-Client-Exception.html#t:StomplException">StomplException</a></code>.
+</p></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Topt" class="def">Topt</a>  </p><div class="doc"><p>Options passed to a transaction.
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:OTimeout" class="def">OTimeout</a> Int</td><td class="doc"><p>The timeout in milliseconds (not microseconds!)
+   to wait for <em>pending receipts</em>.
+   If receipts are pending, when the transaction
+   is ready to terminate,
+   and no timeout or a timeout <em>&lt;= 0</em> is given, 
+   and the option <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OWithReceipts">OWithReceipts</a></code> 
+   was passed to <code>withTransaction</code>,
+   the transaction will be aborted with <code><a href="Network-Mom-Stompl-Client-Exception.html#v:TxException">TxException</a></code>;
+   otherwise it will wait until all pending
+   ineractions with the broker have terminated
+   or the timeout has expired - whatever comes first.
+   If the timeout expires first, <code><a href="Network-Mom-Stompl-Client-Exception.html#v:TxException">TxException</a></code> is raised. 
+</p></td></tr><tr><td class="src"><a name="v:OWithReceipts" class="def">OWithReceipts</a></td><td class="doc"><p>This option has two effects:
+   1) Internal interactions of the transaction
+      with the broker will request receipts;
+   2) before ending the transaction,
+      the library will check for receipts
+      that have not yet been confirmed by the broker
+      (including receipts requested by user calls
+       such as <em>writeQ</em> or <em>ackWith</em>).
+</p><p>If receipts are pending, when the transaction
+   is ready to terminate and <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OTimeout">OTimeout</a></code> with
+   a value <em>&gt; 0</em> is given, the transaction will
+   wait for pending receipts; otherwise
+   the transaction will be aborted with <code><a href="Network-Mom-Stompl-Client-Exception.html#v:TxException">TxException</a></code>.
+   Note that it, usually, does not make sense to use
+   this options without <code><a href="Network-Mom-Stompl-Client-Queue.html#v:OTimeout">OTimeout</a></code>,
+   since it is in all probability that a receipt 
+   has not yet been confirmed when the transaction terminates.
+</p></td></tr><tr><td class="src"><a name="v:OAbortMissingAcks" class="def">OAbortMissingAcks</a></td><td class="doc"><p>If a message has been received from a 
+   queue with <code>OMode</code> option other 
+   than <code><a href="Network-Mom-Stompl-Client-Queue.html#v:Auto">Auto</a></code> and this message has not yet been
+   acknowledged when the transaction is ready
+   to terminate, the <em>ack</em> is <em>missing</em>.
+   With this option, the transaction 
+   will not commit with missing <em>acks</em>,
+   but abort and raise <code><a href="Network-Mom-Stompl-Client-Exception.html#v:TxException">TxException</a></code>.
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:Topt" class="caption collapser" onclick="toggleSection('i:Topt')">Instances</p><div id="section.i:Topt" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Client-Queue.html#t:Topt">Topt</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:abort" class="def">abort</a> :: String -&gt; IO ()</p><div class="doc"><p>Aborts the transaction immediately by raising <code><a href="Network-Mom-Stompl-Client-Exception.html#v:AppException">AppException</a></code>.
+   The string passed in to <code><a href="Network-Mom-Stompl-Client-Queue.html#v:abort">abort</a></code> will be added to the 
+   exception message.
+</p></div></div><h1 id="g:6">Acknowledgements
+</h1><div class="doc"><p>Acknowledgements are used by the client to confirm the receipt
+     of a message. The Stomp protocol foresees three different
+     acknowledgement modes, defined when the client subscribes to a queues.
+     A subscription may use 
+     <em>auto mode</em>, <em>i.e.</em> a message is considered acknowledged
+     when it has been sent to the subscriber;
+     <em>client mode</em>, <em>i.e.</em> a message is considered acknowledged
+     only when an <em>ack</em> message has been sent back from the client.
+     Note that client mode is cumulative, that means, 
+     the broker will consider all messages acknowledged 
+     that have been sent
+     from the previous ack up to the acknowledged message;
+     or <em>client-individual mode</em>, <em>i.e.</em> non-cumulative
+     client mode.
+</p><p>A message may also be <em>negatively acknowledged</em> (<em>nack</em>). 
+     How the broker handles a <em>nack</em>, however,
+     is not further specified by the Stomp protocol.
+</p></div><div class="top"><p class="src"><a name="v:ack" class="def">ack</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</p><div class="doc"><p>Acknowledges the arrival of <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> to the broker.
+   It is used with a <code>Connection</code> <em>c</em> and a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> <em>x</em> like:
+</p><pre> ack c x
+</pre></div></div><div class="top"><p class="src"><a name="v:ackWith" class="def">ackWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</p><div class="doc"><p>Acknowledges the arrival of <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> to the broker,
+   requests a receipt and waits until it is confirmed.
+   Since it preempts the calling thread,
+   it is usually used with <em>timeout</em>,
+   for a <code>Connection</code> <em>c</em>, a <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> <em>x</em> 
+   and a <em>timeout</em> in microseconds <em>tmo</em> like:
+</p><pre> mbR &lt;- timeout tmo $ ackWith c x   
+ case mbR of
+   Nothing -&gt; -- error handling
+   Just _  -&gt; do -- ...
+</pre></div></div><div class="top"><p class="src"><a name="v:nack" class="def">nack</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</p><div class="doc"><p>Negatively acknowledges the arrival of <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> to the broker.
+   For more details see <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ack">ack</a></code>.
+</p></div></div><div class="top"><p class="src"><a name="v:nackWith" class="def">nackWith</a> ::  <a href="Network-Mom-Stompl-Client-Queue.html#t:Con">Con</a> -&gt; <a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a> a -&gt; IO ()</p><div class="doc"><p>Negatively acknowledges the arrival of <code><a href="Network-Mom-Stompl-Client-Queue.html#t:Message">Message</a></code> to the broker,
+   requests a receipt and waits until it is confirmed.
+   For more details see <code><a href="Network-Mom-Stompl-Client-Queue.html#v:ackWith">ackWith</a></code>.
+</p></div></div><h1 id="g:7">Exceptions
+</h1><div class="top"><p class="src">module <a href="Network-Mom-Stompl-Client-Exception.html">Network.Mom.Stompl.Client.Exception</a></p></div><h1 id="g:8">Complete Example
+</h1><div class="doc"><pre> import Network.Mom.Stompl.Client.Queue
+
+ import System.Environment (getArgs)
+ import Network.Socket (withSocketsDo)
+ import Control.Monad (forever)
+ import Control.Concurrent (threadDelay)
+ import qualified Data.ByteString.UTF8  as U
+ import Data.Char(toUpper)
+ import Codec.MIME.Type (nullType)
+
+ main :: IO ()
+ main = do
+   os &lt;- getArgs
+   case os of
+     [q] -&gt; withSocketsDo $ ping q
+     _   -&gt; putStrLn &quot;I need a queue name!&quot;
+            -- error handling...
+ 
+ data Ping = Ping | Pong
+   deriving (Show)
+
+ strToPing :: String -&gt; IO Ping
+ strToPing s = case map toUpper s of
+                 &quot;PING&quot; -&gt; return Ping
+                 &quot;PONG&quot; -&gt; return Pong
+                 _      -&gt; convertError $ &quot;Not a Ping: '&quot; ++ s ++ &quot;'&quot;
+
+ ping :: String -&gt; IO ()
+ ping qn = 
+   withConnection &quot;localhost&quot; 61613 [] [] $ \c -&gt; do
+     let iconv _ _ _ = strToPing . U.toString
+     let oconv       = return    . U.fromString . show
+     inQ  &lt;- newReader c &quot;Q-IN&quot;  qn [] [] iconv
+     outQ &lt;- newWriter c &quot;Q-OUT&quot; qn [] [] oconv
+     writeQ outQ nullType [] Pong
+     listen inQ outQ
+
+ listen  :: Reader Ping -&gt; Writer Ping -&gt; IO ()
+ listen iQ oQ = forever $ do
+   eiM &lt;- try $ readQ iQ 
+   case eiM of
+     Left  e -&gt; do
+       putStrLn $ &quot;Error: &quot; ++ show e
+       -- error handling ...
+     Right m -&gt; do
+       let p = case msgContent m of
+                 Ping -&gt; Pong
+                 Pong -&gt; Ping
+       putStrLn $ show p
+       writeQ oQ nullType [] p
+       threadDelay 10000
+</pre></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

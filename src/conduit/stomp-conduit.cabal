@@ -49,8 +49,8 @@ Description:
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
-                   stomp-queue >= 0.0.7,
-                   stompl      >= 0.0.3,
+                   stomp-queue >= 0.1.1,
+                   stompl      >= 0.1.1,
                    conduit     >= 1.0.8,
                    mtl         >= 2.1.2,
                    mime        >= 0.3.3

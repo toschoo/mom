@@ -1,0 +1,76 @@
+\begin{thebibliography}{10}
+
+\bibitem{amqp09}
+{AMQP Working Group}.
+\newblock {Advanced Message Queuing Protocol (\acronym{amqp})}, version 0.9.1.
+\newblock \url{http://www.amqp.org/specification/0-9-1/amqp-org-download},
+  2008.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{stomp12}
+Codehouse.
+\newblock {Simple Text Oriented Message Protocol}, version 1.2.
+\newblock \url{http://stomp.github.io/stomp-specification-1.2.html}, 2012.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{mapred}
+Jeffrey Dean and Sanjay Ghemawat.
+\newblock Mapreduce: Simplified data processing on large clusters.
+\newblock In {\em Sixth Symposium on Operating System Design and Implementation
+  (OSDI'04)}, 2004.
+
+\bibitem{gof}
+Erich Gamma, Richard Helm, Ralph Johnson, and John Vlissides.
+\newblock {\em {Design Patterns: Elements of reusable object-oriented
+  Software}}.
+\newblock Addison Wesley, 1994.
+
+\bibitem{cc13}
+Pieter Hintjens.
+\newblock {\em {Code Connected Volume 1 - Learning ZeroMQ, Professional Edition
+  for C/C++}}.
+\newblock O'Reilly, 2013.
+
+\bibitem{chp}
+iMatix Corporation.
+\newblock {CHP - ZeroMQ Clustered Hashmap Protocol - Draft}.
+\newblock \url{http://rfc.zeromq.org/spec:12}, 2011.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{mdp}
+iMatix Corporation.
+\newblock {MDP - Majordomo Protocol}.
+\newblock \url{http://rfc.zeromq.org/spec:7}, 2011.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{titanic}
+iMatix Corporation.
+\newblock {TSP - Titanic Service Protocol}.
+\newblock \url{http://rfc.zeromq.org/spec:9}, 2011.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{Knuth97}
+Donald Knuth.
+\newblock {\em {The Art of Computer Programming, Volume I}: Fundamental
+  Algorithms}.
+\newblock Addison-Wesley, 1997.
+
+\bibitem{amqp10}
+OASIS.
+\newblock {Advanced Message Queuing Protocol (\acronym{amqp})}, version 1.0.
+\newblock
+  \url{http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-complete-v1.0-os.pdf},
+  2011.
+\newblock [retrieved 10 September 2013].
+
+\bibitem{vino02}
+Steve Vinoski.
+\newblock Chain of responsibility.
+\newblock {\em {IEEE Internet Computing}}, 6:80--83, 6 2002.
+
+\bibitem{i3emqp}
+Steve Vinoski.
+\newblock {Advanced Message Queuing Protocol}.
+\newblock {\em {IEEE Internet Computing}}, 10:87--89, 10 2006.
+
+\end{thebibliography}

@@ -256,7 +256,7 @@ where
   setMyTime t c = c {conMyBeat = t}
 
   updCon :: Connection -> [Connection] -> [Connection]
-  updCon c cs = c : delete' c cs
+  updCon c cs = let !c' = delete' c cs in c:c'
   
   ------------------------------------------------------------------------
   -- Transaction 

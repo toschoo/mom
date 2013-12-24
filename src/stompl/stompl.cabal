@@ -1,8 +1,8 @@
 Name:            stompl
 Category:        Message-Oriented Middleware, Network, Stomp, Parser
-Version:         0.1.0
+Version:         0.1.1
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2012
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2013
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
@@ -36,6 +36,10 @@ Description:
   .
 
   Release History:
+
+  .
+
+  [0.1.1] Dependency for bytestring set to 0.10
 
   .
 
@@ -114,9 +118,9 @@ Description:
 
 Library
   Build-Depends:   base        >= 4.0 && < 5.0,
-                   bytestring  >= 0.9 && < 0.10,
+                   bytestring  >= 0.10, 
                    utf8-string >= 0.3.6,
-                   attoparsec  >= 0.9.1.1,
+                   attoparsec  >= 0.10,
                    split       >= 0.1.4.1,
                    mime        >= 0.3.3
                    -- 3.0.3.2,
