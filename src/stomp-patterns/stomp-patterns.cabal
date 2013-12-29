@@ -1,4 +1,4 @@
-Name:            stomp-conduit
+Name:            stomp-patterns
 Version:         0.0.1
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2013
@@ -9,7 +9,7 @@ Maintainer:      tobias dot schoofs at gmx dot net
 Homepage:        http://github.com/toschoo/mom
 Category:        Network, Message-oriented Middleware, Stomp, Client, Conduit
 Build-Type:      Simple
-Synopsis:        Stompl Conduit Client
+Synopsis:        Stompl MOM Stomp Client
 Description:
   The Stomp Protocol specifies message-oriented interoperability.
   Applications connect to a message broker to send (publish)
@@ -49,13 +49,15 @@ Description:
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
-                   stomp-queue >= 0.0.7,
-                   stompl      >= 0.0.3,
-                   conduit     >= 1.0.8,
+                   stomp-queue >= 0.1.1,
+                   stompl      >= 0.1.0,
                    mtl         >= 2.1.2,
-                   mime        >= 0.3.3
+                   mime        >= 0.3.3,
+                   bytestring  >= 0.10.4.0,
+                   time        >= 1.4,
+                   containers  >= 0.4.2.1
 
-  hs-source-dirs: Network/Mom/Stompl/Client, .
+  hs-source-dirs: Network/Mom/Stompl/Patterns, .
                    
-  Exposed-Modules: Network.Mom.Stompl.Client.Conduit
+  Exposed-Modules: Network.Mom.Stompl.Patterns.Basic
 

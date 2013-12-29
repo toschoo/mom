@@ -1,6 +1,7 @@
 module Main
 where
 
+  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
@@ -13,17 +14,17 @@ where
   main = do
     os <- getArgs
     case os of
-      [m] -> withSocketsDo $ tstRequest m
-      _   -> do
-        putStrLn "I need a message and nothing else."
+      [q,m] -> withSocketsDo $ tstRequest q m
+      _     -> do
+        putStrLn "I need a queue and a message and nothing else."
         exitFailure
 
-  tstRequest :: String -> IO ()
-  tstRequest m = 
+  tstRequest :: QName -> String -> IO ()
+  tstRequest q m = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> 
       withClient c "Test" "olleh"
                  ("/q/mychannel", [], [], iconv)
-                 ("/q/olleh",     [], [], oconv) $ \cl -> do
+                 (q,              [], [], oconv) $ \cl -> do
         mbX <- request cl (-1) nullType [] m
         case mbX of
           Nothing -> putStrLn "Nothing received"

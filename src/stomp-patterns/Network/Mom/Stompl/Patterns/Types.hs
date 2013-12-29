@@ -14,7 +14,7 @@ where
   import           Control.Exception (throwIO, 
                                       Exception, SomeException, Handler(..),
                                       AsyncException(ThreadKilled),
-                                      bracket, catch, catches)
+                                      bracket, catch, catches, finally)
   import           Control.Concurrent 
   import           Control.Monad (forever, unless, void)
 
@@ -56,6 +56,12 @@ where
   ignorebody :: InBound ()
   ignorebody _ _ _ _ = return ()
 
+  bytesOut :: OutBound B.ByteString
+  bytesOut = return
+
+  bytesIn :: InBound B.ByteString
+  bytesIn _ _ _ = return
+
   -----------------------------------------------------------------------
   -- Error and Exception
   -----------------------------------------------------------------------
@@ -72,6 +78,13 @@ where
   killAndWait :: MVar () -> ThreadId -> IO ()
   killAndWait m tid = do killThread tid
                          void $ takeMVar m
+
+  withThread :: IO () -> IO r -> IO r
+  withThread thrd action = do
+    stp <- newEmptyMVar
+    bracket (forkIO $ finally thrd (putMVar stp ()))
+            (killAndWait stp)
+            (\_ -> action)
 
   -------------------------------------------------------------------------
   -- | Indicates criticality of the error event
@@ -97,6 +110,7 @@ where
                          | HeaderX String    String
                          | MissingHbX        String
                          | UnacceptableHbX   Int
+                         | NoProviderX       String
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception PatternsException

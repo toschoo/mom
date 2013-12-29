@@ -10,7 +10,10 @@ CLIENT = Client
 
 SUBSRC = $(SUTDIR)/Patterns/Basic.hs \
          $(SUTDIR)/Patterns/Types.hs \
-         $(SUTDIR)/Patterns/Registry.hs 
+         $(SUTDIR)/Patterns/Registry.hs \
+	 $(SUTDIR)/Patterns/Desk.hs \
+	 $(SUTDIR)/Patterns/Balancer.hs \
+	 $(SUTDIR)/Patterns/Bridge.hs 
 
 GHC = ghc
 FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
@@ -29,9 +32,19 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/sub3 \
         $(SMOKEDIR)/server1 \
         $(SMOKEDIR)/server2 \
+        $(SMOKEDIR)/server3 \
+        $(SMOKEDIR)/server4 \
         $(SMOKEDIR)/worker1 \
+        $(SMOKEDIR)/worker2 \
         $(SMOKEDIR)/pub1 \
         $(SMOKEDIR)/pub2 \
+        $(SMOKEDIR)/desk1 \
+        $(SMOKEDIR)/bal1 \
+        $(SMOKEDIR)/router1 \
+        $(SMOKEDIR)/fwd1 \
+        $(SMOKEDIR)/srb1 \
+        $(SMOKEDIR)/tsb1 \
+        $(SMOKEDIR)/deskcl1 \
         $(SMOKEDIR)/sendtx \
         $(SMOKEDIR)/sendtx2 \
         $(SMOKEDIR)/sendf \
@@ -71,13 +84,43 @@ $(SMOKEDIR)/server1:	$(SMOKEDIR)/server1.hs $(SUBSRC)
 $(SMOKEDIR)/server2:	$(SMOKEDIR)/server2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/server3:	$(SMOKEDIR)/server3.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/server4:	$(SMOKEDIR)/server4.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/worker1:	$(SMOKEDIR)/worker1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/worker2:	$(SMOKEDIR)/worker2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/pub1:	$(SMOKEDIR)/pub1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/pub2:	$(SMOKEDIR)/pub2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/desk1:	$(SMOKEDIR)/desk1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/bal1:	$(SMOKEDIR)/bal1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/router1:	$(SMOKEDIR)/router1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/fwd1:	$(SMOKEDIR)/fwd1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/srb1:	$(SMOKEDIR)/srb1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/tsb1:	$(SMOKEDIR)/tsb1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/deskcl1:	$(SMOKEDIR)/deskcl1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/frost:	$(SMOKEDIR)/frost.hs $(SUBSRC)
@@ -167,9 +210,19 @@ clean:
 	rm -f $(SMOKEDIR)/sub3
 	rm -f $(SMOKEDIR)/server1
 	rm -f $(SMOKEDIR)/server2
+	rm -f $(SMOKEDIR)/server3
+	rm -f $(SMOKEDIR)/server4
 	rm -f $(SMOKEDIR)/worker1
+	rm -f $(SMOKEDIR)/worker2
 	rm -f $(SMOKEDIR)/pub1
 	rm -f $(SMOKEDIR)/pub2
+	rm -f $(SMOKEDIR)/desk1
+	rm -f $(SMOKEDIR)/bal1 
+	rm -f $(SMOKEDIR)/router1
+	rm -f $(SMOKEDIR)/fwd1 
+	rm -f $(SMOKEDIR)/srb1 
+	rm -f $(SMOKEDIR)/tsb1 
+	rm -f $(SMOKEDIR)/deskcl1
 	rm -f $(SMOKEDIR)/contx1
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o

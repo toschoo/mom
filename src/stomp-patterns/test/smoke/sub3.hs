@@ -1,6 +1,7 @@
 module Main
 where
 
+  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
@@ -8,16 +9,24 @@ where
   import Control.Monad (forever)
   import Control.Concurrent
   import System.IO (stdout, hFlush)
+  import System.Environment
+  import System.Exit
 
   main :: IO ()
-  main = withSocketsDo tstSub
+  main = do
+    os <- getArgs
+    case os of
+      [rq, sq] -> withSocketsDo $ tstSub rq sq
+      _   -> do
+        putStrLn "I need a pub queue and a sub queue and nothing else."
+        exitFailure
 
-  tstSub :: IO ()
-  tstSub = 
+  tstSub :: QName -> QName -> IO ()
+  tstSub rq sq = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do
       m <- newMVar 0
-      withSubMVar c "Test" "Pub1" "/q/pub1" 500000 
-                    ("/q/sub1", [], [], iconv)
+      withSubMVar c "Test" "Pub1" rq 500000 
+                    (sq, [], [], iconv)
                     m onerr $ forever $ waitfor m 0
     where iconv :: InBound Int
           iconv _ _ _ = return . read . B.unpack 

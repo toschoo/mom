@@ -15,13 +15,13 @@ where
   tstPub :: IO ()
   tstPub = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> 
-      withPub c "Test1" "Pub1" "/q/pub1" onerr
-              ("/q/privatepub1", [], [], oconv) (go 1) 
+      withPub c "Test1" "Pub1" "/q/source/pub1" onerr
+                ("unknown", [], [], oconv) (go 1) 
     where oconv       = return . B.pack . show
           onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
           go :: Int -> PubA Int -> IO ()
           go i p      = do publish p nullType [] i 
                            print i
-                           -- threadDelay 500000
+                           threadDelay 500000
                            go (i+1) p
 

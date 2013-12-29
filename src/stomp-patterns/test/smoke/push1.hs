@@ -1,6 +1,7 @@
 module Main
 where
 
+  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
@@ -13,16 +14,16 @@ where
   main = do
     os <- getArgs
     case os of
-      [m] -> withSocketsDo $ tstPush m
+      [q,m] -> withSocketsDo $ tstPush q m
       _   -> do
-        putStrLn "I need a message and nothing else."
+        putStrLn "I need a queue and a message and nothing else."
         exitFailure
 
-  tstPush :: String -> IO ()
-  tstPush m = 
+  tstPush :: QName -> String -> IO ()
+  tstPush q m = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> 
       withPusher c "Test" "olleh" 
-                   ("/q/olleh", [], [], oconv) $ \p -> 
+                   (q, [], [], oconv) $ \p -> 
         push p nullType [] m
     where oconv       = return . B.pack
 

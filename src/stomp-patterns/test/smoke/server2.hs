@@ -9,22 +9,31 @@ where
   import Control.Monad (forever, when)
   import Control.Concurrent 
   import Codec.MIME.Type (nullType)
+  import System.Environment
+  import System.Exit
 
   main :: IO ()
-  main = withSocketsDo tstReply 
+  main = do
+    os <- getArgs
+    case os of
+      [rq, sq] -> withSocketsDo $ tstReply rq sq
+      _   -> do
+        putStrLn "I need a register queue and service queue and nothing else."
+        exitFailure
+
 
   tstReply :: IO ()
-  tstReply = 
+  tstReply rq sq = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do
       withRegistry c "Test" "/q/registry" (0,1000)
                    onerr $ \reg ->
         withServerThread c "Test" 
                            "olleh" nullType [] createReply
-                           ("/q/request", [], [], iconv)
+                           (sq,           [], [], iconv)
                            ("unknown",    [], [], oconv)
-                           ("/q/registry", 500000, (500, 100, 2000))
+                           (rq, 500000, (500, 100, 2000))
                            onerr $ 
-            withReader c "Server1" "/q/olleh" [] [] iconv $ \r -> 
+            withReader c "Server2" "/q/olleh" [] [] iconv $ \r -> 
               withWriter c "Dummy" "unknown"  [] [] oconv $ \w -> forever $ do
                 m <- readQ r
                 j <- getJobName m

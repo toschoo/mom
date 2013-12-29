@@ -11,15 +11,14 @@ where
   import           Data.Maybe (fromMaybe)
   import           Data.Map (Map)
   import qualified Data.Map as M
-  import           Data.Sequence (Seq, (|>), (<|), (><), ViewL(..))
+  import           Data.Sequence (Seq, (|>), (<|), ViewL(..))
   import qualified Data.Sequence as S
   import           Data.Foldable (toList)
   import           Codec.MIME.Type (nullType)
   import           Prelude hiding (catch)
-  import           Control.Exception (throwIO, 
-                                      bracket, catches, finally)
+  import           Control.Exception (throwIO, catches)
   import           Control.Concurrent 
-  import           Control.Monad (forever, unless, void)
+  import           Control.Monad (forever)
   import           Control.Applicative ((<$>))
 
   -----------------------------------------------------------------------
@@ -57,10 +56,10 @@ where
             mbF <- timeout tmo $ readQ r 
             case mbF of
               Nothing -> throwIO $ TimeoutX
-                                    "No response from router"
+                                    "No response from registry"
               Just m  -> do eiS <- getSC m
                             case eiS of 
-                              Left s   -> throwIO $ BadStatusCodeX s
+                              Left  s  -> throwIO $ BadStatusCodeX s
                               Right OK -> do h <- getHB m
                                              return (OK, h)
                               Right sc ->    return (sc, 0)
@@ -218,7 +217,7 @@ where
                              ps = updOrAddProv (upd now) p 
                                                (jobProvs j)
                           in M.insert jn j{jobProvs = ps} m
-          upd now o = o{prvNxt = nextHB now True $ tolerance * (prvHb o)}
+          upd now o = o{prvNxt = nextHB now True $ tolerance * prvHb o}
       
   ------------------------------------------------------------------------
   -- Remove 'Provider' from the job
@@ -229,7 +228,10 @@ where
     where ins m = 
             case M.lookup jn m of
               Nothing -> m
-              Just j  -> M.insert jn j{jobProvs = remProv qn $ jobProvs j} m
+              Just j  -> 
+                let ps = remProv qn $ jobProvs j
+                 in if S.null ps then M.delete jn m
+                                 else M.insert jn j{jobProvs = ps} m
 
   ------------------------------------------------------------------------
   -- | Map action to 'Provider's of job 'JobName';
@@ -312,10 +314,7 @@ where
   withRegistry c n rq (mn, mx) onErr action = do
     let nm  = n ++ "Registry"
     reg <- Registry <$> newMVar (Reg nm M.empty)
-    stp <- newEmptyMVar -- wait for worker thread to exit
-    bracket (forkIO $ finally (startReg reg nm) (putMVar stp ()))
-            (killAndWait stp) 
-            (\_  -> action reg)
+    withThread (startReg reg nm) (action reg)
     where startReg reg nm = 
             withReader   c (n ++ "Reader") rq [] [] ignorebody $ \r -> 
               withWriter c (n ++ "Writer") "unknown" [] [] nobody $ \w -> 

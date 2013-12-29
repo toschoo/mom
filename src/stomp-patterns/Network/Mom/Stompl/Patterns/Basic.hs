@@ -38,17 +38,25 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Patterns.Basic (
                           -- * Client
-                          ClientA, withClient, request, checkRequest,
+                          ClientA, clName, withClient, request, checkRequest,
                           -- * Server
-                          ServerA, withServer, reply,
-                          RegistryDesc, withServerThread,
+                          ServerA, srvName, withServer, reply,
+                          -- * Registry
+                          RegistryDesc, register, unRegister, heartbeat,
+                          Registry, withRegistry, 
+                          insertR, removeR, mapR, mapAllR, 
+                          Provider, prvQ, getProvider, showRegistry,
+                          -- * withServerThread
+                          withServerThread,
                           -- * Pub
-                          PubA, withPub, publish, withPubThread,
+                          PubA, pubName, withPub, publish, withPubThread,
                           -- * Sub
-                          SubA, withSub, checkIssue,
+                          SubA, subName, withSub, checkIssue,
                           withSubThread, withSubMVar,
+                          -- * Heartbeats for Pub
+                          withPubProxy,
                           -- * Worker
-                          PusherA, withPusher, push,
+                          PusherA, pushName, withPusher, push,
                           withTaskThread)
 where
 
@@ -58,26 +66,21 @@ where
   import           Network.Mom.Stompl.Client.Queue 
   import qualified Network.Mom.Stompl.Frame as F
   import           System.Timeout
-  import           Data.Time.Clock
-  import           Data.Char (isDigit)
-  import qualified Data.ByteString.Char8 as B
-  import           Codec.MIME.Type (Type, nullType)
+  import           Codec.MIME.Type (Type)
   import           Prelude hiding (catch)
-  import           Control.Exception (throwIO, 
-                                      SomeException, Handler(..),
-                                      AsyncException(ThreadKilled),
-                                      bracket, catch, catches, finally)
+  import           Control.Exception (throwIO, catches, finally)
   import           Control.Concurrent 
-  import           Control.Monad (forever, unless, when, void)
+  import           Control.Monad (forever, unless, void)
 
   ------------------------------------------------------------------------
   -- | The client data type
   ------------------------------------------------------------------------
   data ClientA i o = Cl {
-                      clChn :: String,
-                      clJob :: JobName,
-                      clIn  :: Reader i,
-                      clOut :: Writer o}
+                      clName :: String,
+                      clChn  :: QName,
+                      clJob  :: JobName,
+                      clIn   :: Reader i,
+                      clOut  :: Writer o}
   
   ------------------------------------------------------------------------
   -- | The function creates a client that lives within its scope.
@@ -105,11 +108,7 @@ where
                        WriterDesc o ->
                        (ClientA i o  -> IO r) -> IO r
   withClient c n jn rd@(rn, _, _, _) wd act =
-    withPair c n rd wd $ \(r,w) -> act $ Cl rn jn r w
-
-  -- the reply queue header ----------------------------------------------
-  channel :: String
-  channel = "__client__"
+    withPair c n rd wd $ \(r,w) -> act $ Cl n rn jn r w
 
   ------------------------------------------------------------------------
   -- | The client will send the request of type /o/
@@ -139,7 +138,7 @@ where
   request :: ClientA i o -> 
              Int -> Type -> [F.Header] -> o -> IO (Maybe (Message i))
   request c tmo t hs r = 
-    let hs' = [(channel  , clChn c),
+    let hs' = [("__channel__", clChn c),
                ("__job__", clJob c)] ++ hs
      in writeQ (clOut c) t hs' r >> timeout tmo (readQ (clIn c))
 
@@ -245,48 +244,53 @@ where
     mbM <- timeout tmo $ readQ (srvIn s)
     case mbM of
       Nothing -> return ()
-      Just m  -> 
-        case lookup channel $ msgHdrs m of
-          Nothing -> throwIO $ HeaderX channel 
-                                 "No reply channel defined!"
-          Just c  -> transform m >>=
-                        writeAdHoc (srvOut s) c t hs 
+      Just m  -> do
+        c <- getChannel m
+        o <- transform m
+        writeAdHoc (srvOut s) c t hs o
 
   type RegistryDesc = (QName, Int, (Int, Int, Int))
 
   ------------------------------------------------------------------------
   -- | Create a server that works in a background thread 
   ------------------------------------------------------------------------
-  withServerThread :: Con -> String ->
-                      JobName -> Type -> [F.Header] -> (Message i -> IO o) ->
+  withServerThread :: Con -> String -> JobName ->
+                      Type -> [F.Header] -> (Message i -> IO o) ->
                       ReaderDesc i -> 
                       WriterDesc o ->
                       RegistryDesc -> 
-                      OnError -> (IO r) ->  IO r
+                      OnError      -> IO r -> IO r
   withServerThread c n
                      jn t hs transform
-                     rd@(rn, ros, rh, iconv)
-                     wd@(wn, wos, wh, oconv) 
+                     rd@(rn, _, _, _)
+                     wd
                      (reg, tmo, (best, mn, mx))
                      onErr action =
     withServer c n rd wd $ \s -> do
-      (sc,me) <- register c jn Service reg rn tmo best
+      (sc,me) <- if null reg 
+                   then return (OK, 0)
+                   else register c jn Service reg rn tmo best
       case sc of
         OK -> 
           if me < mn || me > mx
             then throwIO $ UnacceptableHbX me
-            else do hb  <- mkHB me
-                    m   <- newMVar hb 
-                    stp <- newEmptyMVar -- wait for thread to terminate
+            else do hb <- mkHB me
+                    m  <- newMVar hb 
                     let p = if me <= 0 then (-1) else 1000 * me 
-                    bracket (forkIO $ finally (srv m p s) (putMVar stp ()))
-                            (killAndWait stp) 
-                            (\_   -> action)
+                    withThread (finally (srv m p s) 
+                                        (finalise c jn reg rn tmo)) action
         e -> throwIO $ NotOKX e "on register"
       where srv m p s = withWriter c "HB" reg [] [] nobody $ \w -> 
                           forever $ catches (
-                            reply s p t hs transform >> heartbeat m w jn rn)
-                            $ ignoreHandler Error (srvName s) onErr
+                            reply s p t hs transform >> heartbeat m w jn rn) (
+                           ignoreHandler Error (srvName s) onErr)
+
+  finalise :: Con -> JobName -> QName -> QName -> Int -> IO ()
+  finalise c jn wn rn tmo | null wn   = return ()
+                          | otherwise = do 
+                               sc <- unRegister c jn wn rn tmo
+                               unless (sc == OK) $ 
+                                     throwIO $ NotOKX sc "on unregister"
 
   ------------------------------------------------------------------------
   -- | The publisher data type
@@ -302,11 +306,11 @@ where
   --   of the user action passed in.
   ------------------------------------------------------------------------
   withPub :: Con -> String -> JobName -> QName -> OnError -> 
-             WriterDesc o ->
+             WriterDesc o -> -- qname is irrelevant
              (PubA o      -> IO r) -> IO r
-  withPub c n jn rn onErr wd@(wn, wos, wh, oconv) act = 
-    withRegistry c jn rn (0,0) onErr $ \r ->
-      withWriter c jn wn wos wh oconv $ \w -> act $ Pub n jn r w
+  withPub c n jn rn onErr (_, wos, wh, oconv) act = 
+    withRegistry c  n rn (0,0) onErr $ \r ->
+      withWriter c jn "unknown" wos wh oconv $ \w -> act $ Pub n jn r w
 
   ------------------------------------------------------------------------
   -- | Publishh data of type /o/.
@@ -319,22 +323,14 @@ where
   -- | Create a publisher that works in a background thread 
   ------------------------------------------------------------------------
   withPubThread :: Con -> String -> JobName -> QName ->
-                   Type -> [F.Header] -> (IO o) ->
-                   WriterDesc o    -> Int -> 
-                   OnError -> (IO r) ->  IO r
-  withPubThread c n jn rn
-                t hs create
-                wd period
-                onErr action = do
-    stp <- newEmptyMVar -- wait for thread to terminate
-    bracket (forkIO $ finally doPub (putMVar stp ()))
-            (killAndWait stp) 
-            (\_   -> action)
+                   Type -> [F.Header] -> IO o ->
+                   WriterDesc o       -> Int  -> 
+                   OnError -> IO r    ->  IO r
+  withPubThread c n jn rn t hs create wd period onErr = withThread doPub
     where doPub = withPub c n jn rn onErr wd $ \p ->
                     forever $ catches (do
                       threadDelay period -- simplistic
-                      m <- create
-                      publish p t hs m) (
+                      create >>= publish p t hs) (
                     ignoreHandler Error (pubName p) onErr)
 
   ------------------------------------------------------------------------
@@ -352,27 +348,25 @@ where
   withSub :: Con -> String -> JobName -> QName -> Int ->
              ReaderDesc i ->
              (SubA i      -> IO r) -> IO r
-  withSub c n jn wn tmo rd@(rn, ros, rh, iconv) act = 
-    withReader c n rn ros rh iconv $ \r -> finally (go r) finalise
+  withSub c n jn wn tmo (rn, ros, rh, iconv) act = 
+    withReader c n rn ros rh iconv $ \r -> 
+      finally (go r) (finalise c jn wn rn tmo)
     where go r     = do
-            (sc, _) <- register c jn Topic wn rn tmo 0
-            if (sc /= OK) then throwIO $ NotOKX sc "on register "
-                          else act $ Sub n r
-          finalise = do sc <- unRegister c jn wn rn tmo
-                        unless (sc == OK) $ 
-                              throwIO $ NotOKX sc "on unregister"
+            mbR <- if null wn 
+                     then return (Just (OK,0))
+                     else timeout tmo $ register c jn Topic wn rn tmo 0
+            case mbR of
+              Nothing     -> throwIO $ TimeoutX "on register"
+              Just (OK,_) -> act $ Sub n r
+              Just (sc,_) -> throwIO $ NotOKX sc "on register "
 
   ------------------------------------------------------------------------
   -- | Create a subscriber that works in a background thread 
   ------------------------------------------------------------------------
   withSubThread :: Con -> String -> JobName    -> QName  -> Int     ->
                    ReaderDesc i  -> (Message i -> IO ()) -> OnError -> 
-                   (IO r) -> IO r
-  withSubThread c n jn wn tmo rd@(rn, ros, rh, iconv) job onErr action = do
-    stp <- newEmptyMVar -- wait for thread to terminate
-    bracket (forkIO $ finally go (putMVar stp ()))
-            (killAndWait stp) 
-            (\_   -> action)
+                   IO r -> IO r
+  withSubThread c n jn wn tmo rd job onErr = withThread go 
     where go = withSub c n jn wn tmo rd $ \s -> 
                  forever $ catches (checkIssue s >>= job)
                                    (ignoreHandler Error (subName s) onErr)
@@ -383,10 +377,10 @@ where
   ------------------------------------------------------------------------
   withSubMVar :: Con -> String -> JobName    -> QName  -> Int     ->
                  ReaderDesc i  -> MVar i     -> OnError -> 
-                 (IO r) -> IO r
-  withSubMVar c n jn wn tmo rd m onErr action = 
-    withSubThread c n jn wn tmo rd (job m) onErr action
-    where job v m = modifyMVar_ v $ \_ -> return $ msgContent m 
+                 IO r -> IO r
+  withSubMVar c n jn wn tmo rd v = 
+    withSubThread c n jn wn tmo rd job 
+    where job m = modifyMVar_ v $ \_ -> return $ msgContent m 
 
   ------------------------------------------------------------------------
   -- | Check if there is a new issue
@@ -408,7 +402,7 @@ where
   ------------------------------------------------------------------------
   withPusher :: Con -> String -> JobName -> WriterDesc o -> 
                 (PusherA o -> IO r) -> IO r
-  withPusher c n jn wd@(wq, wos, wh, oconv) action = 
+  withPusher c n jn (wq, wos, wh, oconv) action = 
     withWriter c n wq wos wh oconv $ \w -> action $ Pusher n jn w
 
   ------------------------------------------------------------------------
@@ -421,28 +415,27 @@ where
   ------------------------------------------------------------------------
   -- | Create a worker that works in a background thread 
   ------------------------------------------------------------------------
-  withTaskThread :: Con -> String ->
-                    JobName -> (Message i -> IO ()) ->
-                    ReaderDesc i -> 
-                    RegistryDesc -> 
-                    OnError -> (IO r) ->  IO r
+  withTaskThread :: Con -> String -> JobName     ->
+                    (Message i -> IO ())         -> 
+                    ReaderDesc i -> RegistryDesc -> 
+                    OnError      -> IO r         -> IO r
   withTaskThread c n
                    jn task
-                   rd@(rn, ros, rh, iconv)
+                   (rn, ros, rh, iconv)
                    (reg, tmo, (best, mn, mx))
                    onErr action = do
-      (sc,me) <- register c jn Task reg rn tmo best
+      (sc,me) <- if null reg
+                   then return (OK,0)
+                   else register c jn Task reg rn tmo best
       case sc of
         OK -> 
           if me < mn || me > mx
             then throwIO $ UnacceptableHbX me
             else do hb  <- mkHB me
                     m   <- newMVar hb 
-                    stp <- newEmptyMVar -- wait for thread to terminate
                     let p = if me <= 0 then (-1) else 1000 * me 
-                    bracket (forkIO $ finally (tsk m p) (putMVar stp ()))
-                            (killAndWait stp) 
-                            (\_   -> action)
+                    withThread (finally (tsk m p) 
+                                        (finalise c jn reg rn tmo)) action
         e -> throwIO $ NotOKX e "on register"
       where tsk m p = withWriter   c "HB" reg [] [] nobody $ \w -> 
                         withReader c n rn ros rh iconv $ \r ->
@@ -458,19 +451,13 @@ where
   -- | Send heartbeats from a publisher
   ------------------------------------------------------------------------
   withPubProxy :: Con -> String -> JobName -> QName ->
-                  ReaderDesc i  ->
-                  RegistryDesc  ->
-                  (IO r) -> IO r
-  withPubProxy c n jn wn rd@(rn, _, _, _)
-               (reg, tmo, (best, mn, mx)) act = do
-      stp <- newEmptyMVar
-      bracket (forkIO $ finally go (putMVar stp ()))
-              (killAndWait stp) 
-              (\_   -> act)
-      where go = withSub c n jn wn tmo rd $ \s -> 
-                   withWriter c "HB" wn [] [] nobody $ \w -> do
-                     (sc, h) <- register c jn Topic wn rn tmo 0
-                     if (sc /= OK) 
+                  ReaderDesc i  -> RegistryDesc     -> IO r -> IO r
+  withPubProxy c n jn pq rd@(rn, _, _, _)
+               (reg, tmo, (best, mn, mx)) = withThread go 
+      where go = withSub c n jn pq tmo rd $ \s -> 
+                   withWriter c "HB" reg [] [] nobody $ \w -> do
+                     (sc, h) <- register c jn Topic reg rn tmo best
+                     if sc /= OK
                        then throwIO $ NotOKX sc "on register proxy"
                        else 
                          if h < mn || h > mx
@@ -484,6 +471,6 @@ where
                 Nothing -> if i == 10 
                              then throwIO $ MissingHbX "No input from pub"
                              else beat hb h s w (i+1)
-                Just m  -> heartbeat hb w jn wn >> 
+                Just _  -> heartbeat hb w jn reg >> 
                            beat hb h s w 0
       

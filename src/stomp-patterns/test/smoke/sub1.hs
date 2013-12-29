@@ -13,7 +13,7 @@ where
   tstSub :: IO ()
   tstSub = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> 
-      withSub c "Test" "Pub1" "/q/pub1" 500000 
+      withSub c "Test" "Pub1" "/q/target/pub1" 500000 
               ("/q/sub1", [], [], iconv) $ \s -> forever $ do
         m <- checkIssue s
         print $ msgContent m
