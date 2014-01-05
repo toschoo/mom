@@ -1,7 +1,6 @@
 module Main
 where
 
-  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
@@ -30,7 +29,7 @@ where
                     m onerr $ forever $ waitfor m 0
     where iconv :: InBound Int
           iconv _ _ _ = return . read . B.unpack 
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m   = putStrLn $ "Error in " ++ m ++ show e
           waitfor m i = do
             i' <- readMVar m
             if i' /= i then    print i' >> waitfor m i'

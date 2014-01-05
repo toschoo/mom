@@ -153,7 +153,7 @@ where
       withRegistry c "Test-1" "/q/registry1" (0,0) onerr action
                    
   onerr :: OnError
-  onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+  onerr e m = putStrLn $ "Error in " ++ m ++ ": " ++ show e
 
   nonemptyString :: NonEmptyList (NonEmptyList Char) -> [String]
   nonemptyString (NonEmpty ns) = map (\(NonEmpty c) -> c) ns

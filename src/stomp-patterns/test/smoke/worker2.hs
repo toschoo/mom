@@ -1,15 +1,12 @@
 module Main
 where
 
-  import Types
-  import Registry
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
   import Network.Socket
-  import Control.Monad (forever, when)
+  import Control.Monad (forever)
   import Control.Concurrent 
-  import Codec.MIME.Type (nullType)
   import System.Environment
   import System.Exit
 
@@ -34,4 +31,4 @@ where
             forever $ threadDelay 1000000
     where iconv _ _ _ = return . B.unpack
           job         = putStrLn . reverse . msgContent
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m   = putStrLn $ "Error in " ++ m ++ show e

@@ -1,15 +1,12 @@
 module Main
 where
 
-  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import Network.Mom.Stompl.Patterns.Balancer
-  import qualified Data.ByteString.Char8 as B
   import Network.Socket
   import Control.Monad (forever)
   import Control.Concurrent
-  import Codec.MIME.Type (nullType)
   import System.Environment
   import System.Exit
 
@@ -26,7 +23,6 @@ where
   tstPub :: QName -> QName -> IO ()
   tstPub rq sq = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> 
-      withBalancer c "Test" rq {- "/q/reg/1" -} (0,5000) onerr
-                            sq {- "/q/olleh/1" -} $ 
-        forever $ threadDelay 100000
-    where onerr c e m = putStrLn $ show c ++ " in " ++ m ++ ": " ++ show e
+      withBalancer c "Test" rq (0,5000) sq onerr $
+        forever $ threadDelay 5000000
+    where onerr e m = putStrLn $ "Error in " ++ m ++ ": " ++ show e

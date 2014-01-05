@@ -1,13 +1,11 @@
 module Main
 where
 
-  import Registry
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
   import Network.Socket
   import Control.Monad (forever, when)
-  import Control.Concurrent 
   import Codec.MIME.Type (nullType)
 
   main :: IO ()
@@ -34,7 +32,7 @@ where
     where iconv _ _ _ = return . B.unpack
           oconv       = return . B.pack
           job         = putStrLn . reverse . msgContent
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m   = putStrLn $ "Error in " ++ m ++ show e
           sendM w m p = do putStrLn $ "Provider: " ++ prvQ p
                            writeAdHoc w (prvQ p) nullType (msgHdrs    m) 
                                                           (msgContent m)

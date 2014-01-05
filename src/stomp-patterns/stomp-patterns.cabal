@@ -7,36 +7,75 @@ license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
 Homepage:        http://github.com/toschoo/mom
-Category:        Network, Message-oriented Middleware, Stomp, Client, Conduit
+Category:        Network, Message-oriented Middleware, Stomp, Client
 Build-Type:      Simple
-Synopsis:        Stompl MOM Stomp Client
+Synopsis:        Stompl MOM Stomp Patterns
 Description:
-  The Stomp Protocol specifies message-oriented interoperability.
-  Applications connect to a message broker to send (publish)
-  or receive (subscribe) messages through queues. 
-  Interoperating applications do not know 
-  the location or internal structure of each other.
-  They see only each other's interfaces, /i.e./ the messages
-  published and subscribed through a broker.
+  The Stomp Protocol specifies a reduced message broker
+  with queues usually read by one application and written
+  by one or more applications.
+  The specification does not include other, more advanced,
+  interoperability patterns, where, for example,
+  a client requests a job from a server or
+  a publisher sends data to many subscribers.
+  Such communication patterns, apparantly,
+  are left to be implemented by applications.
+  Patterns like clients-server, publish and subscribe
+  and many others, however, are used over and over again
+  in message-oriented applications.
 
   .
   
-  The Stomp Queue library provides 
-  a Stomp client, using abstractions like 'Reader' and 'Writer' Queues.
-  The Stomp Conduit library provides an abstraction level
-  on top of queues, where not single messages are in the focus
-  of the API, but streams of messages,
-  either infinite streams or
-  multipart messages with an explicit last message segment.
-  The latter concept is
-  an extension of the Stomp specification.
+  This library implements a number of communication patterns
+  on top of the Stomp specification
+  that are often used and often described in the literature.
+  There is a set of /basic/ patterns,
 
   .
 
+  * client-server,
+
+  .
+
+  * publish and subscribe and
+
+  .
+
+  * pusher-worker
+
+  .
+
+  as well as a set of derived patterns, namely:
+
+  .
+
+  * Desk: A service to obtain the access point
+          (/i.e./ queue name) of a specified provider;
+
+  .
+
+  * Load balancers: Services to balance requests
+                    among a group of connected /workers/
+                    (a.k.a. /Majordomo/ pattern);
+
+  .
+
+  * Bridge: Connections between brokers.
+            
+  .
+  
   More information, examples and a test suite are available 
   on <http://github.com/toschoo/mom>.
   The Stomp specification can be found at
   <http://stomp.github.com>.
+
+  .
+
+  The notion of /pattern/ and the related concepts,
+  as they are presented here,
+  rely heavily on 
+  Pieter Hintjens, \"Code Connected\", O'Reilly, 2013
+  (see also <http://hintjens.com/books>).
 
   .
 
@@ -55,9 +94,16 @@ Library
                    mime        >= 0.3.3,
                    bytestring  >= 0.10.4.0,
                    time        >= 1.4,
-                   containers  >= 0.4.2.1
+                   containers  >= 0.4.2.1,
+                   split       >= 0.2.2
 
   hs-source-dirs: Network/Mom/Stompl/Patterns, .
                    
-  Exposed-Modules: Network.Mom.Stompl.Patterns.Basic
+  Exposed-Modules: Network.Mom.Stompl.Patterns.Basic,
+                   Network.Mom.Stompl.Patterns.Desk,
+                   Network.Mom.Stompl.Patterns.Balancer,
+                   Network.Mom.Stompl.Patterns.Bridge
+
+  other-modules: Types, Registry
+                 
 

@@ -1,12 +1,11 @@
 module Main
 where
 
-  import Registry
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
   import Network.Socket
-  import Control.Monad (forever, when)
+  import Control.Monad (forever)
   import Control.Concurrent 
   import Codec.MIME.Type (nullType)
 
@@ -25,4 +24,4 @@ where
     where iconv _ _ _ = return . B.unpack
           oconv       = return . B.pack
           createReply = return . reverse . msgContent
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m   = putStrLn $ "Error in " ++ m ++ show e

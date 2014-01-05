@@ -29,8 +29,8 @@ where
   (~>) :: IO Bool -> IO Bool -> IO Bool
   x ~> f = x >>= \t -> if t then f else return False
 
-  onErr :: Criticality -> SomeException -> String -> IO ()
-  onErr c e m = putStrLn $ show c ++ ": " ++ show e ++ " - " ++ m
+  onErr :: SomeException -> String -> IO ()
+  onErr e m = putStrLn $ "Error in " ++ m ++ ": " ++ show e
 
   -------------------------------------------------------------
   -- controlled quickcheck, arbitrary tests

@@ -22,11 +22,14 @@ where
   import           Control.Applicative ((<$>))
 
   -----------------------------------------------------------------------
-  -- JobType: Service, Task or Topic
+  -- | JobType: Service, Task or Topic
   -----------------------------------------------------------------------
   data JobType = Service | Task | Topic
     deriving (Eq, Show)
 
+  -----------------------------------------------------------------------
+  -- | Safe read method for JobType
+  -----------------------------------------------------------------------
   readJobType :: String -> Maybe JobType
   readJobType s = 
     case map toUpper s of
@@ -35,15 +38,69 @@ where
       "TOPIC"   -> Just Topic
       _         -> Nothing
 
+
   ------------------------------------------------------------------------
-  -- | Connect to a registry to receive a service
+  -- | A helper that shall ease the use of the 'register' function.
+  --   A registry to which a call wants to connect is described as
+  --   
+  --   * The 'QName' through which the registry receives requests;
+  --
+  --   * The 'Timeout' in microseconds, /i.e./ the time the caller
+  --                   will wait before the request fails;
+  --
+  --   * A triple of heartbeat specifications:
+  --     the /best/ value, /i.e./ 
+  --          the rate at which the caller 
+  --                   prefers to send heartbeats,
+  --     the /minimum/ rate at which the caller 
+  --                   can accept to send heartbeats,
+  --     the /maximum/ rate at which the caller 
+  --                   can accept to send heartbeats.
+  --     Note that all these values are in milliseconds!
+  ------------------------------------------------------------------------
+  type RegistryDesc = (QName, Int, (Int, Int, Int))
+
+  ------------------------------------------------------------------------
+  -- | Connect to a registry:
+  --   The caller registers itself at the registry.
+  --   The owner of the registry will then
+  --   use the caller depending on its purpose.
+  --
+  --   * 'Con': Connection to a Stomp broker;
+  --
+  --   * 'JobName': The name of the job provided by the caller;
+  --
+  --   * 'JobType': The type of the job provided by the caller;
+  --
+  --   * 'QName': The registry's registration queue;
+  --
+  --   * 'QName': The queue to register;
+  --              this is the queue the register will actually
+  --              use (for forwarding requests or whatever
+  --              it does in this specific case).
+  --              The registry, internally,
+  --              uses 'JobName' together with this queue
+  --              as a /key/ to identify the provider. 
+  --
+  --   * Int: Timeout in microseconds;
+  --
+  --   * Int: Preferred heartbeat in milliseconds
+  --          (0 foro no heartbeats).
+  --
+  -- The function returns a tuple of 'StatusCode' 
+  -- and the heartbeat proposed by the registry
+  -- (which may differ from the preferred heartbeat of the caller).
+  -- Whenever the 'StatusCode' is not 'OK', 
+  -- the heartbeat is 0.
+  -- If the 'JobName' is null, the 'StatusCode' will be 'BadRequest'.
+  -- If the timeout expires, register throws 'TimeoutX'.
   ------------------------------------------------------------------------
   register :: Con -> JobName -> JobType -> 
-                     QName -> 
-                     QName -> Int -> Int -> IO (StatusCode, Int)
+                     QName   -> QName   -> 
+                     Int -> Int -> IO (StatusCode, Int)
   register c j t o i tmo me | null j    = return (BadRequest,0)
                             | otherwise =
-      let i' = o ++ "/" ++ j ++ i
+      let i' = o ++ "/" ++ j ++ "/" ++ i
           hs = [("__type__",    "register"),
                 ("__job-type__",    show t),
                 ("__job__",              j),
@@ -65,10 +122,33 @@ where
                               Right sc ->    return (sc, 0)
 
   ------------------------------------------------------------------------
-  -- | Disconnect from a registry
+  -- | Disconnect from a registry:
+  --   The caller disconnects from a registry
+  --   to which it has registered before.
+  --   For the case that the registry is not receiving heartbeats
+  --   from the caller,
+  --   it is essential to unregister, when
+  --   the service is no longer provided.
+  --   Otherwise, the registry has no way to know
+  --   that it should not send requests to this provider anymore.
+  --
+  --   * 'Con': Connection to a Stomp broker;
+  --
+  --   * 'JobName': The 'JobName' to unregister;
+  --
+  --   * 'QName': The registry's registration queue ;
+  --
+  --   * 'QName': The queue to unregister;
+  --
+  --   * Int: The timeout in microseconds.
+  --
+  --  The function returns a 'StatusCode'. 
+  --  If 'JobName' is null, the 'StatusCode' will be 'BadRequest'.
+  --  If the timeout expires, the function will throw 'TimeoutX'.
   ------------------------------------------------------------------------
   unRegister :: Con -> JobName -> 
-                       QName   -> QName -> Int -> IO StatusCode
+                       QName   -> QName -> 
+                       Int     -> IO StatusCode
   unRegister c j o i tmo | null j    = return BadRequest
                          | otherwise = 
       let i' = o ++ "/" ++ j ++ i
@@ -88,7 +168,20 @@ where
                               Right sc -> return sc
 
   ------------------------------------------------------------------------
-  -- | Send heartbeats
+  -- | Send heartbeats:
+  --
+  --   * 'MVar' 'HB': An MVar of type 'HB', this MVar will be used
+  --                  to keep track of when the heartbeat has actually to
+  --                  be sent.
+  --
+  --   * 'Writer' (): The writer through which to send the heartbeat;
+  --                  The queue name of the writer is the registration queue
+  --                  of the registry; note that its type is ():
+  --                  heartbeats are empty messages.
+  --
+  --   * 'JobName': The 'JobName' for which to send heartbeats;
+  --
+  --   * 'QName': The queue for which to send heartbeats.
   ------------------------------------------------------------------------
   heartbeat :: MVar HB -> Writer () -> JobName -> QName -> IO ()
   heartbeat m w j q = 
@@ -103,9 +196,13 @@ where
             | otherwise           =    return hb
 
   ------------------------------------------------------------------------
-  -- Provider: a queue and heartbeat data
+  -- | A provider is an opaque data type;
+  --   most of its attributes are use only internally by the registry.
+  --   Interesting for user applications is only the queue
+  --   that identifies the provider.
   ------------------------------------------------------------------------
   data Provider = Provider {
+                    -- | Queue through which the job is provided 
                     prvQ   :: QName,
                     prvHb  :: Int,
                     prvNxt :: UTCTime
@@ -171,7 +268,7 @@ where
              }
 
   ------------------------------------------------------------------------
-  -- Registry (MVar of Reg)
+  -- | Registry: An opaque data type
   ------------------------------------------------------------------------
   data Registry = Registry {
                     regM :: MVar Reg
@@ -239,9 +336,24 @@ where
   --
   --   * Serice, Task: action is applied to the first
   --                   active provider and this provider
-  --                   is then sent to the back of the list.
+  --                   is then sent to the back of the list,
+  --                   hence, implementing a balancer.
   --
-  --   * Topic: action is applied to all providers. 
+  --   * Topic: action is applied to all providers,
+  --            hence, implementing a publisher.
+  --
+  --   Parameters:
+  --
+  --   * 'Registry': The registry to use;
+  --
+  --   * 'JobName': The job to which to apply the action;
+  --
+  --   * ('Provider' -> IO ()): The action to apply.
+  --
+  --   The function returns False iff the requested job is not available
+  --   and True otherwise. (Note that a job without providers is removed;
+  --   when the function returns True, the job, thus, 
+  --   was applied at least once.
   ------------------------------------------------------------------------
   mapR :: Registry -> JobName -> (Provider -> IO ()) -> IO Bool
   mapR r jn f = 
@@ -260,7 +372,11 @@ where
                     return (M.insert jn j{jobProvs = ps} m, True)
 
   ------------------------------------------------------------------------
-  -- | Map action to all 'Provider's of job 'JobName'
+  -- | Map function of type 
+  --
+  --   > 'Provider' -> 'Provider'
+  --
+  --   to all 'Provider's of job 'JobName'
   --   (independent of 'JobType')
   ------------------------------------------------------------------------
   mapAllR :: Registry -> JobName -> (Provider -> Provider) -> IO ()
@@ -276,7 +392,21 @@ where
                    x :< ss  -> f x <| go ss
               
   ------------------------------------------------------------------------
-  -- | Get n 'Provider's for job 'JobName'
+  -- | Retrieves /n/ 'Provider's of a certain job;
+  --   getProvider works, for all 'JobType's
+  --   according to the work balancer logic, /i.e./:
+  --   it returns the first n providers of the list for this job
+  --   and moves them to the end of the list.
+  --   'getProvider' is used, for instance, in the Desk pattern. 
+  --
+  --   * 'Registry': The registry in use;
+  --
+  --   * 'JobName': The job for which the caller needs a provider;
+  --
+  --   * Int: The number /n/ of provider to retrieve; 
+  --          if less then /n/ providers are available for this job,
+  --          all available providers will be returned,
+  --          but no error event is created.
   ------------------------------------------------------------------------
   getProvider :: Registry -> JobName -> Int -> IO [Provider]
   getProvider r jn n = 
@@ -294,7 +424,8 @@ where
                                       in (nub (x++x'), ps2)
 
   ------------------------------------------------------------------------
-  -- | Debug: show all jobs and providers
+  -- | This function shows all jobs with all their providers
+  --   in a registry; the function is intended for debugging only.
   ------------------------------------------------------------------------
   showRegistry :: Registry -> IO ()
   showRegistry r = 
@@ -307,10 +438,30 @@ where
                               Just ps -> toList $ jobProvs ps
 
   ------------------------------------------------------------------------
-  -- | Create a registry and use it
+  -- | A registry is used through a function 
+  --   that, internally, creates a registry
+  --   and defines its lifetime in terms of the scope of an action
+  --   passed in to the function:
+  --
+  --   * 'Con': Connection to a Stomp broker;
+  --
+  --   * String: Name of the registry used for error handling;
+  --
+  --   * 'QName': Name of the registration queue.
+  --              It is this queue to which 'register'
+  --              sends a registration request;
+  --
+  --   * (Int, Int): Minimal and maximal accepted heartbeat interval;
+  --
+  --   * 'OnError': Error handler;
+  --
+  --   * ('Registry' -> IO r): The action that defines 
+  --                           the registry's lifetime;
+  --                           the result of this action, /r/, 
+  --                           is also the result of /withRegistry/.
   ------------------------------------------------------------------------
   withRegistry :: Con -> String -> QName -> (Int, Int)
-                      -> OnError -> (Registry -> IO a) -> IO a
+                      -> OnError -> (Registry -> IO r) -> IO r
   withRegistry c n rq (mn, mx) onErr action = do
     let nm  = n ++ "Registry"
     reg <- Registry <$> newMVar (Reg nm M.empty)
@@ -327,7 +478,7 @@ where
                         "hb"       -> handleHeartbeat  reg m
                         x          -> throwIO $ HeaderX "__type__" $
                                                 "Unknown type: " ++ x)
-                  (ignoreHandler Error nm onErr)
+                  (ignoreHandler nm onErr)
 
   ------------------------------------------------------------------------
   -- Handle registration request
@@ -366,37 +517,45 @@ where
     -- print $ msgHdrs m -- test
 
   ------------------------------------------------------------------------
-  -- Get JobQueue
+  -- | Get JobQueue
+  --   (and throw an exception if at least 
+  --    one of the headers does not exist)
   ------------------------------------------------------------------------
   getJobQueue :: Message m -> IO (String, String)
   getJobQueue m = getJobName m >>= \j -> getQueue m >>= \q -> return (j,q)
 
   ------------------------------------------------------------------------
-  -- Message Type from headers
+  -- | Get Message Type from headers
+  --   (and throw an exception if the header does not exist)
   ------------------------------------------------------------------------
   getMType :: Message m -> IO String
   getMType = getHeader "__type__" "No message type in headers"
 
   ------------------------------------------------------------------------
-  -- Job Name from headers
+  -- | Get Job name from headers
+  --   (and throw an exception if the header does not exist)
   ------------------------------------------------------------------------
   getJobName :: Message m -> IO String
   getJobName = getHeader "__job__" "No job name in headers" 
 
   ------------------------------------------------------------------------
-  -- Reply queue (channel) from headers
+  -- | Get Reply queue (channel) from headers
+  --   (and throw an exception if the header does not exist)
   ------------------------------------------------------------------------
   getChannel :: Message m -> IO String
   getChannel = getHeader "__channel__" "No response q in headers" 
 
   ------------------------------------------------------------------------
-  -- Queue name from headers
+  -- | Get Queue name from headers
+  --   (and throw an exception if the header does not exist)
   ------------------------------------------------------------------------
   getQueue :: Message m -> IO String
   getQueue = getHeader "__queue__" "No queue q in headers" 
 
   ------------------------------------------------------------------------
-  -- Job type from headers
+  -- | Get Job type from headers
+  --   (and throw an exception if the header does not exist
+  --        or contains an invalid value)
   ------------------------------------------------------------------------
   getJobType :: Message m -> IO JobType
   getJobType m = 
@@ -407,7 +566,9 @@ where
         Just t  -> return t  
 
   ------------------------------------------------------------------------
-  -- Heartbeat specification from headers
+  -- | Get Heartbeat specification from headers
+  --   (and throw an exception if the header does not exist
+  --        or if its value is not numeric)
   ------------------------------------------------------------------------
   getHB :: Message m -> IO Int
   getHB m = 
@@ -419,14 +580,22 @@ where
                           "heartbeat not numeric: "  ++ show v
 
   ------------------------------------------------------------------------
-  -- Status code from headers
+  -- | Get Status code from headers
+  --   (and throw an exception if the header does not exist)
   ------------------------------------------------------------------------
   getSC :: Message m -> IO (Either String StatusCode)
   getSC m = readStatusCode <$> getHeader "__sc__"
                                  "No status code in message" m
                                
   ------------------------------------------------------------------------
-  -- Generic function to retrieve a header value
+  -- | Get Generic function to retrieve a header value
+  --   (and throw an exception if the header does not exist):
+  --
+  --   * String: Key of the wanted header
+  --
+  --   * String: Error message in case there is no such header
+  --
+  --   * 'Message' m: The message whose headers we want to search
   ------------------------------------------------------------------------
   getHeader :: String -> String -> Message m -> IO String
   getHeader h e m = case lookup h $ msgHdrs m of

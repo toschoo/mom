@@ -18,4 +18,4 @@ where
                    "/q/source/sub1" 
                    "/q/target/pub1" (-1) onerr $
         forever $ do threadDelay 100000
-    where onerr c e m = putStrLn $ show c ++ " in " ++ m ++ ": " ++ show e
+    where onerr e m = putStrLn $ "Error in " ++ m ++ ": " ++ show e

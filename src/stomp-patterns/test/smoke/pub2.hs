@@ -1,7 +1,6 @@
 module Main
 where
 
-  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
@@ -29,6 +28,6 @@ where
                     ("", [], [], oconv) 500000
                     onerr $ forever $ threadDelay 1000000
     where oconv       = return . B.pack . show
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m = putStrLn $ "Error in " ++ m ++ show e
           pub :: MVar Int -> IO Int
           pub m = modifyMVar m $ \i -> return (i+1,i)

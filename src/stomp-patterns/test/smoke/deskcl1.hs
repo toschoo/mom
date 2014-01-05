@@ -1,15 +1,12 @@
 module Main
 where
 
-  import Types
   import Network.Mom.Stompl.Client.Queue
   import Network.Mom.Stompl.Patterns.Basic
   import Network.Mom.Stompl.Patterns.Desk
-  import qualified Data.ByteString.Char8 as B
   import System.Environment
   import System.Exit
   import Network.Socket
-  import Codec.MIME.Type (nullType)
 
   main :: IO ()
   main = do
