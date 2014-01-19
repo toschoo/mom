@@ -23,8 +23,8 @@ where
       withClient c "Test" j
                  ("/q/mychannel", [], [], ignorebody)
                  ("/q/desks/1",   [], [],     nobody) $ \cl -> do
-        (sc,qs) <- requestProvider cl (-1) "olleh" 1
+        (sc,qs) <- requestProvider cl (-1) j 1
         case sc of
           OK -> mapM_ putStrLn qs
-          _  -> putStrLn $ "No result: " ++ show sc
+          _  -> putStrLn $ "Error: " ++ show sc
 

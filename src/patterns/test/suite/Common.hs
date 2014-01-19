@@ -82,15 +82,13 @@ where
   -- controlled quickcheck, arbitrary tests
   -------------------------------------------------------------
   deepCheck :: (Testable p) => p -> IO Result
-  deepCheck = quickCheckWithResult stdArgs{maxSuccess=1000,
-                                           maxDiscard=5000}
+  deepCheck = quickCheckWithResult stdArgs{maxSuccess=100}
 
   -------------------------------------------------------------
   -- do just one test
   -------------------------------------------------------------
   oneCheck :: (Testable p) => p -> IO Result
-  oneCheck = quickCheckWithResult stdArgs{maxSuccess=1,
-                                          maxDiscard=1}
+  oneCheck = quickCheckWithResult stdArgs{maxSuccess=1}
 
   -------------------------------------------------------------
   -- combinator, could be a monad...

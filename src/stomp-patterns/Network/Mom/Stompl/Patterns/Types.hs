@@ -129,6 +129,8 @@ where
                          | UnacceptableHbX   Int
                          -- | No provider for the requested job available
                          | NoProviderX       String
+                         -- | Application-defined exception
+                         | AppX              String
     deriving (Show, Read, Typeable, Eq)
 
   instance Exception PatternsException

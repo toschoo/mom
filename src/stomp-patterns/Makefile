@@ -165,9 +165,13 @@ $(SMOKEDIR)/cl1:	$(SMOKEDIR)/cl1.hs $(SUBSRC)
 $(SMOKEDIR)/contx1:	$(SMOKEDIR)/contx1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-suite:	$(TDIR)/registry
+suite:	$(TDIR)/registry \
+	$(TDIR)/basic
 
 $(TDIR)/registry:	$(TDIR)/Common.hs $(TDIR)/registry.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/basic:	$(TDIR)/Common.hs $(TDIR)/basic.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 run:	suite

@@ -88,10 +88,10 @@ where
                   QName   -> OnError -> IO r  -> IO r
   withBalancer c n qn (mn,mx) rq onErr action =
     withRegistry c n qn (mn,mx) onErr $ \reg -> 
-      withThread (balance reg) action
-    where balance reg = 
-            withPair c n (rq,        [], [], bytesIn)
-                         ("unknown", [], [], bytesOut) $ \(r,w) -> 
+      withPair c n (rq,        [], [], bytesIn)
+                   ("unknown", [], [], bytesOut) $ \(r,w) -> 
+        withThread (balance reg r w) action
+    where balance reg r w = 
               forever $ catches (do
                 m  <- readQ r
                 jn <- getJobName m

@@ -19,7 +19,6 @@ where
         putStrLn "I need a register queue and service queue and nothing else."
         exitFailure
 
-
   tstReply :: QName -> QName -> IO ()
   tstReply rq sq = 
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do

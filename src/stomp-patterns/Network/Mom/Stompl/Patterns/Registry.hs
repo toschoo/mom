@@ -38,7 +38,6 @@ where
       "TOPIC"   -> Just Topic
       _         -> Nothing
 
-
   ------------------------------------------------------------------------
   -- | A helper that shall ease the use of the 'register' function.
   --   A registry to which a call wants to connect is described as
@@ -85,7 +84,7 @@ where
   --   * Int: Timeout in microseconds;
   --
   --   * Int: Preferred heartbeat in milliseconds
-  --          (0 foro no heartbeats).
+  --          (0 for no heartbeats).
   --
   -- The function returns a tuple of 'StatusCode' 
   -- and the heartbeat proposed by the registry
@@ -184,7 +183,8 @@ where
   --   * 'QName': The queue for which to send heartbeats.
   ------------------------------------------------------------------------
   heartbeat :: MVar HB -> Writer () -> JobName -> QName -> IO ()
-  heartbeat m w j q = 
+  heartbeat m w j q | null q    = return ()
+                    | otherwise = 
     let hs = [("__type__", "hb"),
               ("__job__",     j),
               ("__queue__",   q)]
@@ -403,8 +403,8 @@ where
   --
   --   * 'JobName': The job for which the caller needs a provider;
   --
-  --   * Int: The number /n/ of provider to retrieve; 
-  --          if less then /n/ providers are available for this job,
+  --   * Int: The number /n/ of providers to retrieve; 
+  --          if less than /n/ providers are available for this job,
   --          all available providers will be returned,
   --          but no error event is created.
   ------------------------------------------------------------------------
@@ -462,23 +462,27 @@ where
   ------------------------------------------------------------------------
   withRegistry :: Con -> String -> QName -> (Int, Int)
                       -> OnError -> (Registry -> IO r) -> IO r
-  withRegistry c n rq (mn, mx) onErr action = do
-    let nm  = n ++ "Registry"
-    reg <- Registry <$> newMVar (Reg nm M.empty)
-    withThread (startReg reg nm) (action reg)
-    where startReg reg nm = 
-            withReader   c (n ++ "Reader") rq [] [] ignorebody $ \r -> 
-              withWriter c (n ++ "Writer") "unknown" [] [] nobody $ \w -> 
-                forever $ catches 
-                  (do m <- readQ    r
-                      t <- getMType m
-                      case t of
-                        "register" -> handleRegister   reg m w (mn,mx)
-                        "unreg"    -> handleUnRegister reg m w
-                        "hb"       -> handleHeartbeat  reg m
-                        x          -> throwIO $ HeaderX "__type__" $
+  withRegistry c n rq (mn, mx) onErr action = 
+    -- always start the reader in the main thread -------------
+    -- for if started in the background thread    -------------
+    -- the action may send a message              -------------
+    -- without the reader having subscribed to its queue ------
+    withReader c (n ++ "Reader") rq [] [] ignorebody $ \r -> do
+      let nm  = n ++ "Registry"
+      reg <- Registry <$> newMVar (Reg nm M.empty)
+      withThread (startReg reg r nm) (action reg)
+    where startReg reg r nm = 
+            withWriter c (n ++ "Writer") "unknown" [] [] nobody $ \w -> 
+              forever $ catches 
+                (do m <- readQ    r
+                    t <- getMType m
+                    case t of
+                      "register" -> handleRegister   reg m w (mn,mx)
+                      "unreg"    -> handleUnRegister reg m w
+                      "hb"       -> handleHeartbeat  reg m
+                      x          -> throwIO $ HeaderX "__type__" $
                                                 "Unknown type: " ++ x)
-                  (ignoreHandler nm onErr)
+                (ignoreHandler nm onErr)
 
   ------------------------------------------------------------------------
   -- Handle registration request

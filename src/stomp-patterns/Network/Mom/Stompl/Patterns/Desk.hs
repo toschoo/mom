@@ -87,26 +87,25 @@ where
               QName -> IO r -> IO r
   withDesk c n qn (mn,mx) onErr rq action =
     withRegistry c n qn (mn,mx) onErr $ \reg -> 
-      withThread (doDesk reg) action
-    where doDesk reg = 
-            withPair   c n (rq,        [], [], ignorebody)
-                           ("unknown", [], [],     nobody) $ \(r,w) -> 
-              forever $ catches (do
-                m  <- readQ r
-                j  <- getJobName m
-                q  <- getChannel m
-                i  <- getRedundancy m
-                ps <- (intercalate "," . map prvQ) <$> getProvider reg j i
-                case length ps of
-                  0 -> let hs = [("__sc__", show NotFound),
-                                 ("__jobs__",          ""),
-                                 ("__redundancy__",   "0")]
-                        in writeAdHoc w q nullType hs ()
-                  x -> let hs = [("__sc__",        show OK),
-                                 ("__redundancy__", show x),
-                                 ("__jobs__",           ps)]
-                        in writeAdHoc w q nullType hs ())
-              (ignoreHandler n onErr)
+      withPair   c n (rq,        [], [], ignorebody)
+                     ("unknown", [], [],     nobody) $ \(r,w) -> 
+        withThread (doDesk reg r w) action
+    where doDesk reg r w = 
+            forever $ catches (do
+              m  <- readQ r
+              j  <- getJobName m
+              q  <- getChannel m
+              i  <- getRedundancy m
+              ps <- (intercalate "," . map prvQ) <$> getProvider reg j i
+              let hs = case length ps of
+                         0 -> [("__sc__", show NotFound),
+                               ("__jobs__",          ""),
+                               ("__redundancy__",   "0")]
+                         x -> [("__sc__",        show OK),
+                               ("__redundancy__", show x),
+                               ("__jobs__",           ps)]
+               in writeAdHoc w q nullType hs ())
+            (ignoreHandler n onErr)
 
   -----------------------------------------------------------------------
   -- | Function used by consumer to request provider information 

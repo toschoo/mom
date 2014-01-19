@@ -801,9 +801,9 @@ where
   withSubThread :: Con -> String -> JobName    -> QName  -> Int     ->
                    ReaderDesc i  -> (Message i -> IO ()) -> OnError -> 
                    IO r -> IO r
-  withSubThread c n jn wn tmo rd job onErr = withThread go 
-    where go = withSub c n jn wn tmo rd $ \s -> 
-                 forever $ catches (chk s >>= job)
+  withSubThread c n jn wn tmo rd job onErr action = 
+     withSub c n jn wn tmo rd $ \s -> withThread (go s) action
+    where go s = forever $ catches (chk s >>= job)
                                    (ignoreHandler (subName s) onErr)
           chk s = checkIssue s (-1) >>= \mbX ->
                   case mbX of
@@ -955,18 +955,18 @@ where
             else do hb  <- mkHB me
                     m   <- newMVar hb 
                     let p = if me <= 0 then (-1) else 1000 * me 
-                    withThread (finally (tsk m p) 
-                                        (finalise c jn reg rn tmo)) action
+                    withReader c n rn ros rh iconv $ \r -> 
+                      withThread (finally (tsk m r p) 
+                                          (finalise c jn reg rn tmo)) action
         e -> throwIO $ NotOKX e "on register"
-      where tsk m p = withWriter   c "HB" reg [] [] nobody $ \w -> 
-                        withReader c n rn ros rh iconv $ \r ->
+      where tsk m r p = withWriter   c "HB" reg [] [] nobody $ \w -> 
                           forever $ catches (do
                             mbM <- timeout p $ readQ r 
                             case mbM of
                               Nothing -> return ()
                               Just x  -> task x 
                             heartbeat m w jn rn)
-                          (ignoreHandler n onErr)
+                           (ignoreHandler n onErr)
 
   ------------------------------------------------------------------------
   -- | Unlike servers and workers,
