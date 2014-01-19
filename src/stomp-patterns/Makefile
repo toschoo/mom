@@ -186,19 +186,8 @@ prof-clean:
 clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
-	rm -f $(TDIR)/tdialogs
-	rm -f $(TDIR)/tdialogsdbg
-	rm -f $(TDIR)/responder
-	rm -f $(TDIR)/tprotocol
-	rm -f $(TDIR)/tprotocoldbg
-	rm -f $(TDIR)/tstate
-	rm -f $(SMOKEDIR)/listen2
-	rm -f $(SMOKEDIR)/send2
-	rm -f $(SMOKEDIR)/sendtx
-	rm -f $(SMOKEDIR)/sendtx2
-	rm -f $(SMOKEDIR)/sendf
-	rm -f $(SMOKEDIR)/sendjp
-	rm -f $(SMOKEDIR)/sendforever
+	rm -f $(TDIR)/basic
+	rm -f $(TDIR)/registry
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/multi1
 	rm -f $(SMOKEDIR)/demo1
