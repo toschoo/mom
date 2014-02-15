@@ -198,6 +198,7 @@ where
   import           Control.Concurrent 
   import           Control.Monad (forever, unless, void)
   import           Data.Time
+  import qualified Data.ByteString.Char8 as B
 
   {- $registry_intro
       Before we continue the survey of basic patterns,
@@ -599,7 +600,8 @@ where
                   pubName :: String,
                   pubJob  :: JobName,
                   pubReg  :: Registry,
-                  pubOut  :: Writer o}
+                  pubConv :: OutBound o,
+                  pubOut  :: Writer B.ByteString}
 
   ------------------------------------------------------------------------
   -- | Create a publisher with the lifetime of the scope
@@ -636,7 +638,8 @@ where
              WriterDesc o  -> (PubA o -> IO r) -> IO r
   withPub c n jn rn onErr (_, wos, wh, oconv) act = 
     withRegistry c  n rn (0,0) onErr $ \r ->
-      withWriter c jn "unknown" wos wh oconv $ \w -> act $ Pub n jn r w
+      withWriter c jn "unknown" wos wh bytesOut $ \w -> 
+        act $ Pub n jn r oconv w
 
   ------------------------------------------------------------------------
   -- | Publish data of type /o/:
@@ -650,8 +653,10 @@ where
   --   * /o/: The message content.
   ------------------------------------------------------------------------
   publish :: PubA o -> Type -> [F.Header] -> o -> IO ()
-  publish p t hs m = void $ mapR  (pubReg p) (pubJob p) $ \prv -> 
-                       writeAdHoc (pubOut p) (prvQ prv) t hs m
+  publish p t hs x = let oc = pubConv p
+                      in oc x >>= \m ->
+                         void $ mapR  (pubReg p) (pubJob p) $ \prv -> 
+                           writeAdHoc (pubOut p) (prvQ prv) t hs m
 
   ------------------------------------------------------------------------
   -- | Create a publisher that works in a background thread
@@ -1015,25 +1020,25 @@ where
   ------------------------------------------------------------------------
   withPubProxy :: Con -> String -> JobName      -> QName   ->
                   ReaderDesc i  -> RegistryDesc -> OnError -> IO r -> IO r
-  withPubProxy c n jn pq rd (reg, tmo, (best, mn, mx)) onErr = withThread go
-    where go = withSub c n jn pq tmo rd $ \s -> 
-                 withWriter c "HB" reg [] [] nobody $ \w -> do
-                   (sc, h) <- register c jn Topic reg pq tmo best
-                   if sc /= OK
-                     then throwIO $ NotOKX sc "on register proxy"
-                     else if h < mn || h > mx
-                            then throwIO $ UnacceptableHbX h
-                            else do hb <- mkHB h >>= newMVar
-                                    finally (beat hb (h * 1000) s w 0)
-                                            (finalise c jn reg pq tmo)
-          beat :: MVar HB -> Int -> SubA i -> Writer () -> Int -> IO ()
+  withPubProxy c n jn pq rd (reg, tmo, (best, mn, mx)) onErr action = -- withThread go
+    withSub c n jn pq tmo rd $ \s -> 
+      withWriter c "HB" reg [] [] nobody $ \w -> do
+        (sc, h) <- register c jn Topic reg pq tmo best
+        if sc /= OK
+          then throwIO $ NotOKX sc "on register proxy"
+          else if h < mn || h > mx
+                 then throwIO $ UnacceptableHbX h
+                 else do hb <- mkHB h >>= newMVar
+                         withThread (finally (beat hb (h * 1000) s w 0)
+                                             (finalise c jn reg pq tmo)) 
+                           action
+    where beat :: MVar HB -> Int -> SubA i -> Writer () -> Int -> IO ()
           beat hb h s w i = do
             mbM  <- checkIssue s h
             case mbM of
               Nothing -> if i == 10 
                            then throwIO $ MissingHbX "No input from pub"
                            else beat hb h s w (i+1)
-              Just _  -> heartbeat hb w jn reg >> 
-                           beat hb h s w 0 
+              Just _  -> heartbeat hb w jn pq >> beat hb h s w 0 
             `catches` (ignoreHandler n onErr)
 

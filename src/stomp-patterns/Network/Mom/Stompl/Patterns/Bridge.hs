@@ -62,7 +62,8 @@ where
   --
   --   * 'QName': Registration queue of the target publisher;
   --
-  --   * Int: Timeout on registering to the source publisher;
+  --   * Int: Timeout on registering to the source publisher
+  --          in microseconds;
   --
   --   * 'OnError': Error handler;
   --

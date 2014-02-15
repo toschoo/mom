@@ -166,7 +166,9 @@ $(SMOKEDIR)/contx1:	$(SMOKEDIR)/contx1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 suite:	$(TDIR)/registry \
-	$(TDIR)/basic
+	$(TDIR)/basic    \
+        $(TDIR)/advanced \
+        $(TDIR)/mem1
 
 $(TDIR)/registry:	$(TDIR)/Common.hs $(TDIR)/registry.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -174,8 +176,19 @@ $(TDIR)/registry:	$(TDIR)/Common.hs $(TDIR)/registry.hs $(SUBSRC)
 $(TDIR)/basic:	$(TDIR)/Common.hs $(TDIR)/basic.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(TDIR)/advanced:	$(TDIR)/Common.hs $(TDIR)/advanced.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(TDIR)/mem1:	$(TDIR)/Common.hs $(TDIR)/mem1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 run:	suite
+	stompserver -p61615 1>/dev/null &
+	sleep 1
 	$(TDIR)/registry 
+	$(TDIR)/basic
+	$(TDIR)/advanced
+	test/suite/stopsrv.sh
 
 prof-clean:
 	mv -f ./*.prof  ./profiling/

@@ -39,9 +39,6 @@ where
   stringOut :: OutBound String
   stringOut = return . B.pack
 
-  onErr :: SomeException -> String -> IO ()
-  onErr e m = putStrLn $ "Error in " ++ m ++ ": " ++ show e
-
   subtleErr :: MVar Int -> OnError
   subtleErr o _ _ = do 
     x <- modifyMVar o (\x -> let r = if x == 0 then 1 else 0  

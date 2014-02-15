@@ -97,8 +97,8 @@ where
   register :: Con -> JobName -> JobType -> 
                      QName   -> QName   -> 
                      Int -> Int -> IO (StatusCode, Int)
-  register c j t o i tmo me | null j    = return (BadRequest,0)
-                            | otherwise =
+  register c j t o i to me | null j    = return (BadRequest,0)
+                           | otherwise =
       let i' = o ++ "/" ++ j ++ "/" ++ i
           hs = [("__type__",    "register"),
                 ("__job-type__",    show t),
@@ -109,7 +109,7 @@ where
        in withWriter c "RegistryW" o  [] [] nobody     $ \w -> 
           withReader c "RegistryR" i' [] [] ignorebody $ \r -> do
             writeQ w nullType hs ()
-            mbF <- timeout tmo $ readQ r 
+            mbF <- timeout to $ readQ r 
             case mbF of
               Nothing -> throwIO $ TimeoutX
                                     "No response from registry"
@@ -219,14 +219,14 @@ where
   -- Add provider to seq or, if already in, 
   -- update according to the values of the new node.
   ------------------------------------------------------------------------
-  updOrAddProv :: (Provider -> Provider) -> Provider -> 
+  updOrAddProv :: Bool -> (Provider -> Provider) -> Provider -> 
                   Seq Provider -> Seq Provider
-  updOrAddProv upd p s = 
+  updOrAddProv add upd p s = 
     case S.viewl s of
-      S.EmptyL -> S.singleton p
+      S.EmptyL -> if add then S.singleton p else S.empty
       x :< ss  -> if prvQ x == prvQ p 
                     then upd x <| ss
-                    else     x <| updOrAddProv upd p ss
+                    else     x <| updOrAddProv add upd p ss
 
   ------------------------------------------------------------------------
   -- Remove one provider from the seq
@@ -296,7 +296,7 @@ where
     where ins now m = 
             let j  = fromMaybe (JobNode w S.empty) $ M.lookup jn m
                 p  = Provider qn i $ nextHB now True i
-                ps = updOrAddProv (upd p) p $ jobProvs j
+                ps = updOrAddProv True (upd p) p $ jobProvs j
              in M.insert jn j{jobProvs = ps} m
           upd n _ = n
 
@@ -311,8 +311,8 @@ where
             case M.lookup jn m of
               Nothing -> m
               Just j  -> let p  = Provider qn 0 now
-                             ps = updOrAddProv (upd now) p 
-                                               (jobProvs j)
+                             ps = updOrAddProv False (upd now) p 
+                                                     (jobProvs j)
                           in M.insert jn j{jobProvs = ps} m
           upd now o = o{prvNxt = nextHB now True $ tolerance * prvHb o}
       

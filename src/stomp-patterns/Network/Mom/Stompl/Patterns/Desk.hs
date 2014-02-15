@@ -122,7 +122,7 @@ where
   --                               on providers according to the
   --                               application needs);
   --
-  --   * Int: Timeout in milliseconds;
+  --   * Int: Timeout in microseconds;
   --
   --   * 'JobName': Name of the job for which the consumer
   --                needs providers;

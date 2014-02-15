@@ -2,7 +2,6 @@ module Main
 where
 
   import           System.Exit
-  import           System.IO (stdout, hFlush)
   import           System.Timeout
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
@@ -15,19 +14,20 @@ where
   import           Network.Mom.Stompl.Patterns.Balancer
   import           Network.Mom.Stompl.Client.Queue
 
-  import           Data.List (find, nub, delete, sort, partition)
-  import qualified Data.ByteString.Char8 as B
+  import           Data.List (nub)
   import           Data.Maybe
-  import qualified Data.Sequence as S
-  import           Data.Foldable (toList)
   import           Data.Time.Clock
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Prelude hiding (catch)
-  import           Control.Exception (SomeException, throwIO, catch)
-  import           Control.Monad (void,when,unless)
+  import           Control.Exception (throwIO)
+  import           Control.Monad (void)
   import           Codec.MIME.Type (nullType)
 
+  ------------------------------------------------------------------------
+  -- client / server
+  ------------------------------------------------------------------------
+  -- simple request 
   prpRequest :: NonEmptyList Char -> Property
   prpRequest (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> 
@@ -44,6 +44,7 @@ where
             Just m  -> return $ msgContent m
     assert (s == is)
 
+  --- simple request with tmo ---------------------------------------------
   prpReqTmoOk :: NonEmptyList Char -> Property
   prpReqTmoOk (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> 
@@ -53,13 +54,14 @@ where
         withServerThread c "Srv1" "Service1" nullType [] (return . msgContent)
                    ("/q/service1", [], [],  stringIn)
                    ("unknown",     [], [], stringOut)
-                   ("", 0, (0,0,0)) onErr $ do
+                   ("", 0, (0,0,0)) onerr $ do
           mbM <- request cl 90000 nullType [] is
           case mbM of
             Nothing -> return []
             Just m  -> return $ msgContent m
     assert (s == is)
 
+  --- simple request with tmo fails ---------------------------------------
   prpReqTmoNOk :: NonEmptyList Char -> Property
   prpReqTmoNOk (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> 
@@ -72,6 +74,7 @@ where
           Just m  -> return $ msgContent m
     assert (s == [])
 
+  --- check request -------------------------------------------------------
   prpReqCheck :: NonEmptyList Char -> Property
   prpReqCheck (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> 
@@ -81,7 +84,7 @@ where
         withServerThread c "Srv1" "Service1" nullType [] (return . msgContent)
                    ("/q/service1", [], [],  stringIn)
                    ("unknown",     [], [], stringOut)
-                   ("", 0, (0,0,0)) onErr $ do
+                   ("", 0, (0,0,0)) onerr $ do
           void $ request cl 0 nullType [] is
           mbM <- checkRequest cl 90000
           case mbM of
@@ -89,6 +92,7 @@ where
             Just m  -> return $ msgContent m
     assert (s == is)
 
+  --- withServerThread, 1 client -----------------------------------------
   prpSrvThrd1 :: NonEmptyList Char -> Property
   prpSrvThrd1 (NonEmpty is) = monadicIO $ do
     s <- run $ testWithBalancer "/q/service1" $ \c -> 
@@ -98,13 +102,14 @@ where
         withServerThread c "Srv1" "Service1" nullType [] (return . msgContent)
                    ("/q/internal", [], [],  stringIn)
                    ("unknown",     [], [], stringOut)
-                   ("/q/registry1", 500000, (500,0,2000)) onErr $ do
+                   ("/q/registry1", 500000, (500,0,2000)) onerr $ do
           mbM <- request cl 100000 nullType [] is
           case mbM of
             Nothing -> return []
             Just m  -> return $ msgContent m
     assert (s == is)
 
+  --- withServerThread, n clients -----------------------------------------
   prpSrvThrdN :: Int -> NonEmptyList Char -> Property
   prpSrvThrdN n (NonEmpty is) | n <= 0 || n > 100  = prpSrvThrdN 10 (NonEmpty is)
                               | otherwise          = monadicIO $ do
@@ -113,7 +118,7 @@ where
         withServerThread c "Srv1" "Service1" nullType [] (return . msgContent)
                    ("/q/internal", [], [],  stringIn)
                    ("unknown",     [], [], stringOut)
-                   ("/q/registry1", 500000, (500,0,2000)) onErr $ do
+                   ("/q/registry1", 500000, (500,0,2000)) onerr $ do
           m  <- newMVar []
           mapM_ (withReq m) cs
           nub <$> evalR m
@@ -134,7 +139,7 @@ where
               mbM <- request cl 100000 nullType [] is
               modifyMVar_ m $ \rs -> return (mbM:rs))
 
-  -- with error / with and without registry
+  -- with error / with and without registry ------------------------------
   prpSrvExcOk :: MVar Int -> NonEmptyList Char -> Property
   prpSrvExcOk o (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> 
@@ -162,9 +167,13 @@ where
                                  throwIO (AppX "Test!")
                          else return $ msgContent m
 
+  ------------------------------------------------------------------------
+  -- Pipeline
+  ------------------------------------------------------------------------
+  -- simple push ----------------------------------------------------------
   prpPush :: NonEmptyList Char -> Property
   prpPush (NonEmpty is) = monadicIO $ do
-    m <- run $ newEmptyMVar 
+    m <- run   newEmptyMVar 
     s <- run $ testWithCon $ \c ->
       testWithWorker m c "" "/q/task1" $ \_ -> 
         withPusher c "Push1" "Task1" 
@@ -176,9 +185,10 @@ where
             Just r  -> return r 
     assert (s == is)
 
+  -- simple push 1 ---------------------------------------------------------
   prpPush1 :: NonEmptyList Char -> Property
   prpPush1 (NonEmpty is) = monadicIO $ do
-    m <- run $ newEmptyMVar 
+    m <- run   newEmptyMVar 
     s <- run $ testWithBalancer "/q/task1" $ \c -> 
       testWithWorker m c "/q/registry1" "/q/internal" $ \_ -> 
         withPusher c "Push1" "Task1" 
@@ -190,10 +200,11 @@ where
             Just r  -> return r 
     assert (s == is)
 
+  -- push n ---------------------------------------------------------------
   prpPushN :: Int -> NonEmptyList Char -> Property
   prpPushN i (NonEmpty is) | i <= 1 || i > 100 = prpPushN 10 (NonEmpty is)
                            | otherwise         = monadicIO $ do
-    m <- run $ newEmptyMVar 
+    m <- run   newEmptyMVar 
     s <- run $ testWithBalancer "/q/task1" $ \c -> 
       testWithWorker m c "/q/registry1" "/q/internal" $ \_ -> 
         withPushers  i c "/q/task1" $ \ps -> do
@@ -212,9 +223,10 @@ where
                                then return rs'
                                else collectR m rs' 0
 
+  -- exception in push ----------------------------------------------------
   prpPushExc :: MVar Int -> NonEmptyList Char -> Property
   prpPushExc o (NonEmpty is) = monadicIO $ do
-    m <- run $ newEmptyMVar 
+    m <- run   newEmptyMVar 
     e <- run $ newMVar (0::Int)
     s <- run $ testWithCon $ \c ->
       withTaskThread c "Task" "Task1" (createErr e m)
@@ -236,6 +248,10 @@ where
                       throwIO $ AppX "Error!"
               else putMVar m $ msgContent msg
                          
+  ------------------------------------------------------------------------
+  -- Publish and Subscribe
+  ------------------------------------------------------------------------
+  -- publish to 1 --------------------------------------------------------
   prpPub :: NonEmptyList Char -> Property
   prpPub (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c ->
@@ -250,12 +266,13 @@ where
             Just i  -> return $ msgContent i
     assert (s == is)
                          
+  -- publish to n --------------------------------------------------------
   prpPubN :: Int -> NonEmptyList Char -> Property
   prpPubN n (NonEmpty is) | n <= 1 || n > 100 = prpPubN 10 (NonEmpty is)
                           | otherwise         = monadicIO $ do
-    s <- run $ testWithCon $ \c -> do
+    s <- run $ testWithCon $ \c -> 
       withPub c "Pub1" "Pub1" "/q/sub2pub1" onerr
-               ("unknown", [], [], stringOut) $ \p -> do
+               ("unknown", [], [], stringOut) $ \p -> 
         -- t1 <- getCurrentTime
         withSubs n c "/q/sub2pub1" $ \ss -> do -- withSubs is slow
                                                -- because we do all
@@ -285,6 +302,7 @@ where
               then return x
               else threadDelay 100 >> waitR m (i+1)
                          
+  -- publisher thread -----------------------------------------------------
   prpPubThread :: NonEmptyList Char -> Property
   prpPubThread (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c ->
@@ -299,7 +317,10 @@ where
             Nothing -> return ""
             Just i  -> return $ msgContent i
     assert (s == is)
-                         
+
+  -- to test rate monotonic publishing ------------------------------------
+  -- the test is not very good, since the network delay -------------------
+  -- varies a lot       ---------------------------------------------------
   prpPubMon :: NonEmptyList Char -> Property
   prpPubMon (NonEmpty is) = monadicIO $ do
     n <- pick $ choose (10,50)
@@ -321,6 +342,7 @@ where
                            Nothing -> return ""
                            Just i  -> go (n-1) (msgContent i:rs) s
                                      
+  -- exception in pub thread ----------------------------------------------
   prpPubExc :: MVar Int -> NonEmptyList Char -> Property
   prpPubExc o (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> do
@@ -343,6 +365,7 @@ where
                       throwIO $ AppX "Error!"
               else return is
 
+  -- sub -----------------------------------------------------------------
   prpSub :: NonEmptyList Char -> Property
   prpSub (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> do
@@ -356,6 +379,7 @@ where
           takeMVar m
     assert (s == is)
 
+  -- exception in sub -----------------------------------------------------
   prpSubExc :: MVar Int -> NonEmptyList Char -> Property
   prpSubExc o (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> do
@@ -378,6 +402,7 @@ where
                       throwIO $ AppX "Error!"
               else putMVar m $ msgContent msg
 
+  -- sub mvar ------------------------------------------------------------
   prpSubMVar :: NonEmptyList Char -> Property
   prpSubMVar (NonEmpty is) = monadicIO $ do
     s <- run $ testWithCon $ \c -> do
@@ -396,10 +421,6 @@ where
                                            >> testMVar (n-1) m
                                       else return x
           
-  -- more tests:
-  -- all message headers are preserved
-  -- advanced patterns only!
-
   setBack :: Registry -> JobName -> Int -> IO ()
   setBack r jn i = mapAllR r jn (\p -> p{prvNxt = timeAdd (prvNxt p) i})
 
@@ -471,7 +492,7 @@ where
     o <- newMVar 0
     r <- -- testWithCon $ \c -> do
          runTest "simple request (-1)"
-                  (deepCheck (prpRequest ))    ?>
+                  (deepCheck prpRequest)    ?>
          runTest "simple request, timeout successful" 
                   (deepCheck prpReqTmoOk)      ?>
          runTest "simple request, timeout fail" 

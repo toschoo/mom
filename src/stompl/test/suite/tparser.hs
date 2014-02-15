@@ -60,7 +60,7 @@ where
   getMk t = 
       case t of
         Connect -> return (mkConFrame . cleanHdrs)    -- remove special chars
-        Stomp   -> return (mkStmpFrame . cleanHdrs)   -- remove special chars
+        Stomp   -> return mkStmpFrame 
         Connected -> return (mkCondFrame . cleanHdrs) -- connect and connected
                                                       -- are not escaped!
         Disconnect -> return mkDisFrame
@@ -126,7 +126,7 @@ where
   -- random char for header values -------------------------------------
   hdrChar :: Gen Char
   hdrChar = elements (['A'..'Z'] ++ ['a'..'z'] ++ ['0'..'9'] ++ 
-                      "!\"$%&/()=?<>#§:\n\r\\")
+                      "!\"$%&/()=?<>#§:\n\r\t\\")
 
   cleanHdrs :: [Header] -> [Header]
   cleanHdrs = map cleanHdr
@@ -433,7 +433,7 @@ where
              ("message-id", "msg-54321"),
              ("content-length", "13"),
              ("content-type", "text/plain"),
-             ("special1", "xyz"),
+             ("special1", "\t1"),
              ("special2", "123")], "msg7-1.1.txt"),
      (TDesc "Message with some NULs in body" 
             Message (Just . id) Pass
@@ -501,6 +501,7 @@ where
       "host"           -> getHost
       "special1"       -> getSpecial "special1"
       "special2"       -> getSpecial "special2"
+      " special3"      -> getSpecial " special3"
       "complex:header" -> getSpecial "complex:header"
       _                -> (\_ -> "unknown")
     where getSpecial k' f = case lookup k' $ getHeaders f of
@@ -559,7 +560,7 @@ where
         tell $ "Header '" ++ h ++ "' is correct.\n"
         return True
       else do
-        tell $ "Header '" ++ h ++ "' is not correct: '" ++ (getValue h f) ++ "'\n"
+        tell $ "Header '" ++ h ++ "' is not correct: '" ++ (getValue h f) ++ " - " ++ show (dscHdrs d) ++ "'\n"
         return False
 
   -- test headers verbosely ------------------------------------------------

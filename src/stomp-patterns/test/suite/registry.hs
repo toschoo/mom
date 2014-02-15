@@ -2,8 +2,6 @@ module Main
 where
 
   import           System.Exit
-  import           System.Timeout
-  import           System.IO (stdout, hFlush)
   import           Test.QuickCheck
   import           Test.QuickCheck.Monadic
   import           Common
@@ -11,22 +9,18 @@ where
   import           Registry  -- <--- SUT
   import           Types 
 
-  import           Network.Mom.Stompl.Patterns.Basic
   import           Network.Mom.Stompl.Client.Queue
 
-  import           Data.List (find, nub, delete, sort, partition)
-  import qualified Data.ByteString.Char8 as B
+  import           Data.List (find, nub, sort, partition)
   import           Data.Maybe
-  import qualified Data.Sequence as S
-  import           Data.Foldable (toList)
   import           Data.Time
   import           Codec.MIME.Type (nullType)
   import           Prelude hiding (catch)
-  import           Control.Exception  (catch, throwIO)
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad (void,when)
 
+  -- insert into registry ------------------------------------------------
   prpInsertR :: NonEmptyList (NonEmptyList Char) -> Property
   prpInsertR ns = let is = nub $ nonemptyString ns
                    in monadicIO $ do
@@ -36,6 +30,7 @@ where
     let qs = map prvQ s
     assert (sort qs == sort is)
 
+  -- getProvider from registry --------------------------------------------
   prpGet1 :: NonEmptyList (NonEmptyList Char) -> Property
   prpGet1 ns = let is = nub $ nonemptyString ns
                 in monadicIO $ do
@@ -45,6 +40,7 @@ where
     assert (not  (null q) &&
             prvQ (head q) == head is)
 
+  -- getProvider for all in registry --------------------------------------
   prpGet1NTimes :: NonEmptyList (NonEmptyList Char) -> Property
   prpGet1NTimes ns = let is = nub $ nonemptyString ns
                       in monadicIO $ do
@@ -55,6 +51,7 @@ where
     assert (not  (null q) &&
             prvQ (head q) == last is)
 
+  -- getProvider n from registry ------------------------------------------
   prpGetN :: NonEmptyList (NonEmptyList Char) -> Property
   prpGetN ns = let is = nub $ nonemptyString ns
                 in monadicIO $ do
@@ -66,11 +63,12 @@ where
             length q == n &&
             map prvQ q == take n is)
 
+  -- getProvider n after getting others from registry ---------------------
   prpGetNxN :: NonEmptyList (NonEmptyList Char) -> Property
   prpGetNxN ns = let is = nub $ nonemptyString ns
                   in monadicIO $ do
     n1 <- pick $ choose (0,if length is > 1 then length is - 1 else 0) 
-    n2 <- pick $ choose (if n1 == 0 then 1 else 1,length is-n1)
+    n2 <- pick $ choose (1,length is-n1)
     q <- run $ testWithReg $ \_ r -> do
       mapM_ (\q -> insertR r "service1" Service q 0) is
       when (n1 > 0) $ void $ getProvider r "service1" n1
@@ -79,6 +77,7 @@ where
             length q == n2 &&
             map prvQ q == take n2 (drop n1 is))
 
+  -- updR ----------------------------------------------------------------
   prpUpd  :: NonEmptyList (NonEmptyList Char) -> Property
   prpUpd  ns = let is = nub $ nonemptyString ns
                 in monadicIO $ do
@@ -88,16 +87,16 @@ where
     qs  <- run $ testWithReg $ \_ r -> do
       mapM_ (\q -> insertR r "service1" Service q 500) is
       setTo r "service1" now
-      updR r "service1" p 
+      updR  r "service1" p 
       getProvider r "service1" $ length is
     case find (\x -> prvQ x == p) qs of
       Nothing -> assert False
-      Just q  -> let h     = head qs
-                     (l,r) = partition (\x -> prvNxt x == now) qs
+      Just _  -> let (_,r) = partition (\x -> prvNxt x == now) qs
                   in assert (not (null r)  &&
                              length r == 1 &&
                              prvQ (head r) == p) 
 
+  -- mapR ----------------------------------------------------------------
   prpMapRService :: NonEmptyList (NonEmptyList Char) -> Property
   prpMapRService ns = let is = nub $ nonemptyString ns
                        in monadicIO $ do
@@ -111,6 +110,7 @@ where
     assert (qs == is)
     where act m p = modifyMVar_ m $ \xs -> return (prvQ p : xs)
 
+  -- mapR with old values -------------------------------------------------
   prpMapRSrvOld :: NonEmptyList (NonEmptyList Char) -> Property
   prpMapRSrvOld ns = let is = nub $ nonemptyString ns
                        in monadicIO $ do
@@ -121,7 +121,7 @@ where
     run $ testWithReg $ \_ r -> do
       mapM_ (\q -> insertR r "service1" t q 500) is
       setTo r "service1" now
-      mapM_ (\(n,q) -> when (n `rem` 2 /= 0) $ updR r "service1" q) $ 
+      mapM_ (\(n,q) -> when (odd n) $ updR r "service1" q) $ 
             zip [1..length is] is
       mapM_ (\_ -> mapR r "service1" (act m)) [1..length is]
     qs <- run (nub . reverse <$> readMVar m)
@@ -129,9 +129,10 @@ where
     where act m p = modifyMVar_ m $ \xs -> return (prvQ p : xs)
           del2nd :: Int -> [a] -> [a]
           del2nd _ [] = []
-          del2nd i (x:xs) | i `rem` 2 == 0 =     del2nd (i+1) xs
-                          | otherwise      = x : del2nd (i+1) xs
+          del2nd i (x:xs) | even i    =     del2nd (i+1) xs
+                          | otherwise = x : del2nd (i+1) xs
 
+  -- mapR with topic -----------------------------------------------------
   prpMapRTopic :: NonEmptyList (NonEmptyList Char) -> Property
   prpMapRTopic ns = let is = nub $ nonemptyString ns
                        in monadicIO $ do
@@ -143,18 +144,19 @@ where
     assert (qs == is)
     where act m p = modifyMVar_ m $ \xs -> return (prvQ p : xs)
 
-  -- register
-  prpRegister1 :: NonEmptyList Char -> Property
-  prpRegister1 (NonEmpty is) = monadicIO $ do
-    (sc, i) <- run $ testWithReg $ \c r -> 
+  -- register ------------------------------------------------------------
+  prpRegister1 :: Property
+  prpRegister1 = monadicIO $ do
+    (sc, i) <- run $ testWithReg $ \c _ -> 
       register c "Job1" Task "/q/registry1" "/q/internal" 500000 0
     assert (sc == OK && i == 0)
 
+  -- register n -----------------------------------------------------------
   prpRegisterN :: Int -> NonEmptyList Char -> Property
   prpRegisterN n (NonEmpty is) | n <= 1 || n > 100 = 
     prpRegisterN 10 (NonEmpty is) 
                                | otherwise = monadicIO $ do
-    (sc, i) <- run $ testWithReg $ \c r -> do
+    (sc, i) <- run $ testWithReg $ \c _ -> do
       -- t1 <- getCurrentTime
       rs <- nub <$> mapM (\_ -> register c "Job1" Task 
                                            "/q/registry1" 
@@ -165,6 +167,7 @@ where
                         else return $ head rs
     assert (sc == OK && i == 0)
 
+  -- unregister -----------------------------------------------------------
   prpUnReg :: Property
   prpUnReg = monadicIO $ do
     t <- run $ testWithReg $ \c r -> do
@@ -183,21 +186,22 @@ where
         _  -> return False
     assert t
 
+  -- exception in registry ------------------------------------------------
   prpExc :: MVar Int -> Property
   prpExc o = monadicIO $ do
     (sc, _) <- run $ testWithCon $ \c -> 
-        withRegistry c "Reg" "/q/registry1" (0, 1000) (subtleErr o) $ \r ->
+        withRegistry c "Reg" "/q/registry1" (0, 1000) (subtleErr o) $ \_ ->
           withWriter c "Bad" "/q/registry1" [] [] nobody $ \w -> do
             writeQ w nullType [] ()
             register c "Job1" Task "/q/registry1" "/q/internal" 500000 0
     assert (sc == OK)
 
-  -- heartbeat
+  -- no heartbeats: should be removed  ------------------------------------
   prpNoHeartbeat :: Property
   prpNoHeartbeat = monadicIO $ do
     t <- run $ testWithCon $ \c -> 
         withRegistry c "Reg" "/q/registry1" (0, 1000) onerr $ \r ->
-          withReader c "R1" "/q/internal" [] [] ignorebody $ \rq -> do
+          withReader c "R1" "/q/internal" [] [] ignorebody  $ \_ -> do
             (sc, i) <- register c "Job1" Task "/q/registry1" 
                                               "/q/internal" 500000 10
             case sc of
@@ -208,17 +212,18 @@ where
                                 then return False
                                 else do threadDelay 100000
                                         ps2 <- getProvider r "Job1" 1
-                                        if length ps2 /= 0
+                                        if not (null ps2)
                                           then return False
                                           else return True
               _  -> return False
     assert t
   
+  -- heartbeats ----------------------------------------------------------
   prpHeartbeats :: Property
   prpHeartbeats = monadicIO $ do
     t <- run $ testWithCon $ \c -> 
         withRegistry c "Reg" "/q/registry1" (0, 1000) onerr $ \r ->
-          withReader c "R1" "/q/internal" [] [] ignorebody $ \rq -> do
+          withReader c "R1" "/q/internal" [] [] ignorebody  $ \_ -> do
             (sc, i) <- register c "Job1" Task "/q/registry1" 
                                               "/q/internal" 500000 10
             case sc of
@@ -232,7 +237,7 @@ where
               _  -> return False
     assert t
     where checkHB :: Int -> Registry -> Writer () -> MVar HB -> IO Bool
-          checkHB 0 _ w hb = return True
+          checkHB 0 _ _ _  = return True
           checkHB n r w hb = do ps <- getProvider r "Job1" 1
                                 if length ps /= 1 
                                   then return False
@@ -254,7 +259,7 @@ where
 
   testWithReg :: (Con -> Registry -> IO a) -> IO a
   testWithReg action =
-    withConnection "localhost" 61613 [] [] $ \c -> do
+    withConnection "localhost" 61613 [] [] $ \c -> 
       withRegistry c "Test-1" "/q/registry1" (0,0) onerr (action c)
                    
   onerr :: OnError

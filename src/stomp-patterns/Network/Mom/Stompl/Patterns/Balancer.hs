@@ -136,7 +136,7 @@ where
                 Int   -> OnError -> IO r    -> IO r
   withRouter c n jn srq ssq trq tmo onErr action = 
      withPub c n jn trq onErr 
-                     ("unknown", [], [], bytesOut) $ \p ->
+               ("unknown", [], [], bytesOut) $ \p ->
        withSubThread c n jn srq tmo 
                      (ssq,       [], [], bytesIn) (pub p) onErr action
     where pub p m = publish p nullType (msgHdrs m) $ msgContent m
