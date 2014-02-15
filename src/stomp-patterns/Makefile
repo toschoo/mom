@@ -200,6 +200,8 @@ clean:
 	rm -f $(TDIR)/*.hi
 	rm -f $(TDIR)/*.o
 	rm -f $(TDIR)/basic
+	rm -f $(TDIR)/advanced
+	rm -f $(TDIR)/mem1
 	rm -f $(TDIR)/registry
 	rm -f $(SMOKEDIR)/ping
 	rm -f $(SMOKEDIR)/multi1
