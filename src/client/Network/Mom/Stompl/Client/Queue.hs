@@ -40,7 +40,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Messages
                    P.Message, 
                    msgContent, P.msgRaw, 
-                   P.msgType, P.msgLen, P.msgHdrs,
+                   P.msgType, P.msgHdrs,
                    -- * Receipts
                    -- $stomp_receipts
                    Factory.Rec(..), Receipt,
@@ -599,7 +599,7 @@ where
   --
   --   > let iconv _ _ _ = return . toString
   ------------------------------------------------------------------------
-  type InBound  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
+  type InBound  a = Mime.Type -> [F.Header] -> B.ByteString -> IO a
   ------------------------------------------------------------------------
   -- | Out-bound converters are much simpler.
   --   Since the application developer knows,
@@ -1026,7 +1026,7 @@ where
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
             let m = P.mkMessage P.NoMsg NoSub dest ""
-                                mime (B.length s) tx s x
+                                mime tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
             P.send (conCon c) m (show rc) hs 
@@ -1288,12 +1288,11 @@ where
     let conv = rFrom q
     let sid  = if  null (F.getSub f) || not (numeric $ F.getSub f)
                  then NoSub else Sub $ read $ F.getSub f
-    x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
+    x <- conv (F.getMime f) (F.getHeaders f) b
     let m = P.mkMessage (P.MsgId $ F.getId f) sid
                         (F.getDest   f) 
                         (F.getMsgAck f) 
                         (F.getMime   f)
-                        (F.getLength f)
                         NoTx 
                         b -- raw bytestring
                         x -- converted context

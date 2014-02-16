@@ -115,16 +115,13 @@ where
   ------------------------------------------------------------------------
   -- Frame with body
   ------------------------------------------------------------------------
-  bodyFrame :: ([Header] -> Int -> Body -> Either String Frame) -> Parser Frame
+  bodyFrame :: ([Header] -> Body -> Either String Frame) -> Parser Frame
   bodyFrame mk = do
     hs <- headers True
-    case getLen hs of
+    b <- body
+    case mk hs b of
       Left  e -> fail e
-      Right l -> do
-        b  <- body l
-        case mk hs l b of
-          Left  e -> fail e
-          Right m -> return m
+      Right m -> return m
 
   ------------------------------------------------------------------------
   -- Frame without body and without escaping headers,
@@ -199,22 +196,14 @@ where
   -- if text length is given,
   -- until text length
   ------------------------------------------------------------------------
-  body :: Int -> Parser B.ByteString
-  body x = body' x B.empty
+  body :: Parser B.ByteString
+  body = body' B.empty
     where 
-      body' l i = do
+      body' i = do
+        _ <- word8 nul
         n <- A.takeTill (== nul)
         let b = i >|< n 
-        if l < 0 || l == B.length b
-          then do
-            _ <- word8 nul
-            return b
-          else 
-            if l < B.length b 
-              then failBodyLen l (B.length b)
-              else do
-                _ <- word8 nul
-                body' l (b |> '\x00') 
+        body' (b |> '\x00')
 
   ------------------------------------------------------------------------
   -- escape header key and value;

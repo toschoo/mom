@@ -36,7 +36,7 @@ module Network.Mom.Stompl.Frame (
                        -- * Working with Headers
                        -- $stomp_headers
                        mkLogHdr,   mkPassHdr, mkDestHdr, 
-                       mkLenHdr,   mkTrnHdr,  mkRecHdr, 
+                       mkTrnHdr,  mkRecHdr, 
                        mkSelHdr,   mkIdHdr,   mkAckHdr, 
                        mkSesHdr,   mkMsgHdr,  mkMIdHdr,
                        mkAcVerHdr, mkVerHdr,  mkHostHdr,
@@ -48,7 +48,7 @@ module Network.Mom.Stompl.Frame (
                        strToSrv, srvToStr,
                        negoVersion, negoBeat,
                        rmHdr, rmHdrs, 
-                       getAck, getLen,   
+                       getAck,   
                        -- * Working with Frames
                        typeOf, putFrame, toString, putCommand,
                        sndToMsg, conToCond,
@@ -61,7 +61,7 @@ module Network.Mom.Stompl.Frame (
                        getBeat, 
                        getSession, getServer, 
                        getSub, getSelector, getId, getAcknow, getMsgAck,
-                       getBody, getMime, getLength, 
+                       getBody, getMime,
                        getMsg, getHeaders,
                        -- * Sequence Operators to work on 'ByteString'
                        (|>), (<|), (>|<),
@@ -153,7 +153,7 @@ where
   noSrvDesc :: SrvDesc
   noSrvDesc = ("","","")
 
-  hdrLog, hdrPass, hdrDest, hdrSub, hdrLen, hdrTrn, hdrRec, hdrRecId,
+  hdrLog, hdrPass, hdrDest, hdrSub, hdrTrn, hdrRec, hdrRecId,
     hdrSel, hdrId, hdrAck, hdrAckId, hdrSes, hdrMsg, hdrMId, hdrSrv,
     hdrAcVer, hdrVer, hdrBeat, hdrHost, hdrMime, hdrCliId :: String
   hdrLog   = "login"
@@ -161,7 +161,6 @@ where
   hdrCliId = "client-id"
   hdrDest  = "destination"
   hdrSub   = "subscription"
-  hdrLen   = "content-length"
   hdrMime  = "content-type"
   hdrTrn   = "transaction"
   hdrRec   = "receipt"
@@ -198,10 +197,6 @@ where
   -- | make /destination/ header
   ------------------------------------------------------------------------
   mkDestHdr  :: String -> Header
-  ------------------------------------------------------------------------
-  -- | make /content-length/ header
-  ------------------------------------------------------------------------
-  mkLenHdr   :: String -> Header
   ------------------------------------------------------------------------
   -- | make /content-type/ header
   ------------------------------------------------------------------------
@@ -271,7 +266,6 @@ where
   mkPassHdr  = mkHeader hdrPass
   mkCliIdHdr = mkHeader hdrCliId
   mkDestHdr  = mkHeader hdrDest
-  mkLenHdr   = mkHeader hdrLen
   mkMimeHdr  = mkHeader hdrMime
   mkTrnHdr   = mkHeader hdrTrn
   mkRecHdr   = mkHeader hdrRec
@@ -347,7 +341,6 @@ where
                    frmDest  :: String,
                    frmTrans :: String,
                    frmRec   :: String,
-                   frmLen   :: Int,
                    frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | DisFrame {
@@ -389,7 +382,6 @@ where
                    frmDest  :: String,
                    frmId    :: String,
                    frmAckId :: String,
-                   frmLen   :: Int,
                    frmMime  :: Mime.Type,
                    frmBody  :: Body}
                | RecFrame {
@@ -399,7 +391,6 @@ where
                | ErrFrame {
                    frmMsg  :: String,
                    frmRec  :: String,
-                   frmLen  :: Int,
                    frmMime :: Mime.Type,
                    frmHdrs :: [Header],
                    frmBody :: Body}
@@ -598,8 +589,6 @@ where
   --   * 'Mime.Type': The content type of the payload message
   --                  as MIME Type
   --
-  --   * Length: The length of the type in bytes
-  --
   --   * 'Header': List of additional headers;
   --               Stomp protocol requires that user-specified
   --               headers are passed through to subscribing applications.
@@ -609,15 +598,14 @@ where
   --   * 'Body': The payload message
   ----------------------------------------------------------------------
   mkSend :: String    -> String -> String   -> 
-            Mime.Type -> Int    -> [Header] -> 
+            Mime.Type -> [Header] -> 
             Body      -> Frame
-  mkSend dst trn rec mime len hs bdy = 
+  mkSend dst trn rec mime hs bdy = 
     SndFrame {
       frmHdrs  = hs,
       frmDest  = dst,
       frmTrans = trn,
       frmRec   = rec,
-      frmLen   = len,
       frmMime  = mime,
       frmBody  = bdy}
 
@@ -635,23 +623,20 @@ where
   --
   --   * 'Mime.Type': The type of the playload as MIME Type
   --
-  --   * Length: The length of the payload in bytes
-  --
   --   * 'Header': A list of user-defined headers (see 'mkSend' for details)
   --
   --   * 'Body': The payload
   ----------------------------------------------------------------------
   mkMessage :: String    -> String -> String   -> String ->
-               Mime.Type -> Int    -> [Header] -> 
+               Mime.Type -> [Header] -> 
                Body      -> Frame
-  mkMessage sub dst mid ack mime len hs bdy =
+  mkMessage sub dst mid ack mime hs bdy =
     MsgFrame {
       frmHdrs  = hs,
       frmSub   = sub,
       frmDest  = dst,
       frmAckId = ack,
       frmId    = mid,
-      frmLen   = len,
       frmMime  = mime,
       frmBody  = bdy}
 
@@ -779,18 +764,15 @@ where
   --
   --   * 'Mime.Type': The format of the error message as MIME Type
   --
-  --   * Length: The length of the error message
-  --
   --   * 'Header': List of additional, broker-specific headers
   --
   --   * 'Body': The error message
   ----------------------------------------------------------------------
-  mkErr :: String -> String -> Mime.Type -> Int -> [Header] -> Body -> Frame
-  mkErr mid rc mime len hs bdy =
+  mkErr :: String -> String -> Mime.Type -> [Header] -> Body -> Frame
+  mkErr mid rc mime hs bdy =
     ErrFrame {
       frmMsg  = mid,
       frmRec  = rc,
-      frmLen  = len,
       frmMime = mime,
       frmBody = bdy,
       frmHdrs = hs}
@@ -894,11 +876,6 @@ where
   ------------------------------------------------------------------------
   getMime :: Frame -> Mime.Type
   getMime = frmMime
-  ------------------------------------------------------------------------
-  -- | get /content-length/ from 'Send', 'Message', 'Error'
-  ------------------------------------------------------------------------
-  getLength :: Frame -> Int
-  getLength = frmLen
   ------------------------------------------------------------------------
   -- | get /message/ from 'Error'
   ------------------------------------------------------------------------
@@ -1038,14 +1015,6 @@ where
   cleanWhite :: String -> String
   cleanWhite = 
     takeWhile (/= ' ') . dropWhile (== ' ')
-
-  getLen :: [Header] -> Either String Int
-  getLen hs = 
-    case lookup hdrLen hs of
-      Nothing -> Right (-1)
-      Just l  -> let len = cleanWhite l
-                 in if numeric len then Right $ read len 
-                      else Left $ "content-length is not numeric: " ++ l
 
   getAck :: [Header] -> Either String AckMode
   getAck hs = 
@@ -1292,12 +1261,11 @@ where
         rh = if null r then [] else [mkRecHdr r]
     in normalise $ dh ++ ih ++ rh ++ hs
   -- Send Frame -----------------------------------------------------------
-  toHeaders (SndFrame hs d t r l m _) = 
+  toHeaders (SndFrame hs d t r m _) = 
     let th = if null t then [] else [mkTrnHdr t]
         rh = if null r then [] else [mkRecHdr r]
-        lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in normalise $ [mkDestHdr d, 
-                    mkMimeHdr (showType m)] ++ th ++ rh ++ lh ++ hs
+                    mkMimeHdr (showType m)] ++ th ++ rh ++ hs
   -- Begin Frame -----------------------------------------------------------
   toHeaders (BgnFrame  t r hs) = 
     let rh = if null r then [] else [mkRecHdr r]
@@ -1317,22 +1285,20 @@ where
   toHeaders (NackFrame i s t r hs) = 
     normalise ([mkMIdHdr i, mkIdHdr i] ++ hs ++ subRecTrn s r t)
   -- Message Frame ----------------------------------------------------------
-  toHeaders (MsgFrame hs s d i a l m _)  = 
+  toHeaders (MsgFrame hs s d i a m _)  = 
     let sh = if null s then [] else [mkSubHdr  s]
         dh = if null d then [] else [mkDestHdr d]
         ah = if null a then [] else [mkAckHdr  a]
-        lh = if l <= 0 then [] else [mkLenHdr (show l)]
     in normalise $ [mkMIdHdr i,
                     mkMimeHdr (showType m)] 
-                    ++ sh ++ dh ++ ah ++ lh ++ hs
+                    ++ sh ++ dh ++ ah ++ hs
   -- Receipt Frame ----------------------------------------------------------
   toHeaders (RecFrame  r hs) = normalise $ mkRecIdHdr r : hs
   -- Error Frame ------------------------------------------------------------
-  toHeaders (ErrFrame m r l t hs _) = 
+  toHeaders (ErrFrame m r t hs _) = 
     let mh = if null m then [] else [mkMsgHdr m]
         rh = if null r then [] else [mkRecIdHdr r]
-        lh = if l <= 0 then [] else [mkLenHdr (show l)]
-    in  normalise $ mh ++ rh ++ lh ++ [mkMimeHdr $ showType t] ++ hs
+    in  normalise $ mh ++ rh ++ [mkMimeHdr $ showType t] ++ hs
   -- Beat Frame --------------------------------------------------------------
   toHeaders BeatFrame = []
 
@@ -1437,15 +1403,14 @@ where
   ------------------------------------------------------------------------
   -- | make 'Send' frame
   ------------------------------------------------------------------------
-  mkSndFrame :: [Header] -> Int -> Body -> Either String Frame
-  mkSndFrame hs l b =
+  mkSndFrame :: [Header] -> Body -> Either String Frame
+  mkSndFrame hs b =
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in SEND Frame"
       Just d  -> Right SndFrame {
                            frmHdrs  = rmHdrs hs [hdrMime, hdrTrn, hdrRec,
-                                                 hdrDest, hdrLen],
+                                                 hdrDest],
                            frmDest  = d,
-                           frmLen   = l,
                            frmMime  = case lookup hdrMime hs of
                                         Nothing -> defMime
                                         Just t  -> 
@@ -1458,8 +1423,8 @@ where
   ------------------------------------------------------------------------
   -- | make 'Message' frame
   ------------------------------------------------------------------------
-  mkMsgFrame :: [Header] -> Int -> Body -> Either String Frame
-  mkMsgFrame hs l b =
+  mkMsgFrame :: [Header] -> Body -> Either String Frame
+  mkMsgFrame hs b =
     case lookup hdrDest hs of
       Nothing -> Left "No destination header in MESSAGE Frame"
       Just d  -> case lookup hdrMId hs of
@@ -1467,13 +1432,12 @@ where
                    Just i  ->
                      Right MsgFrame {
                              frmHdrs  = rmHdrs hs [hdrSub, hdrMime, 
-                                                   hdrLen, hdrDest,
+                                                   hdrDest,
                                                    hdrMId, hdrAckId],
                              frmDest  = d,
                              frmSub   = findStrHdr hdrSub   "" hs,
                              frmAckId = findStrHdr hdrAckId "" hs, 
                              frmId    = i, 
-                             frmLen   = l,
                              frmMime  = case lookup hdrMime hs of
                                           Nothing -> defMime
                                           Just t  -> 
@@ -1625,17 +1589,16 @@ where
   ------------------------------------------------------------------------
   -- | make 'Error' frame
   ------------------------------------------------------------------------
-  mkErrFrame :: [Header] -> Int -> Body -> Either String Frame
-  mkErrFrame hs l b =
+  mkErrFrame :: [Header] -> Body -> Either String Frame
+  mkErrFrame hs b =
     Right ErrFrame {
             frmMsg  = findStrHdr hdrMsg   "" hs,
             frmRec  = findStrHdr hdrRecId "" hs,
-            frmLen  = l,
             frmMime = 
               case lookup hdrMime hs of
                 Nothing -> defMime
                 Just t  -> fromMaybe defMime (parseMIMEType t),
-            frmHdrs = rmHdrs hs [hdrMime, hdrLen, hdrMsg, hdrRecId],
+            frmHdrs = rmHdrs hs [hdrMime, hdrMsg, hdrRecId],
             frmBody = b}
 
   ------------------------------------------------------------------------
@@ -1655,7 +1618,6 @@ where
                                  frmHdrs  = frmHdrs f,
                                  frmDest  = frmDest f,
                                  frmSub   = sub, 
-                                 frmLen   = frmLen  f,
                                  frmMime  = frmMime f,
                                  frmId    = i,
                                  frmAckId = a,

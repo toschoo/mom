@@ -104,9 +104,6 @@ where
                      msgHdrs :: [F.Header],
                      -- | The /MIME/ type of the content
                      msgType :: Mime.Type,
-                     -- | The length of the 
-                     --   encoded content
-                     msgLen  :: Int,
                      -- | The transaction, in which 
                      --   the message was received
                      msgTx   :: Fac.Tx,
@@ -119,16 +116,15 @@ where
   -- Create a message
   ---------------------------------------------------------------------
   mkMessage :: MsgId -> Fac.Sub -> String -> String ->
-               Mime.Type -> Int -> Fac.Tx -> 
+               Mime.Type -> Fac.Tx -> 
                B.ByteString -> a -> Message a
-  mkMessage mid sub dst ak typ len tx raw cont = Msg {
+  mkMessage mid sub dst ak typ tx raw cont = Msg {
                                              msgId   = mid,
                                              msgSub  = sub,
                                              msgDest = dst,
                                              msgAck  = ak,
                                              msgHdrs = [], 
                                              msgType = typ, 
-                                             msgLen  = len, 
                                              msgTx   = tx,
                                              msgRaw  = raw,
                                              msgCont = cont}
@@ -401,7 +397,7 @@ where
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
     Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
-                     (msgType msg) (msgLen msg) hs -- escape headers! 
+                     (msgType msg) hs -- escape headers! 
                      (msgRaw  msg) 
 
   mkAckF :: Bool -> Message a -> String -> [F.Header] -> Either String F.Frame
