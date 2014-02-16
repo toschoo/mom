@@ -102,8 +102,6 @@ where
   --
   --   * 'Int': The timeout in microseconds.
   --
-  --   * 'M.Type': The /MIME/ type of the request.
-  --
   --   * ['F.Header']: List of additional headers 
   --                   to be sent with the request;
   --                   note that the function, internally,
@@ -114,9 +112,9 @@ where
   --  * /o/: The request 
   ------------------------------------------------------------------------
   request :: ClientA i o -> 
-             Int -> M.Type -> [F.Header] -> o -> IO (Maybe (Message i))
-  request c tmo t hs r = 
-    writeQ (clOut c) t ((channel, clChn c) : hs) r >> 
+             Int -> [F.Header] -> o -> IO (Maybe (Message i))
+  request c tmo hs r = 
+    writeQ (clOut c) ((channel, clChn c) : hs) r >> 
       timeout tmo (readQ (clIn c))
 
   ------------------------------------------------------------------------
@@ -206,17 +204,15 @@ where
   --
   --   * 'Int': The timeout in microseconds.
   --
-  --   * 'M.Type': The /MIME/ type of the reply.
-  --
   --   * ['F.Header']: Additional headers to be sent with the reply.
   --
   --   * 'Message' i -> IO o: Transforms the request into a reply -
   --                          this defines the service provided by this
   --                          application.
   ------------------------------------------------------------------------
-  reply :: ServerA i o -> Int -> M.Type -> [F.Header] -> 
+  reply :: ServerA i o -> Int -> [F.Header] -> 
            (Message i -> IO o) -> IO ()
-  reply s tmo t hs transform = do
+  reply s tmo hs transform = do
     mbM <- timeout tmo $ readQ (srvIn s)
     case mbM of
       Nothing -> return ()
@@ -225,5 +221,5 @@ where
           Nothing -> throwIO $ 
                        ProtocolException "No reply channel defined!"
           Just c  -> do x <- transform m
-                        writeAdHoc (srvOut s) c t hs x
+                        writeAdHoc (srvOut s) c hs x
 
