@@ -40,7 +40,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Messages
                    P.Message, 
                    msgContent, P.msgRaw, 
-                   P.msgType, P.msgLen, P.msgHdrs,
+                   P.msgHdrs,
                    -- * Receipts
                    -- $stomp_receipts
                    Factory.Rec(..), Receipt,
@@ -90,7 +90,6 @@ where
                                       AsyncException(..), Handler(..),
                                       throwIO, SomeException)
 
-  import           Codec.MIME.Type as Mime (Type)
   import           System.Timeout (timeout)
 
   {- $stomp_con
@@ -599,7 +598,7 @@ where
   --
   --   > let iconv _ _ _ = return . toString
   ------------------------------------------------------------------------
-  type InBound  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
+  type InBound  a = [F.Header] -> B.ByteString -> IO a
   ------------------------------------------------------------------------
   -- | Out-bound converters are much simpler.
   --   Since the application developer knows,
@@ -923,8 +922,6 @@ where
 
   ------------------------------------------------------------------------
   -- | Adds the value /a/ as message at the end of the queue.
-  --   The Mime type as well as the headers 
-  --   are added to the message.
   --
   --   If the queue was created with the option
   --   'OWithReceipt',
@@ -951,9 +948,9 @@ where
   --   >   Nothing -> -- error handling
   --   >   Just r  -> do -- ...
   ------------------------------------------------------------------------
-  writeQ :: Writer a -> Mime.Type -> [F.Header] -> a -> IO ()
-  writeQ q mime hs x =
-    writeQWith q mime hs x >>= (\_ -> return ())
+  writeQ :: Writer a -> [F.Header] -> a -> IO ()
+  writeQ q hs x =
+    writeQWith q hs x >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- | This is a variant of 'writeQ'
@@ -966,9 +963,9 @@ where
   --   indicated in the header using 'writeAdHoc'.
   --   The additional 'String' parameter contains the destination.
   ------------------------------------------------------------------------
-  writeAdHoc :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO ()
-  writeAdHoc q dest mime hs x =
-    writeGeneric q dest mime hs x >>= (\_ -> return ())
+  writeAdHoc :: Writer a -> String -> [F.Header] -> a -> IO ()
+  writeAdHoc q dest hs x =
+    writeGeneric q dest hs x >>= (\_ -> return ())
 
   ------------------------------------------------------------------------
   -- | This is a variant of 'writeQ' 
@@ -988,7 +985,7 @@ where
   --
   --   > r <- writeQWith q nullType [] "hello world!"
   ------------------------------------------------------------------------
-  writeQWith :: Writer a -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeQWith :: Writer a -> [F.Header] -> a -> IO Receipt
   writeQWith q = writeGeneric q (wDest q) 
 
   ------------------------------------------------------------------------
@@ -999,15 +996,15 @@ where
   --   later, using 'waitReceipt'.
   --   Please refer to 'writeQWith' for more details.
   ------------------------------------------------------------------------
-  writeAdHocWith :: Writer a -> String -> Mime.Type -> [F.Header] -> a -> IO Receipt
+  writeAdHocWith :: Writer a -> String -> [F.Header] -> a -> IO Receipt
   writeAdHocWith = writeGeneric 
  
   ------------------------------------------------------------------------
   -- internal work horse
   ------------------------------------------------------------------------
   writeGeneric :: Writer a -> String -> 
-                  Mime.Type -> [F.Header] -> a -> IO Receipt
-  writeGeneric q dest mime hs x = do
+                  [F.Header] -> a -> IO Receipt
+  writeGeneric q dest hs x = do
     c <- getCon (wCon q)
     if not $ P.connected (conCon c)
       then throwIO $ ConnectException $
@@ -1026,7 +1023,7 @@ where
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
             let m = P.mkMessage P.NoMsg NoSub dest ""
-                                mime (B.length s) tx s x
+                                tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
             P.send (conCon c) m (show rc) hs 
@@ -1288,12 +1285,10 @@ where
     let conv = rFrom q
     let sid  = if  null (F.getSub f) || not (numeric $ F.getSub f)
                  then NoSub else Sub $ read $ F.getSub f
-    x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
+    x <- conv (F.getHeaders f) b
     let m = P.mkMessage (P.MsgId $ F.getId f) sid
                         (F.getDest   f) 
                         (F.getMsgAck f) 
-                        (F.getMime   f)
-                        (F.getLength f)
                         NoTx 
                         b -- raw bytestring
                         x -- converted context
