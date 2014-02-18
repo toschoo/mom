@@ -97,6 +97,8 @@ where
         t50   = mkTest "Send and Receive         " $ testWith p testSndRcv 
         t60   = mkTest "Unicode                  " $ testWith p testUTF8 
         t70   = mkTest "withReader               " $ testWith p testWithQueue 
+        t75   = mkTest "No Content Length        " $ testWith p testNoContentLen
+        t76   = mkTest "Content Length           " $ testWith p testContentLen
         t80   = mkTest "Transaction              " $ testWith p testTx1 
         t90   = mkTest "Abort                    " $ testWith p testAbort 
         t100  = mkTest "Abort on exception       " $ testWith p testTxException 
@@ -137,7 +139,7 @@ where
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
         [ t1,   t2,          t4,
-          t10,  t20,  t30,  t40,  t50,  t60,  t70,        t80,  t90, t100,
+          t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75,  t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
@@ -364,6 +366,55 @@ where
             v <- newEmptyMVar 
             _ <- forkIO (putMVar v $ U.toString b)
             takeMVar v
+
+  ------------------------------------------------------------------------
+  -- Send with ONoContentLen
+  ------------------------------------------------------------------------
+  -- shall create a reader
+  -- shall create a writer
+  -- shall receive message 
+  -- message shall be correct
+  -- message shall not contain "content-length" header
+  ------------------------------------------------------------------------
+  testNoContentLen :: Con -> IO TestResult
+  testNoContentLen c = do
+    iQ <- newReader c "IN"  tQ1 [] [] iconv
+    oQ <- newWriter c "OUT" tQ1 [ONoContentLen] [] oconv
+    writeQ oQ nullType [] text1
+    eiM <- try $ readQ iQ
+    case eiM of
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
+      Right m -> do
+        if msgContent m == text1 && msgLen m <= 0
+          then case lookup "content-length" $ msgHdrs m of
+                 Nothing -> return Pass
+                 Just l  -> return $ Fail $ "conent-length: " ++ l
+          else return $ Fail $ "Unexpected message: " ++ 
+                                msgContent m
+
+  ------------------------------------------------------------------------
+  -- Send without ONoContentLen
+  ------------------------------------------------------------------------
+  -- shall create a reader
+  -- shall create a writer
+  -- shall receive message 
+  -- message shall be correct
+  -- message shall contain "content-length" 
+  ------------------------------------------------------------------------
+  testContentLen :: Con -> IO TestResult
+  testContentLen c = do
+    iQ <- newReader c "IN"  tQ1 [] [] iconv 
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
+    writeQ oQ nullType [] text1
+    eiM <- try $ readQ iQ
+    case eiM of
+      Left  e -> return $ Fail $ "Unexpected exception: " ++ show e
+      Right m -> do
+        if msgContent m == text1 && msgLen m > 0
+          then return Pass
+          else return $ Fail $ "Unexpected message: " ++ 
+                                msgContent m ++ " or message length: " ++
+                                show (msgLen m)
 
   ------------------------------------------------------------------------
   -- Transaction

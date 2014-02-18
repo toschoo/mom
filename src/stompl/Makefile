@@ -29,6 +29,7 @@ clean:
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
 	rm -f $(SMOKEDIR)/esc
+	rm -f $(SMOKEDIR)/parse
 
 dist-clean:	clean
 		cabal clean
@@ -49,6 +50,9 @@ $(TDIR)/tparser:	$(TDIR)/tparser.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/esc:	$(SMOKEDIR)/esc.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/parse:	$(SMOKEDIR)/parse.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 

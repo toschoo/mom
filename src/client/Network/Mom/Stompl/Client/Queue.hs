@@ -462,6 +462,7 @@ where
                    wName :: String,
                    wRec  :: Bool,
                    wWait :: Bool,
+                   wCntl :: Bool,
                    wTx   :: Bool,
                    wTo   :: OutBound a}
 
@@ -546,6 +547,8 @@ where
             -- | A queue created with 'OForceTx' will throw 
             --   'QueueException' when used outside a 'Transaction'.
             | OForceTx
+            -- | Do not automatically add a content-length header
+            | ONoContentLen 
     deriving (Show, Read, Eq) 
 
   hasQopt :: Qopt -> [Qopt] -> Bool
@@ -811,9 +814,10 @@ where
               wCon  = cid,
               wDest = dst,
               wName = qn,
-              wRec  = hasQopt OWithReceipt os, 
-              wWait = hasQopt OWaitReceipt os, 
-              wTx   = hasQopt OForceTx     os, 
+              wRec  = hasQopt OWithReceipt  os, 
+              wWait = hasQopt OWaitReceipt  os, 
+              wTx   = hasQopt OForceTx      os, 
+              wCntl = hasQopt ONoContentLen os,
               wTo   = conv}
 
   ------------------------------------------------------------------------
@@ -1025,8 +1029,8 @@ where
             let conv = wTo q
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
-            let m = P.mkMessage P.NoMsg NoSub dest ""
-                                mime (B.length s) tx s x
+            let l = if wCntl q then -1 else B.length s
+            let m = P.mkMessage P.NoMsg NoSub dest "" mime l tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
             P.send (conCon c) m (show rc) hs 
