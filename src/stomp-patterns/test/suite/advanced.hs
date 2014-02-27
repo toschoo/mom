@@ -119,6 +119,8 @@ where
             _  -> print sc >> return ""
     assert (s == is)
 
+  -- error
+
   ------------------------------------------------------------------------
   -- Proxy
   ------------------------------------------------------------------------
@@ -184,8 +186,23 @@ where
                 action c d p rs' (n-1)
               _ -> return rs
 
-  -- error
-
+  -- error ---------------------------------------------------------------
+  prpProxyExc :: Property
+  prpProxyExc = monadicIO $ do
+    s <- run $ testDesk (0,1000) onerr "/q/desk1/service" $ \c -> -- /q/desk1/reg
+      withPub c "Pub1" "Topic1" "/q/pub/reg" onerr
+               ("unknown", [], [], stringOut) $ \_ -> do
+        m <- newMVar 0
+        withPubProxy c "Proxy" "Topic1"
+                       "/q/pub/reg"
+                      ("/q/proxy/in", [], [], ignorebody)
+                      ("/q/desk1/reg", 500000, (100,50,1000))
+                      (subtleErr m) $ action (10::Int)
+    assert (s == 0)
+    where action :: Int -> IO Int
+          action 0 = return 0
+          action n = threadDelay 1000000 >> action (n-1)
+            
   ------------------------------------------------------------------------
   -- Router
   ------------------------------------------------------------------------
@@ -654,6 +671,8 @@ where
                   (oneCheck prpProxyOK)       ?>  
          runTest "Proxy: no heartbeat"
                   (oneCheck prpProxyNO)       ?> 
+         runTest "Proxy: continues on Exc"
+                  (oneCheck prpProxyExc)      ?> 
          runTest "Router: publish 1 via router"
                   (someCheck 50 prpRouter1)   ?> 
          runTest "Router: publish n via router"

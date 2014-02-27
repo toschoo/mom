@@ -3,15 +3,11 @@ where
 
   import qualified Data.ByteString.Char8 as B
   import           Test.QuickCheck
-  import           Test.QuickCheck.Monadic
   import           Control.Applicative ((<$>))
-  import           Control.Monad (when)
-  import           Control.Exception (SomeException)
   import           Control.Concurrent
   import           System.IO (stdout, hFlush)
 
   import           Types
-
   import           Network.Mom.Stompl.Client.Queue
 
   ------------------------------------------------------------------------
@@ -40,11 +36,26 @@ where
   stringOut = return . B.pack
 
   subtleErr :: MVar Int -> OnError
-  subtleErr o _ _ = do 
+  subtleErr o _ _ = do
     x <- modifyMVar o (\x -> let r = if x == 0 then 1 else 0  
                               in return (r,x))
-    let ch = "\b" ++ if x /= 0 then "O" else "o"
+    let ch = '\b' : if x /= 0 then "O" else "o"
     putStr ch >> hFlush stdout
+
+  runX :: String -> Int -> IO () -> IO ()
+  runX s n f = putStr ("Running Test " ++ s ++ ":    ") 
+               >> hFlush stdout >> go n
+    where go 0 = countdown 0 0 >> putStrLn ""
+          go i = countdown i (i+1) >> f >> go (i-1)
+
+  countdown :: Int -> Int -> IO ()
+  countdown n o = 
+    let x  = show o ++ " "
+        b  = map (\_ -> '\b') x
+        ch = b ++ show n
+     in do putStr " "
+           putStr ch >> hFlush stdout
+
 
   -------------------------------------------------------------
   -- controlled quickcheck, arbitrary tests

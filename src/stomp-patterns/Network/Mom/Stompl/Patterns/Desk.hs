@@ -8,7 +8,7 @@
 -- Portability: portable
 --
 -- A Desk is a server that supplies information
--- about job providers. A client requests providers
+-- about providers. A client requests providers
 -- for a specific job (service, task or topic)
 -- and the desk will reply with a list of queue names
 -- of providers of the enquired job.

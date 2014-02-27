@@ -30,7 +30,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Queues
                    -- $stomp_queues
                    Reader, Writer, 
-                   newReader, newWriter, 
+                   newReader, destroyReader, newWriter, destroyWriter,
                    withReader, withWriter, withPair, ReaderDesc, WriterDesc,
                    Qopt(..), F.AckMode(..), 
                    InBound, OutBound, 
@@ -191,7 +191,7 @@ where
 
   {- $stomp_receipts
 
-     Receipts are identifiers unique during the life time
+     Receipts are identifiers unique during the lifetime
      of an application; receipts can be added to all kinds of
      messages sent to the broker.
      The broker, in its turn, uses receipts to acknowledge received messages.
@@ -305,10 +305,10 @@ where
      >   withConnection "localhost" 61613 [] [] $ \c -> do
      >     let iconv _ _ _ = strToPing . U.toString
      >     let oconv       = return    . U.fromString . show
-     >     inQ  <- newReader c "Q-IN"  qn [] [] iconv
-     >     outQ <- newWriter c "Q-OUT" qn [] [] oconv
-     >     writeQ outQ nullType [] Pong
-     >     listen inQ outQ
+     >     withReader   c "Q-IN"  qn [] [] iconv $ \inQ ->
+     >       withWriter c "Q-OUT" qn [] [] oconv $ \outQ -> do
+     >         writeQ outQ nullType [] Pong
+     >         listen inQ outQ
      >
      > listen  :: Reader Ping -> Writer Ping -> IO ()
      > listen iQ oQ = forever $ do
@@ -332,7 +332,7 @@ where
 
   ------------------------------------------------------------------------
   -- | Initialises a connection and executes an 'IO' action.
-  --   The connection life time is the scope of this action.
+  --   The connection lifetime is the scope of this action.
   --   The connection handle, 'Con', that is passed to the action
   --   should not be returned from 'withConnection'.
   --   Connections, however, can be shared among threads.
@@ -617,7 +617,7 @@ where
   type OutBound a = a -> IO B.ByteString
 
   ------------------------------------------------------------------------
-  -- | Creates a 'Reader' with the life time of the connection 'Con'.
+  -- | Creates a 'Reader' with the lifetime of the connection 'Con'.
   --   Creating a receiving queue involves interaction with the broker;
   --   this may result in preempting the calling thread, 
   --   depending on the options ['Qopt'].
@@ -664,6 +664,11 @@ where
   --   > case mbQ of
   --   >   Nothing -> -- handle error
   --   >   Just q  -> do -- ...
+  --
+  --   A newReader stores data in the connection /c/.
+  --   If the lifetime of a reader is shorter than that of its connection
+  --   it should call 'destroyReader' to avoid memory leaks.
+  --   In such cases, it is usually preferable to use 'withReader'.
   ------------------------------------------------------------------------
   newReader :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                InBound a -> IO (Reader a)
@@ -673,9 +678,15 @@ where
       then throwIO $ ConnectException $ 
                  "Not connected (" ++ show cid ++ ")"
       else newRecvQ cid c qn dst os hs conv
+
+  ------------------------------------------------------------------------
+  -- | Removes all references to the reader from the connection. 
+  ------------------------------------------------------------------------
+  destroyReader :: Reader a -> IO ()
+  destroyReader = unsub 
   
   ------------------------------------------------------------------------
-  -- | Creates a 'Writer' with the life time of the connection 'Con'.
+  -- | Creates a 'Writer' with the lifetime of the connection 'Con'.
   --   Creating a sending queue does not involve interaction with the broker
   --   and will not preempt the calling thread.
   --   
@@ -684,6 +695,17 @@ where
   --   an already defined out-bound converter:
   --
   --   > q <- newWriter c "TestQ" "/queue/test" [] [] oconv
+  --
+  -- Currently no references to the writer are stored 
+  -- in the connection. It is advisable, however, 
+  -- to use 'withWriter' instead of 'newWriter'
+  -- whenever the lifetime of a writer is shorter than that
+  -- of the connection. 
+  -- In cases where this is not possible,
+  -- you should use 'destroyWriter' 
+  -- when the writer is not needed anymore.
+  -- Currently 'destroyWriter' does nothing,
+  -- but this may change in the future.
   ------------------------------------------------------------------------
   newWriter :: Con -> String -> String -> [Qopt] -> [F.Header] -> 
                OutBound a -> IO (Writer a)
@@ -695,16 +717,22 @@ where
       else newSendQ cid qn dst os conv
 
   ------------------------------------------------------------------------
-  -- | Creates a 'Reader' with limited life time. 
+  -- | Does nothing, but should be used with 'newWriter'.
+  ------------------------------------------------------------------------
+  destroyWriter :: Writer a -> IO ()
+  destroyWriter _ = return ()
+
+  ------------------------------------------------------------------------
+  -- | Creates a 'Reader' with limited lifetime. 
   --   The queue will live only in the scope of the action
   --   that is passed as last parameter. 
   --   The function is useful for readers
-  --   that are used only temporarly, /e.g./ during initialisation.
+  --   with a lifetime shorter than that of the connection.
   --   When the action terminates, the client unsubscribes from 
   --   the broker queue - even if an exception is raised.
   --
   --   'withReader' returns the result of the action.
-  --   Since the life time of the queue is limited to the action,
+  --   Since the lifetime of the queue is limited to the action,
   --   it should not be returned.
   --   Any operation on a reader created by 'withReader'
   --   outside the action will raise 'QueueException'.
@@ -716,19 +744,18 @@ where
   withReader :: Con -> String    -> 
                        String    -> [Qopt] -> [F.Header] -> 
                        InBound i -> (Reader i -> IO r)   -> IO r
-  withReader cid qn dst os hs conv act = do
-    q <- newReader cid qn dst os hs conv
-    act q `finally` unsub q
+  withReader cid qn dst os hs conv = 
+    bracket (newReader cid qn dst os hs conv) unsub 
 
   ------------------------------------------------------------------------
-  -- | Creates a 'Writer' with limited life time. 
+  -- | Creates a 'Writer' with limited lifetime. 
   --   The queue will live only in the scope of the action
   --   that is passed as last parameter. 
   --   The function is useful for writers
   --   that are used only temporarly, /e.g./ during initialisation.
   --
   --   'withWriter' returns the result of the action.
-  --   Since the life time of the queue is limited to the action,
+  --   Since the lifetime of the queue is limited to the action,
   --   it should not be returned.
   --   Any operation on a writer created by 'withWriter'
   --   outside the action will raise a 'QueueException'.

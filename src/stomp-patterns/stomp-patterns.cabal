@@ -20,7 +20,7 @@ Description:
   a publisher sends data to many subscribers.
   Such communication patterns, apparantly,
   are left to be implemented by applications.
-  Patterns like clients-server, publish and subscribe
+  Patterns like client-server, publish and subscribe
   and many others, however, are used over and over again
   in message-oriented applications.
 
@@ -41,7 +41,7 @@ Description:
 
   .
 
-  * pusher-worker
+  * pusher-worker (pipeline)
 
   .
 
@@ -88,7 +88,7 @@ Description:
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
-                   stomp-queue >= 0.1.1,
+                   stomp-queue >= 0.1.4,
                    stompl      >= 0.1.0,
                    mtl         >= 2.1.2,
                    mime        >= 0.3.3,

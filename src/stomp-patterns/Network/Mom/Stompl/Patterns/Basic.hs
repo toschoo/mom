@@ -23,10 +23,10 @@
 --  * publish and subscribe: The publisher sends data to all subscribers
 --                           (the topic);
 --
---  * pusher\/worker: The pusher sends data to the worker (the request),
+--  * pusher\/worker: The pusher sends data to the worker (the request)
 --                   without receiving a reply.
 --
---  We call a work that is performed by an application on behalf of 
+--  We call the processing performed by an application on behalf of 
 --  another application a /job/.
 --  There are three different job types:
 --
@@ -39,8 +39,8 @@
 --  * topic: is sent to registered subscribers without being requested
 --           explicitly.
 --
---  Applications providing a job, genericly, are called providers, 
---  applications requesting a job are consumers.
+--  Applications providing a job are generically called providers, 
+--  applications requesting a job are called consumers.
 --  Providers, hence, are servers, workers and publishers, and
 --  consumers are clients, pushers and subscribers.
 --  Note that this is somewhat different from the 
@@ -80,7 +80,8 @@
 --      If the service is /idempotent/ -
 --      /i.e./ calling the service twice has 
 --      the same effect as calling it once -
---      the client can just send the request once more;
+--      the client, when the timeout has expired,
+--      can just send the request once again;
 --      otherwise, it has to use other means to recover 
 --      from this situation.
 --
@@ -196,7 +197,7 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catches, finally)
   import           Control.Concurrent 
-  import           Control.Monad (forever, unless, void)
+  import           Control.Monad (forever, unless, when, void)
   import           Data.Time
   import qualified Data.ByteString.Char8 as B
 
@@ -219,19 +220,20 @@ where
       by the same provider.
       Note that registers provide different modes of using providers:
       a load balancer will send a request to only one of its providers,
-      whereas publishers will send the data it receives to all
+      whereas publishers will send the data they produce to all
       currently registered consumers.
       The difference is defined by the 'JobType' of a given 'Job'.
       Of course, only providers of the same type may register
       for the same job. 
 
-      Registers provide a queue through which services can register
-      and another queue through which they receive requests. 
+      Registers provide a queue through which services can register;
+      patterns using registers would provide 
+      another queue through which they receive requests. 
       Registers allow for some level of reliability,
       /i.e./ registers can ensure with certain probability 
              that providers are available at the time,
              when a request is made.
-     Therefore, registries accept heartbeats from heartbeats.
+     Therefore, registries may request heartbeats from providers.
      Heartbeats are negotiated on registration.
      Note that registries do not send heartbeats back to providers.
      Providers have to use other strategies to make sure
@@ -244,6 +246,12 @@ where
      how to use the registration functions and heartbeats
      together with a server:
 
+     > -- The definition of the variables
+     > -- reg, jn, rn, tmo
+     > -- is out of the scope of this listing;
+     > -- their data type and meaning 
+     > -- can be inferred from the context.
+     >
      >  withConnection "127.0.0.1" 61613 [] [] $ \c -> 
      >    withServer c "Test" (q,            [], [], iconv)
      >                        ("unknown",    [], [], oconv) $ \s -> do
@@ -262,12 +270,12 @@ where
      >                    m  <- newMVar hb 
      >                    let p = if me <= 0 then (-1) else 1000 * me 
      >                    withWriter c "HB" reg [] [] nobody $ \w -> 
-     >                    finally (forever $
-     >                      reply s p t hs transform >> heartbeat m w jn rn) (do
-     >                      -- "don't forget to unregister!" (Frank Zappa)
-     >                      sc <- unRegister c jn wn rn tmo
-     >                            unless (sc == OK) $ 
-     >                              throwIO $ NotOKX sc "on unregister")
+     >                      finally (forever $
+     >                        reply s p t hs transform >> heartbeat m w jn rn) (do
+     >                        -- "don't forget to unregister!" (Frank Zappa)
+     >                        sc <- unRegister c jn wn rn tmo
+     >                              unless (sc == OK) $ 
+     >                                throwIO $ NotOKX sc "on unregister")
      >        -- not ok ---------------------------
      >        e -> throwIO $ NotOKX e "on register"
 
@@ -331,7 +339,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker
   --
-  --   * 'String': Name of the Client, which can be used for error handling.
+  --   * 'String': Name of the Client, which can be used for error reporting.
   --
   --   * 'JobName': Name of the 'Service' the client will request
   --
@@ -427,7 +435,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker
   --
-  --   * 'String': Name of the Server, which can be used for error handling.
+  --   * 'String': Name of the Server, which can be used for error reporting.
   --
   --   * 'ReaderDesc' i: Description of a reader queue;
   --                     this is the queue through which clients
@@ -456,10 +464,10 @@ where
   -- | Waits for a client request, 
   --   calls the application-defined transformer to generate a reply
   --   and sends this reply through the reply queue
-  --   whose name is indicated by header in the request.
+  --   whose name is indicated by a header in the request.
   --   The time a server waits for a request may be restricted
   --   by the timeout. Typically, you would call reply with 
-  --   timeout set to /-1/ (for /wait eternally/).
+  --   timeout set to /-1/ (/wait eternally/).
   --   There may be situations, however, where it actually
   --   makes sense to restrict the waiting time,
   --   /i.e./ to perform some housekeeping in between.
@@ -470,7 +478,7 @@ where
   --
   --   where /f/ is a function of type 
   --
-  --   > 'Message' i -> 'IO' o.
+  --   > Message i -> IO o.
   --
   --   Parameters:
   --
@@ -502,7 +510,7 @@ where
   -- | Create a server that works in a background thread:
   --   The background thread (and with it the server)
   --   is running until the action passed in to the function (IO r)
-  --   is running; when it terminates, the background thread is
+  --   terminates; when it terminates, the background thread is
   --   terminated as well.
   --   /withServerThread/ may connect to a registry
   --   (to serve as a provider of a balancer for instance),
@@ -512,7 +520,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * 'String': The name of the server, used for error handling;
+  --   * 'String': The name of the server, used for error reporting;
   --
   --   * 'JobName': The job provided by this server
   --
@@ -611,13 +619,13 @@ where
   --   The registry will not expect heartbeats from subscribers,
   --   since the dependability relation is the other way round:
   --   the publisher does not depend on subscribers,
-  --   subscriber depend on a publisher.
+  --   but subscribers depend on a publisher.
   --   The publisher, usually, does not send heartbeats either.
   --   For exceptions to this rule, see 'withPubProxy'.
   --
   --   * 'Con': Connect to a Stomp broker;
   --
-  --   * String: Name of the publisher used for error handling;
+  --   * String: Name of the publisher used for error reporting;
   --
   --   * 'JobName': The name of the topic;
   --
@@ -662,13 +670,13 @@ where
   -- | Create a publisher that works in a background thread
   --   publishing periodically at a monotonic rate,
   --   /i.e./ it creates data and publishes them,
-  --          it computes the difference 
+  --          computes the difference 
   --             of the publication rate minus the time needed
   --                to create and publish the data 
-  --          and will then suspend the thread for this period,
-  --          for a publication rate of p microseconds,
-  --              the thread will be delayed for p - x microseconds,
-  --              if x corresponds to the time that was spent
+  --          and will then suspend the thread for this period.
+  --          For a publication rate of /p/ microseconds,
+  --              the thread will be delayed for /p - x/ microseconds,
+  --              if /x/ corresponds to the time that was spent
   --                 on creating and publishing the data.
   --
   --  The precision depends of course on your system and
@@ -680,7 +688,7 @@ where
   --
   --  * 'Con': Connection to a Stomp broker;
   --
-  --  * String: Name of the publisher used for error handling;
+  --  * String: Name of the publisher used for error reporting;
   --
   --  * 'JobName': Name of the topic;
   --
@@ -709,14 +717,14 @@ where
                    Type -> [F.Header] -> IO o ->
                    WriterDesc o       -> Int  -> 
                    OnError -> IO r    -> IO r
-  withPubThread c n jn rn t hs create wd period onErr = withThread doPub
-    where doPub = withPub c n jn rn onErr wd $ \p ->
-                    forever $ catches (do
+  withPubThread c n jn rn t hs create wd period onErr action = 
+    withPub c n jn rn onErr wd $ \p -> withThread (doPub p) action
+    where doPub p = forever $ catches (do
                       n1 <- getCurrentTime
                       create >>= publish p t hs
                       n2 <- getCurrentTime
                       let d = nominal2us (n2 `diffUTCTime` n1)
-                      threadDelay (period - d)) (
+                      when (d < period) $ threadDelay (period - d)) (
                     ignoreHandler (pubName p) onErr)
 
   ------------------------------------------------------------------------
@@ -736,7 +744,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Subscriber name useful for error handling;
+  --   * String: Subscriber name useful for error reporting;
   --
   --   * 'JobName': Subscribed topic;
   --
@@ -785,7 +793,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Subscriber name used for error handling;
+  --   * String: Subscriber name used for error reporting;
   --
   --   * 'JobName': Subscribed topic;
   --
@@ -825,7 +833,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Subscriber name used for error handling;
+  --   * String: Subscriber name used for error reporting;
   --
   --   * 'JobName': Subscribed topic;
   --
@@ -856,7 +864,7 @@ where
   --   Note that, when we say "consumer" here,
   --   the pusher is actually a data producer,
   --   but consumes the effect of having a task done.
-  --   The pusher is similar to a client
+  --   The pusher can be seen as a client
   --   that does not expect a reply.
   ------------------------------------------------------------------------
   data PusherA o = Pusher {
@@ -871,9 +879,9 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Name of the pusher, which may be used for error handling;
+  --   * String: Name of the pusher, which may be used for error reporting;
   --
-  --   * 'JobName': Name of the job requeste by this pusher;
+  --   * 'JobName': Name of the job requested by this pusher;
   --
   --   * 'WriterDesc' o: 'Writer' queue through which 
   --                              the job request is pushed;
@@ -890,13 +898,13 @@ where
   ------------------------------------------------------------------------
   -- | Push a 'Job':
   --
-  --   'PusherA' o: The pusher to be used;
+  --     * 'PusherA' o: The pusher to be used;
   --
-  --   'Type': The MIME Type of the message to be sent;
+  --     * 'Type': The MIME Type of the message to be sent;
   --
-  --   ['F.Header']: The headers to be sent with the message;
+  --     * ['F.Header']: The headers to be sent with the message;
   --
-  --   /o/: The message contents.
+  --     * /o/: The message contents.
   ------------------------------------------------------------------------
   push :: PusherA o -> Type -> [F.Header] -> o -> IO ()
   push p t hs m = let hs' = ("__job__", pushJob p) : hs
@@ -920,13 +928,13 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Name of the worker used for error handling;
+  --   * String: Name of the worker used for error reporting;
   --
   --   * 'JobName': Name of the job, the worker provides;
   --
   --   * ('Message' i  -> IO ()): The job provided by the worker.
   --                              Note that the function does not
-  --                              return a value: Since worker do
+  --                              return a value: Since workers do
   --                              not produce a reply, no result
   --                              is necessary;
   --
@@ -981,7 +989,7 @@ where
   --   publishers do not need load balancers or similar means
   --   that would require registration.
   --   As a consequence, there is no means to send heartbeats internally.
-  --   Sometimes, however, the need to connect to registry may arise.
+  --   Sometimes, however, the need to connect to a registry may arise.
   --   The Desk pattern is an example where it makes sense 
   --   to register a publisher.
   --   But then, there is no means to internally send heartbeats
@@ -998,7 +1006,7 @@ where
   --
   --   * 'Con': Connection to a Stomp broker;
   --
-  --   * String: Name of the proxy used for error handling;
+  --   * String: Name of the proxy used for error reporting;
   --
   --   * 'JobName': Name of the topic, the publisher provides;
   --
@@ -1020,7 +1028,7 @@ where
   ------------------------------------------------------------------------
   withPubProxy :: Con -> String -> JobName      -> QName   ->
                   ReaderDesc i  -> RegistryDesc -> OnError -> IO r -> IO r
-  withPubProxy c n jn pq rd (reg, tmo, (best, mn, mx)) onErr action = -- withThread go
+  withPubProxy c n jn pq rd (reg, tmo, (best, mn, mx)) onErr action =
     withSub c n jn pq tmo rd $ \s -> 
       withWriter c "HB" reg [] [] nobody $ \w -> do
         (sc, h) <- register c jn Topic reg pq tmo best
@@ -1031,9 +1039,10 @@ where
                  else do hb <- mkHB h >>= newMVar
                          withThread (finally (beat hb (h * 1000) s w 0)
                                              (finalise c jn reg pq tmo)) 
-                           action
+                                    action
     where beat :: MVar HB -> Int -> SubA i -> Writer () -> Int -> IO ()
-          beat hb h s w i = do
+          beat hb h s w i = forever $ do -- forever continues 
+                                         -- in case of exception
             mbM  <- checkIssue s h
             case mbM of
               Nothing -> if i == 10 

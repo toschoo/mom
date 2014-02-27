@@ -1,5 +1,5 @@
 Name:            stomp-queue
-Version:         0.1.3
+Version:         0.1.4
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2014
 License:         LGPL
@@ -39,6 +39,18 @@ Description:
   .
 
   Release History:
+
+  .
+
+  [0.1.4] Changes:
+
+          . 
+
+          - New: destroyReader and destroyWriter
+  
+          .
+
+          - Patterns deprecated
 
   .
 

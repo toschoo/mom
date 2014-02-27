@@ -32,10 +32,10 @@ where
     withConnection "localhost" 61613 [] [] $ \c -> do
       let iconv _ _ _ = strToPing . U.toString
       let oconv = return . U.fromString . show
-      inQ  <- newReader c "Q-Ping" qn [] [] iconv
-      outQ <- newWriter c "Q-Pong" qn [] [] oconv
-      writeQ outQ nullType [] Pong
-      listen inQ outQ
+      withReader  c "Q-IN"  qn [] [] iconv $ \inQ ->
+       withWriter c "Q-OUT" qn [] [] oconv $ \outQ -> do
+         writeQ outQ nullType [] Pong
+         listen inQ outQ
  
   listen  :: Reader Ping -> Writer Ping -> IO ()
   listen iQ oQ = forever $ do

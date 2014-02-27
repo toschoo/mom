@@ -36,7 +36,8 @@
 -- called \"__client__\" to agree on the reply queue
 -- 
 -------------------------------------------------------------------------------
-module Network.Mom.Stompl.Client.Patterns (
+module Network.Mom.Stompl.Client.Patterns 
+{-# DEPRECATED "use Network.Mom.Stompl.Patterns.Basic instead!" #-} (
                           -- * Client
                           ClientA, withClient, request, checkRequest,
                           -- * Server

@@ -16,21 +16,21 @@
 -- with increasing numbers of clients.
 --
 -- A balancer consists of a registry to which 
--- servers and workers may connect;
+-- servers and workers connect;
 -- servers and workers are maintained in lists 
 -- according to the job they provide.
--- Client and pushers send requests to the balancer,
--- which then forwards the request to the a server or worker.
+-- Clients and pushers send requests to the balancer,
+-- which then forwards the request to a server or worker.
 -- The client will receive the reply not through the balancer,
 -- but directly from the server (to which the reply queue
 -- was forwarded as part of the request message -- 
 -- see 'ClientA' for details).
 -- 
--- If servers and workers send heartbeats to the registry,
--- it is highly probable that the request will be forwarded
--- to a working provider. This is much more reliable
--- than pushing a job to only one worker or 
--- requesting only one server.
+-- With servers and workers sending heartbeats,
+-- a balancer also improves reliability
+-- in contrast to a topology
+-- where a task is pushed to a single worker or 
+-- a request is sent to only one server.
 -- 
 -- A router is a forwarder of a topic.
 -- A router is very similar to a publisher ('PubA')

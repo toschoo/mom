@@ -39,7 +39,7 @@ where
       _         -> Nothing
 
   ------------------------------------------------------------------------
-  -- | A helper that shall ease the use of the 'register' function.
+  -- | A helper that shall ease the use of the registers.
   --   A registry to which a call wants to connect is described as
   --   
   --   * The 'QName' through which the registry receives requests;
@@ -197,8 +197,8 @@ where
 
   ------------------------------------------------------------------------
   -- | A provider is an opaque data type;
-  --   most of its attributes are use only internally by the registry.
-  --   Interesting for user applications is only the queue
+  --   most of its attributes are used only internally by the registry.
+  --   Interesting for user applications, however, is the queue
   --   that identifies the provider.
   ------------------------------------------------------------------------
   data Provider = Provider {
@@ -335,7 +335,8 @@ where
   --   mapping means different things for:
   --
   --   * Serice, Task: action is applied to the first
-  --                   active provider and this provider
+  --                   active provider of a list of providers
+  --                   and this provider
   --                   is then sent to the back of the list,
   --                   hence, implementing a balancer.
   --

@@ -19,7 +19,7 @@
 -- since servers use the client's reply queue to send the result
 -- back to the client and this queue only exists on the broker
 -- to which the client is connected, the bridge has to remember 
--- the client's reply queue and use its own on the server-side broker
+-- the client's reply queue and use its own queue on the server-side broker
 -- to finally route the reply back to the original client.
 -- With many broker connected by a service bridge,
 -- this can result in long chains of clients and servers 

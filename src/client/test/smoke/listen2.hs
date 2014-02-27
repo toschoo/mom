@@ -11,6 +11,7 @@ where
 
   import Network.Socket (withSocketsDo)
   import Control.Monad (forever)
+  import Control.Exception (finally)
 
   import qualified Data.ByteString.UTF8  as U
 
@@ -28,7 +29,7 @@ where
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do
       let conv _ _ _ = return . U.toString
       q <- newReader c "Q-Hof" qn [] [] conv
-      listen2 q
+      listen2 q `finally` destroyReader q
 
   listen2 :: Reader String -> IO ()
   listen2 q = forever $ do

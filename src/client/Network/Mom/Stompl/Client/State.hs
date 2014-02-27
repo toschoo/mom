@@ -237,7 +237,7 @@ where
 
   rmSubFromCon :: SubEntry -> Connection -> Connection
   rmSubFromCon s c = c {conSubs = ss} 
-    where ss = deleteBy' eq s (conSubs c)
+    where !ss = deleteBy' eq s (conSubs c)
 
   addDestToCon :: DestEntry -> Connection -> Connection
   addDestToCon d c = c {conDests = d : conDests c}
@@ -247,7 +247,7 @@ where
 
   rmDestFromCon :: DestEntry -> Connection -> Connection
   rmDestFromCon d c = c {conDests = ds}
-    where ds = deleteBy' eq d (conDests c)
+    where !ds = deleteBy' eq d (conDests c)
 
   setHisTime :: UTCTime -> Connection -> Connection
   setHisTime t c = c {conHisBeat = t}
@@ -491,8 +491,8 @@ where
                              updTxInThrds t' tid (conThrds c) ts}, 
                         ())
     where updTxInThrds t tid ts trns =
-            let trns' = delete' t trns
-                ts'   = deleteBy' eq (tid, trns) ts
+            let !trns' = delete' t trns
+                !ts'   = deleteBy' eq (tid, trns) ts
              in (tid, t : trns') : ts'
 
   ------------------------------------------------------------------------

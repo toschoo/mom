@@ -52,7 +52,7 @@ where
   ------------------------------------------------------------------------
   -- | Safe StatusCode parser 
   --   ('StatusCode' is instance of 'Read',
-  --    but 'read' would of course cause an error on an invalid StatusCode)
+  --    but 'read' would cause an error on an invalid StatusCode)
   ------------------------------------------------------------------------
   readStatusCode :: String -> Either String StatusCode
   readStatusCode s = case s of

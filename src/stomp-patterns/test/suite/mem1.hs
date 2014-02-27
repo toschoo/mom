@@ -2,10 +2,8 @@ module Main
 where
 
   import           System.Exit
-  import           System.IO (stdout, hFlush)
-  import           System.Timeout
+  import           System.Environment
   import           Test.QuickCheck
-  import           Test.QuickCheck.Monadic
   import           Common
 
   import           Registry  
@@ -13,19 +11,12 @@ where
 
   import           Network.Mom.Stompl.Patterns.Basic -- <--- SUT
   import           Network.Mom.Stompl.Patterns.Balancer
-  import           Network.Mom.Stompl.Patterns.Bridge
   import           Network.Mom.Stompl.Patterns.Desk
   import           Network.Mom.Stompl.Client.Queue
 
-  import           Data.List ((\\), nub)
-  import           Data.Maybe (catMaybes, fromMaybe)
-  import           Data.Char (isAlpha)
-  import           Data.Time.Clock
-  import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Prelude hiding (catch)
-  import           Control.Exception (throwIO)
-  import           Control.Monad (void)
+  import           Control.Monad (when)
   import           Codec.MIME.Type (nullType)
 
   ------------------------------------------------------------------------
@@ -51,76 +42,54 @@ where
                       _       -> return ()
             _  -> putStrLn "No provider!"
 
-  -- header values -------------------------------------------------
-  hdrVal :: Gen String
-  hdrVal = do
-    dice <- choose (1,255) :: Gen Int
-    hdrVal' dice
-    where hdrVal' dice = 
-            if dice == 0 then return ""
-              else do
-                c <- hdrChar
-                s <- hdrVal' (dice - 1)
-                return (c:s)
+  ------------------------------------------------------------------------
+  -- Publisher
+  ------------------------------------------------------------------------
+  pubTest :: Con -> QName -> String -> IO ()
+  pubTest c q m = 
+    withSub c "Sub1" "Topic1" q 500000
+             ("/q/sub/1", [], [], stringIn) $ \s -> do
+      mbI <- checkIssue s 100000
+      case mbI of
+        Nothing -> error "No issue!"
+        Just i  -> when (msgContent i /= m) $ 
+                        error $ "Wrong message: " ++ msgContent i
 
-  -- random char for header values -------------------------------------
-  hdrChar :: Gen Char
-  hdrChar = elements (['A'..'Z'] ++ ['a'..'z'] ++ ['0'..'9'] ++ 
-                      "!\"$%&/()=?<>#§:\n\r\\") -- fail: " \t")
+  ------------------------------------------------------------------------
+  -- Subscriber
+  ------------------------------------------------------------------------
+  subTest :: SubA String -> String -> IO ()
+  subTest s m = do
+      mbI <- checkIssue s 100000
+      case mbI of
+        Nothing -> error "No issue!"
+        Just i  -> when (msgContent i /= m) $ 
+                        error $ "Wrong message: " ++ msgContent i
 
-  esc :: String -> String
-  esc = foldl (\l -> (++) l . conv) []
-    where conv c = case c of 
-                     '\n' -> "\\n"
-                     '\r' -> "\\r"
-                     '\\' -> "\\\\"
-                     ':'  -> "\\c"
-                     _    -> [c]
+  ------------------------------------------------------------------------
+  -- Server
+  ------------------------------------------------------------------------
+  srvTest :: Con -> QName -> String -> IO ()
+  srvTest c q m = 
+    withClient c "Client1" "Service1" 
+                ("/q/client/in", [], [], stringIn)
+                (q,              [], [], stringOut) $ \cl -> do
+      mbM <- request cl 500000 nullType [] m
+      case mbM of
+        Nothing -> error "No response!"
+        Just r  -> when (msgContent r /= reverse m) $
+                        error $ "Wrong message: " ++ msgContent r
 
-  setBack :: Registry -> JobName -> Int -> IO ()
-  setBack r jn i = mapAllR r jn (\p -> p{prvNxt = timeAdd (prvNxt p) i})
-
-  setTo :: Registry -> JobName -> UTCTime -> IO ()
-  setTo r jn now = mapAllR r jn (\p -> p{prvNxt = now})
-
-  qname :: String -> String
-  qname ""     = ""
-  qname (c:cs) = if isAlpha c then   c:qname cs
-                              else '/':qname cs
-
-  withServers :: Int -> Con -> QName -> IO r -> IO r
-  withServers n c rq action = go n 
-    where go 0 = action 
-          go k = withServerThread c "Srv1" "Service1" nullType [] (return . msgContent)
-                   ("/q/servers/" ++ show k, [], [],  stringIn)
-                   ("unknown",               [], [], stringOut)
-                   (rq, 500000, (0,0,0)) onerr $ go (k-1)
-
-  withClients :: Int -> Con -> QName -> 
-                 ([ClientA String String] -> IO a) -> IO a
-  withClients n c sq action = withNClient n []
-    where withNClient 0 cs = action cs
-          withNClient k cs = 
-            withClient c ("CL-" ++ show k) "Service1"
-                         ("/q/client" ++ show k, [], [],  stringIn)
-                         (sq,                    [], [], stringOut) $ \cl ->
-              withNClient (k-1) (cl:cs)
-
-  withPushers :: Int -> Con -> QName -> ([PusherA String] -> IO a) -> IO a
-  withPushers n c tq action = withNPushers n []
-    where withNPushers 0 ps = action ps
-          withNPushers k ps = 
-            withPusher c ("PUSH-" ++ show k) "Task1"
-                         (tq, [], [], stringOut) $ \p ->
-               withNPushers (k-1) (p:ps)
-
-  withSubs :: Int -> Con -> QName -> ([SubA String] -> IO a) -> IO a
-  withSubs n c rq action  = withNSubs n []
-    where withNSubs 0 ss  = action ss
-          withNSubs k ss  = 
-            withSub c ("Sub"    ++ show k) "Topic1" rq 500000
-                      ("/q/sub" ++ show k, [], [], stringIn) $ \s ->
-              withNSubs (k-1) (s:ss)
+  ------------------------------------------------------------------------
+  -- Client
+  ------------------------------------------------------------------------
+  cliTest :: ClientA String String -> String -> IO ()
+  cliTest cl m = do
+      mbM <- request cl 500000 nullType [] m
+      case mbM of
+        Nothing -> error "No response!"
+        Just r  -> when (msgContent r /= reverse m) $
+                        error $ "Wrong message: " ++ msgContent r
 
   testWithBalancer :: QName -> (Con -> IO a) -> IO a
   testWithBalancer jq action =
@@ -160,30 +129,54 @@ where
   nonemptyString :: NonEmptyList (NonEmptyList Char) -> [String]
   nonemptyString (NonEmpty ns) = map (\(NonEmpty c) -> c) ns
 
-  runX :: String -> Int -> IO () -> IO ()
-  runX s n f = putStr ("Running Test " ++ s ++ ":    ") 
-               >> hFlush stdout >> go n
-    where go 0 = bubble 0 0 >> putStrLn ""
-          go i = bubble i (i+1) >> f >> go (i-1)
-
-  bubble :: Int -> Int -> IO ()
-  bubble n o = 
-    let x  = show o ++ " "
-        b  = map (\_ -> '\b') x
-        ch = b ++ show n
-     in do putStr " "
-           putStr ch >> hFlush stdout
-                   
-  withCon :: IO ()
-  withCon = do
+  withCon :: String -> IO ()
+  withCon t = do
     putStrLn "========================================="
     putStrLn "   Stompl Patterns Library Test Suite"
     putStrLn "            Memory Test "
     putStrLn "========================================="
 
     withConnection "localhost" 61613 [] [] $ \c ->
-      withDesk c "Desk1" "/q/desk1/reg" (0,1000) onerr "/q/desk1/service" $ 
-        runX "Desk Request" 1000 $ deskReq c "/q/desk1/reg" "/q/desk1/service"
+        let p = case t of
+                  "desk" -> withDesk c "Desk1" "/q/desk1/reg" (0,1000) 
+                              onerr "/q/desk1/service" $ 
+                                deskReq c "/q/desk1/reg" "/q/desk1/service"
+                  "pub"  -> withPubThread c "Pub1" "Topic1" "/q/pub/topic1"
+                                nullType [] (return "hello world!")
+                                ("unknown", [], [], stringOut)
+                                50000 onerr $ 
+                                  pubTest c "/q/pub/topic1" "hello world!"
+                  "sub"  -> withPubThread c "Pub1" "Topic1" "/q/pub/topic1"
+                                nullType [] (return "hello world!")
+                                ("unknown", [], [], stringOut)
+                                50000 onerr $ 
+                              withSub c "Sub1" "Topic1" "/q/pub/topic1" 500000
+                                       ("/q/sub/1", [], [], stringIn) $ \s -> 
+                                  subTest s "hello world!"
+                  "srv"  -> withServerThread c "Srv1" "Service1" nullType []
+                                               (return . reverse . msgContent)
+                                               ("/q/srv/in", [], [], stringIn)
+                                               ("unknown",   [], [], stringOut) 
+                                               ("", 0,(0,0,0))
+                                               onerr $ 
+                              srvTest c "/q/srv/in" "hello world!"
+                  "cli"  -> withServerThread c "Srv1" "Service1" nullType []
+                                               (return . reverse . msgContent)
+                                               ("/q/srv/in", [], [], stringIn)
+                                               ("unknown",   [], [], stringOut) 
+                                               ("", 0,(0,0,0))
+                                               onerr $ 
+                              withClient c "Client1" "Service1" 
+                                          ("/q/client/in", [], [], stringIn)
+                                          ("/q/srv/in",    [], [], stringOut) $ \cl -> 
+                                cliTest cl "hello world!"
+                  _      -> error $ "I don't know that test: " ++ t
+         in runX t 1000 p
          
   main :: IO ()
-  main = withCon
+  main = do
+    os <- getArgs
+    case os of
+      [t] -> withCon t
+      _   -> putStrLn "I need a test name and nothing else!"
+             >> exitFailure
