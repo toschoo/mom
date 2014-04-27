@@ -79,8 +79,16 @@ where
   import           Data.List (find, sortBy, foldl', nub)
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes, fromMaybe)
-  import           Codec.MIME.Type as Mime (showType, Type, nullType)
-  import           Codec.MIME.Parse        (parseMIMEType)
+  import           Codec.MIME.Type as Mime (Type, nullType)
+  import qualified Codec.MIME.Type         (showType)
+  import qualified Codec.MIME.Parse        (parseMIMEType)
+  import qualified Data.Text               (pack,unpack)
+
+  parseMIMEType :: String -> Maybe Mime.Type
+  parseMIMEType = Codec.MIME.Parse.parseMIMEType . Data.Text.pack
+
+  showType :: Mime.Type -> String
+  showType = Data.Text.unpack . Codec.MIME.Type.showType
 
   ------------------------------------------------------------------------
   -- | Tuple of (key, value)

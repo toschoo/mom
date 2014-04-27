@@ -122,7 +122,8 @@ Library
                    utf8-string >= 0.3.6,
                    attoparsec  >= 0.10,
                    split       >= 0.1.4.1,
-                   mime        >= 0.3.3
+                   mime        >= 0.4,
+                   text        >= 0.1
                    -- 3.0.3.2,
                    
   Exposed-Modules: Network.Mom.Stompl.Frame, Network.Mom.Stompl.Parser
