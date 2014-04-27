@@ -1,0 +1,732 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Patterns.Basic</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Patterns-Basic.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-patterns-0.0.1: Stompl MOM Stomp Patterns</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Patterns.Basic</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Client
+</a></li><li><a href="#g:2">Server
+</a></li><li><a href="#g:3">Registry
+</a></li><li><a href="#g:4">withServerThread
+</a></li><li><a href="#g:5">Pusher
+</a></li><li><a href="#g:6">Worker
+</a></li><li><a href="#g:7">More about Registries
+</a></li><li><a href="#g:8">Publisher
+</a></li><li><a href="#g:9">Subscriber
+</a></li><li><a href="#g:10">Heartbeats for Pub
+</a></li><li><a href="#g:11">Exceptions and Error Handling
+</a></li><li><a href="#g:12">Useful Types and Helpers
+</a></li></ul></div><div id="description"><p class="caption">Description</p><div class="doc"><p>This module provides the <em>basic</em> patterns
+ client/server, publish and subscribe and pusher/worker
+ (a.k.a. pipeline) as well as a <em>registry</em>,
+ a means to support patterns
+ where one application uses or serves a set of other applications. 
+</p><p>Basic patterns can be distinguished by the data exchange
+ defined by their protocol:
+</p><ul><li> client/server: The client, first, sends data to the server
+                    (the request) and, then, 
+                    the server sends data to this client
+                    (the reply);
+</li><li> publish and subscribe: The publisher sends data to all subscribers
+                           (the topic);
+</li><li> pusher/worker: The pusher sends data to the worker (the request)
+                   without receiving a reply.
+</li></ul><p>We call the processing performed by an application on behalf of 
+  another application a <em>job</em>.
+  There are three different job types:
+</p><ul><li> service: must be requested explicitly and includes a message
+             sent from the application that perfoms the service (server)
+             to the application that requests the service (client).
+</li><li> task: must be requested explicitly, but does not include a reply.
+</li><li> topic: is sent to registered subscribers without being requested
+           explicitly.
+</li></ul><p>Applications providing a job are generically called providers, 
+  applications requesting a job are called consumers.
+  Providers, hence, are servers, workers and publishers, and
+  consumers are clients, pushers and subscribers.
+  Note that this is somewhat different from the 
+  data-centric terminology &quot;producer&quot; and &quot;consumer&quot;.
+  It is not very useful
+  to distinugish servers from clients or
+  pushers from workers by referring to the distinction
+  of producing or not producing data.
+  It is in fact the pusher that produces data,
+  not the worker. The pusher, however, is the one
+  that requests something from the worker. The task, in this case,
+  is the &quot;good&quot; that is provided by one side and consumed
+  by the other.
+</p><p>This distinction is relevant when we start to think
+  about <em>reliability</em>.
+  Reliability is a relation between a provider and a consumer:
+  The consumer relies on the producer,
+  not the other way round, <em>e.g.</em>
+  a pusher relies on a woker
+  and a client on a server to get the job done.
+</p><p>The interfaces in this library 
+  give some guarantees related to reliability, 
+  but there are also some pitfalls:
+</p><ul><li> A client using timeouts can be sure that 
+      the requested service has been performed
+      when the reply arrives before the timeout expires.
+      If no reply arrives before timeout expiration,
+      no such claim can be made (in particular not
+      that the service has not been performed).
+      The service may have been performed, but 
+      it may have taken more time than expected or
+      it may have been performed, 
+      but the reply message has failed to arrive.
+      If the service is <em>idempotent</em> -
+      <em>i.e.</em> calling the service twice has 
+      the same effect as calling it once -
+      the client, when the timeout has expired,
+      can just send the request once again;
+      otherwise, it has to use other means to recover 
+      from this situation.
+</li><li> A pusher will never know if the task has been performed
+      correctly, since there is no response from the worker.
+      This is one of the reasons that the pipeline pattern 
+      should usually not be used alone, but in the context of
+      a balancer. (You usually want to push 
+      a request to a worker through a balancer --
+      one of the ideas behind pusher/woker is work balancing.)
+      A balancer may request providers to send <em>heartbeats</em>
+      and, this way, minimise the risk of failure.
+      The worker still may fail between a heartbeat
+      and a request and even the fact that it does send hearbeats
+      does not necessarily mean that it is operating correctly.
+      If it is essential for the client to know
+      that all tasks have been performed correctly,
+      other verification means are required.
+</li><li> Finally, a subscriber will never know
+             whether a publisher is still working correctly
+             or not, if the publisher does not send data
+             periodically. A reliable design
+             would use periodic publishers, <em>i.e.</em>
+             publishers that send data at a constant rate,
+             even if no new data are available.
+             The data update, in this case,
+             would have the effect of a heartbeat.
+</li></ul><p>The library uses a set of headers that must not be used by applications.
+  All internal header keys start and end with two underscores.
+  By avoiding this naming of header keys, application code easily avoids
+  naming conflicts. The headers used in basic patterns are:
+</p><ul><li> __channel__: Reply queue (client/server)
+</li><li> __job__: The requested <em>job</em> (client/server, pusher/worker and registry)
+</li><li> __type__: Request type (registry)
+</li><li> __job-type__: Type of job (registry)
+</li><li> __queue__: Queue to register (registry)
+</li><li> __hb__: Heartbeat specification (registry)
+</li><li> __sc__: Status Code (registry) 
+</li></ul></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><span class="keyword">data</span>  <a href="#t:ClientA">ClientA</a> i o</li><li class="src short"><a href="#v:clName">clName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; String</li><li class="src short"><a href="#v:withClient">withClient</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:request">request</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; Type -&gt; [Header] -&gt; o -&gt; IO (Maybe (Message i))</li><li class="src short"><a href="#v:checkRequest">checkRequest</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; IO (Maybe (Message i))</li><li class="src short"><span class="keyword">data</span>  <a href="#t:ServerA">ServerA</a> i o</li><li class="src short"><a href="#v:srvName">srvName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; String</li><li class="src short"><a href="#v:withServer">withServer</a> ::  Con -&gt; String -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:reply">reply</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; Int -&gt; Type -&gt; [Header] -&gt; (Message i -&gt; IO o) -&gt; IO ()</li><li class="src short"><a href="#v:register">register</a> :: Con -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; Int -&gt; IO (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>, Int)</li><li class="src short"><a href="#v:unRegister">unRegister</a> :: Con -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></li><li class="src short"><a href="#v:heartbeat">heartbeat</a> :: MVar <a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a> -&gt; Writer () -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; IO ()</li><li class="src short"><span class="keyword">data</span>  <a href="#t:HB">HB</a> </li><li class="src short"><a href="#v:mkHB">mkHB</a> :: Int -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a></li><li class="src short"><a href="#v:withServerThread">withServerThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Type -&gt; [Header] -&gt; (Message i -&gt; IO o) -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><span class="keyword">type</span> <a href="#t:RegistryDesc">RegistryDesc</a> = (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a>, Int, (Int, Int, Int))</li><li class="src short"><span class="keyword">data</span>  <a href="#t:PusherA">PusherA</a> o</li><li class="src short"><a href="#v:pushName">pushName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; String</li><li class="src short"><a href="#v:withPusher">withPusher</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:push">push</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; Type -&gt; [Header] -&gt; o -&gt; IO ()</li><li class="src short"><a href="#v:withTaskThread">withTaskThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; (Message i -&gt; IO ()) -&gt; ReaderDesc i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Registry">Registry</a> </li><li class="src short"><a href="#v:withRegistry">withRegistry</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:mapR">mapR</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a> -&gt; IO ()) -&gt; IO Bool</li><li class="src short"><a href="#v:getProvider">getProvider</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Int -&gt; IO [<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a>]</li><li class="src short"><a href="#v:showRegistry">showRegistry</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; IO ()</li><li class="src short"><span class="keyword">data</span>  <a href="#t:Provider">Provider</a> </li><li class="src short"><a href="#v:prvQ">prvQ</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></li><li class="src short"><span class="keyword">data</span>  <a href="#t:JobType">JobType</a> <ul class="subs"><li>= <a href="#v:Service">Service</a>  </li><li>| <a href="#v:Task">Task</a>  </li><li>| <a href="#v:Topic">Topic</a>  </li></ul></li><li class="src short"><span class="keyword">data</span>  <a href="#t:PubA">PubA</a> o</li><li class="src short"><a href="#v:pubName">pubName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; String</li><li class="src short"><a href="#v:withPub">withPub</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:publish">publish</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; Type -&gt; [Header] -&gt; o -&gt; IO ()</li><li class="src short"><a href="#v:withPubThread">withPubThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Type -&gt; [Header] -&gt; IO o -&gt; WriterDesc o -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><span class="keyword">data</span>  <a href="#t:SubA">SubA</a> i</li><li class="src short"><a href="#v:subName">subName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; String</li><li class="src short"><a href="#v:withSub">withSub</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; IO r) -&gt; IO r</li><li class="src short"><a href="#v:checkIssue">checkIssue</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; Int -&gt; IO (Maybe (Message i))</li><li class="src short"><a href="#v:withSubThread">withSubThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; (Message i -&gt; IO ()) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><a href="#v:withSubMVar">withSubMVar</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; MVar i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><a href="#v:withPubProxy">withPubProxy</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; ReaderDesc i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><span class="keyword">data</span>  <a href="#t:PatternsException">PatternsException</a> <ul class="subs"><li>= <a href="#v:TimeoutX">TimeoutX</a> String  </li><li>| <a href="#v:BadStatusCodeX">BadStatusCodeX</a> String  </li><li>| <a href="#v:NotOKX">NotOKX</a> <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a> String  </li><li>| <a href="#v:HeaderX">HeaderX</a> String String  </li><li>| <a href="#v:MissingHbX">MissingHbX</a> String  </li><li>| <a href="#v:UnacceptableHbX">UnacceptableHbX</a> Int  </li><li>| <a href="#v:NoProviderX">NoProviderX</a> String  </li><li>| <a href="#v:AppX">AppX</a> String  </li></ul></li><li class="src short"><span class="keyword">type</span> <a href="#t:OnError">OnError</a> = SomeException -&gt; String -&gt; IO ()</li><li class="src short"><span class="keyword">data</span>  <a href="#t:StatusCode">StatusCode</a> <ul class="subs"><li>= <a href="#v:OK">OK</a>  </li><li>| <a href="#v:BadRequest">BadRequest</a>  </li><li>| <a href="#v:Forbidden">Forbidden</a>  </li><li>| <a href="#v:NotFound">NotFound</a>  </li><li>| <a href="#v:Timeout">Timeout</a>  </li></ul></li><li class="src short"><a href="#v:readStatusCode">readStatusCode</a> :: String -&gt; Either String <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></li><li class="src short"><span class="keyword">type</span> <a href="#t:JobName">JobName</a> = String</li><li class="src short"><span class="keyword">type</span> <a href="#t:QName">QName</a> = String</li><li class="src short"><a href="#v:nobody">nobody</a> :: OutBound ()</li><li class="src short"><a href="#v:ignorebody">ignorebody</a> :: InBound ()</li><li class="src short"><a href="#v:bytesOut">bytesOut</a> :: OutBound ByteString</li><li class="src short"><a href="#v:bytesIn">bytesIn</a> :: InBound ByteString</li><li class="src short"><a href="#v:getJobName">getJobName</a> ::  Message m -&gt; IO String</li><li class="src short"><a href="#v:getJobType">getJobType</a> ::  Message m -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></li><li class="src short"><a href="#v:getQueue">getQueue</a> ::  Message m -&gt; IO String</li><li class="src short"><a href="#v:getChannel">getChannel</a> ::  Message m -&gt; IO String</li><li class="src short"><a href="#v:getHB">getHB</a> ::  Message m -&gt; IO Int</li><li class="src short"><a href="#v:getSC">getSC</a> ::  Message m -&gt; IO (Either String <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>)</li><li class="src short"><a href="#v:getHeader">getHeader</a> ::  String -&gt; String -&gt; Message m -&gt; IO String</li></ul></div><div id="interface"><h1 id="g:1">Client
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:ClientA" class="def">ClientA</a> i o </p><div class="doc"><p>The client data type, which implements the client side
+   of the client/server protocol.
+</p></div></div><div class="top"><p class="src"><a name="v:clName" class="def">clName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; String</p><div class="doc"><p>Access to the client name
+</p></div></div><div class="top"><p class="src"><a name="v:withClient" class="def">withClient</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>The function creates a client that lives within its scope.
+</p><p>Parameters:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker
+</li><li> <code>String</code>: Name of the Client, which can be used for error reporting.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:Service">Service</a></code> the client will request
+</li><li> <code>ReaderDesc</code> i: Description of a reader queue;
+                     this is the queue through which the server
+                     will send its response.
+</li><li> <code>WriterDesc</code> o: Description of a writer queue;
+                     this is the queue through which the server
+                     is expecting requests.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a></code> i o -&gt; IO r: An application-defined action
+                            whose scope defines the client's lifetime
+</li></ul></div></div><div class="top"><p class="src"><a name="v:request" class="def">request</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; Type -&gt; [Header] -&gt; o -&gt; IO (Maybe (Message i))</p><div class="doc"><p>The client will send the request of type <em>o</em>
+   and wait for the reply until the timeout exprires.
+   The reply is of type <em>i</em> and is returned as <code>Message</code> <em>i</em>.
+   If the timeout expires before the reply has been received,
+   the function returns <code>Nothing</code>.
+</p><p>Since servers do not know the clients they are serving,
+   <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:request">request</a></code> sends the name of its reader queue (the <em>reply queue</em>)
+   as message header to the server.
+</p><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a></code> i o: The client; note that i is the type of the reply,
+                                          o is the type of the request.
+</li><li> <code>Int</code>: The timeout in microseconds.
+</li><li> <code>Type</code>: The <em>MIME</em> type of the request.
+</li><li> [<code>Header</code>]: List of additional headers 
+                   to be sent with the request.
+</li><li> <em>o</em>: The request 
+</li></ul></div></div><div class="top"><p class="src"><a name="v:checkRequest" class="def">checkRequest</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> i o -&gt; Int -&gt; IO (Maybe (Message i))</p><div class="doc"><p>This function serves as a &quot;delayed&quot; receiver for the case
+   that the timeout of a request has expired.
+   When using this function, it is assumed
+   that a request has been made, but no response has been received.
+   It can be used in time-critical applications,
+   where the client may use the time between request and reply
+   productively, instead of passively blocking on the reply queue.
+</p><p>Use this function with care! It can be easily abused
+   to break the client/server pattern, when it is called
+   without a request having been made before.
+   If, in this case, <em>timout</em> is <em>-1</em>,
+   the application will block forever.
+</p><p>The function receives those parameters from <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:request">request</a></code>
+   that are related to receiving the reply, <em>i.e.</em>
+   <code>Type</code>, [<code>Header</code>] and <em>o</em> are not passed to <em>checkRequest</em>.
+</p></div></div><h1 id="g:2">Server
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:ServerA" class="def">ServerA</a> i o </p><div class="doc"><p>The server data type, which implements the server side
+   of the client/server protocol.
+</p></div></div><div class="top"><p class="src"><a name="v:srvName" class="def">srvName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; String</p><div class="doc"><p>Access to the server name
+</p></div></div><div class="top"><p class="src"><a name="v:withServer" class="def">withServer</a> ::  Con -&gt; String -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>The function creates a server
+   that lives within the scope of the application-defined action
+   passed into it.
+</p><p>Parameters:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker
+</li><li> <code>String</code>: Name of the Server, which can be used for error reporting.
+</li><li> <code>ReaderDesc</code> i: Description of a reader queue;
+                     this is the queue through which clients
+                     are expected to send requests.
+</li><li> <code>WriterDesc</code> o: Description of a writer queue;
+                     this is the queue through which
+                     a specific client will expect the reply.
+                     Note that the server will overwrite
+                     the destination of this queue
+                     using <code>writeAdHoc</code>; 
+                     the destination of this queue, hence,
+                     is irrelevant.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a></code> i o -&gt; IO r: An application-defined action
+                            whose scope defines the server's lifetime
+</li></ul></div></div><div class="top"><p class="src"><a name="v:reply" class="def">reply</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a> i o -&gt; Int -&gt; Type -&gt; [Header] -&gt; (Message i -&gt; IO o) -&gt; IO ()</p><div class="doc"><p>Waits for a client request, 
+   calls the application-defined transformer to generate a reply
+   and sends this reply through the reply queue
+   whose name is indicated by a header in the request.
+   The time a server waits for a request may be restricted
+   by the timeout. Typically, you would call reply with 
+   timeout set to <em>-1</em> (<em>wait eternally</em>).
+   There may be situations, however, where it actually
+   makes sense to restrict the waiting time,
+   <em>i.e.</em> to perform some housekeeping in between.
+</p><p>Typically, you call reply in a loop like
+</p><pre> forever $ reply srv (-1) nullType [] f
+</pre><p>where <em>f</em> is a function of type 
+</p><pre> Message i -&gt; IO o.
+</pre><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ServerA">ServerA</a></code> i o: The server; note that i is the request queue
+                                     and  o the reply queue.
+</li><li> <code>Int</code>: The timeout in microseconds.
+</li><li> <code>Type</code>: The <em>MIME</em> type of the reply.
+</li><li> [<code>Header</code>]: Additional headers to be sent with the reply.
+</li><li> <code>Message</code> i -&gt; IO o: Transforms the request into a reply -
+                          this defines the service provided by this
+                          application.
+</li></ul></div></div><h1 id="g:3">Registry
+</h1><div class="doc"><p>Before we continue the survey of basic patterns,
+      we have to introduce registries.
+      Registries are used by some patterns, advanced patterns,
+      but also publishers,
+      to use a set of providers that register beforehand
+      or, in the case of publishers, 
+      to serve a set of consumers that have registered to
+      the publisher.
+      A typical example is balancers (<em>majordomo pattern</em>):
+      Servers or tasks register to a balancer, which 
+      on receiving a request from a client for a certain job,
+      forwards the request to one of the registered providers
+      of this job. Internally, the register balances the request,
+      such that, with more than one provider currently registered,
+      two consecutive requests will not be served
+      by the same provider.
+      Note that registers provide different modes of using providers:
+      a load balancer will send a request to only one of its providers,
+      whereas publishers will send the data they produce to all
+      currently registered consumers.
+      The difference is defined by the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></code> of a given <code>Job</code>.
+      Of course, only providers of the same type may register
+      for the same job. 
+</p><p>Registers provide a queue through which services can register;
+      patterns using registers would provide 
+      another queue through which they receive requests. 
+      Registers allow for some level of reliability,
+      <em>i.e.</em> registers can ensure with certain probability 
+             that providers are available at the time,
+             when a request is made.
+     Therefore, registries may request heartbeats from providers.
+     Heartbeats are negotiated on registration.
+     Note that registries do not send heartbeats back to providers.
+     Providers have to use other strategies to make sure
+     that the registry to which they have registered is actually
+     available. 
+</p></div><div class="top"><p class="src"><a name="v:register" class="def">register</a> :: Con -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; Int -&gt; IO (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>, Int)</p><div class="doc"><p>Connect to a registry:
+   The caller registers itself at the registry.
+   The owner of the registry will then
+   use the caller depending on its purpose.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The name of the job provided by the caller;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></code>: The type of the job provided by the caller;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The registry's registration queue;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The queue to register;
+              this is the queue the register will actually
+              use (for forwarding requests or whatever
+              it does in this specific case).
+              The registry, internally,
+              uses <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code> together with this queue
+              as a <em>key</em> to identify the provider. 
+</li><li> Int: Timeout in microseconds;
+</li><li> Int: Preferred heartbeat in milliseconds
+          (0 for no heartbeats).
+</li></ul><p>The function returns a tuple of <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> 
+ and the heartbeat proposed by the registry
+ (which may differ from the preferred heartbeat of the caller).
+ Whenever the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> is not <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:OK">OK</a></code>, 
+ the heartbeat is 0.
+ If the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code> is null, the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> will be <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:BadRequest">BadRequest</a></code>.
+ If the timeout expires, register throws <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:TimeoutX">TimeoutX</a></code>.
+</p></div></div><div class="top"><p class="src"><a name="v:unRegister" class="def">unRegister</a> :: Con -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></p><div class="doc"><p>Disconnect from a registry:
+   The caller disconnects from a registry
+   to which it has registered before.
+   For the case that the registry is not receiving heartbeats
+   from the caller,
+   it is essential to unregister, when
+   the service is no longer provided.
+   Otherwise, the registry has no way to know
+   that it should not send requests to this provider anymore.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code> to unregister;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The registry's registration queue ;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The queue to unregister;
+</li><li> Int: The timeout in microseconds.
+</li></ul><p>The function returns a <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code>. 
+  If <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code> is null, the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> will be <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:BadRequest">BadRequest</a></code>.
+  If the timeout expires, the function will throw <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:TimeoutX">TimeoutX</a></code>.
+</p></div></div><div class="top"><p class="src"><a name="v:heartbeat" class="def">heartbeat</a> :: MVar <a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a> -&gt; Writer () -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; IO ()</p><div class="doc"><p>Send heartbeats:
+</p><ul><li> <code>MVar</code> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a></code>: An MVar of type <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a></code>, this MVar will be used
+                  to keep track of when the heartbeat has actually to
+                  be sent.
+</li><li> <code>Writer</code> (): The writer through which to send the heartbeat;
+                  The queue name of the writer is the registration queue
+                  of the registry; note that its type is ():
+                  heartbeats are empty messages.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code> for which to send heartbeats;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The queue for which to send heartbeats.
+</li></ul></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:HB" class="def">HB</a>  </p><div class="doc"><p>Heartbeat controller type
+</p></div></div><div class="top"><p class="src"><a name="v:mkHB" class="def">mkHB</a> :: Int -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:HB">HB</a></p><div class="doc"><p>Create a heartbeat controller;
+   receives the heartbeat in milliseconds.
+</p></div></div><div class="doc"><p>The following example shows
+     how to use the registration functions and heartbeats
+     together with a server:
+</p><pre> -- The definition of the variables
+ -- reg, jn, rn, tmo
+ -- is out of the scope of this listing;
+ -- their data type and meaning 
+ -- can be inferred from the context.
+
+  withConnection &quot;127.0.0.1&quot; 61613 [] [] $ \c -&gt; 
+    withServer c &quot;Test&quot; (q,            [], [], iconv)
+                        (&quot;unknown&quot;,    [], [], oconv) $ \s -&gt; do
+      (sc,me) &lt;- if null reg -- if parameter reg is null
+                   then return (OK, 0)
+                   else register c jn Service reg rn tmo 500
+      case sc of
+        -- ok ------------------------------
+        OK -&gt; 
+          if me &lt; 0 || me &gt; 5000 -- accept heartbeat  from 
+                                 -- 0 (no heartbeats) to
+                                 -- 5 seconds
+            then do void $ unRegister c jn wn rn tmo
+                    throwIO $ UnacceptableHbX me
+            else do hb &lt;- mkHB me
+                    m  &lt;- newMVar hb 
+                    let p = if me &lt;= 0 then (-1) else 1000 * me 
+                    withWriter c &quot;HB&quot; reg [] [] nobody $ \w -&gt; 
+                      finally (forever $
+                        reply s p t hs transform &gt;&gt; heartbeat m w jn rn) (do
+                        -- &quot;don't forget to unregister!&quot; (Frank Zappa)
+                        sc &lt;- unRegister c jn wn rn tmo
+                              unless (sc == OK) $ 
+                                throwIO $ NotOKX sc &quot;on unregister&quot;)
+        -- not ok ---------------------------
+        e -&gt; throwIO $ NotOKX e &quot;on register&quot;
+</pre><p>There is, however, a function that does all of this internally: 
+     <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withServerThread">withServerThread</a></code>.
+</p></div><h1 id="g:4">withServerThread
+</h1><div class="top"><p class="src"><a name="v:withServerThread" class="def">withServerThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Type -&gt; [Header] -&gt; (Message i -&gt; IO o) -&gt; ReaderDesc i -&gt; WriterDesc o -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a server that works in a background thread:
+   The background thread (and with it the server)
+   is running until the action passed in to the function (IO r)
+   terminates; when it terminates, the background thread is
+   terminated as well.
+   <em>withServerThread</em> may connect to a registry
+   (to serve as a provider of a balancer for instance),
+   which is automatically handled internally
+   when a RegistryDesc is passed in with a <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>
+   that is not null. 
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> <code>String</code>: The name of the server, used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The job provided by this server
+</li><li> <code>Type</code>: The MIME Type (passed to <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:reply">reply</a></code>)
+</li><li> [<code>Header</code>]: Additional headers (passed to <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:reply">reply</a></code>)
+</li><li> <code>Message</code> i -&gt; IO o: The core of the reply function:
+                          transforming a request of type <em>i</em>
+                          into a reply of type <em>o</em>
+</li><li> <code>ReaderDesc</code> i: The reader through which requests are expected;
+</li><li> <code>WriterDesc</code> o: The writer through which replies are sent;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a></code>: Describes whether and how to connect to a registry:
+                     if the queue name of the registry description 
+                     is null,
+                     the function will not connect to a registry;
+                     otherwise it will connect to the registry
+                     proposing the best value of the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a></code>
+                     as its preferred heartbeat rate;
+                     should the heartbeat rate returned by the registry
+                     be outside the scope of min and max,
+                     <em>withServerThread</em> will terminate 
+                     with <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:UnacceptableHbX">UnacceptableHbX</a></code>.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handler
+</li><li> IO r: The function starts a new thread on which the 
+           the server is working; 
+           the thread from which the function was called
+           continues in this action.
+           Its return value is also the result of <em>withServerThread</em>.
+           When the action terminates,
+           the new thread is terminated internally.
+</li></ul></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:RegistryDesc" class="def">RegistryDesc</a> = (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a>, Int, (Int, Int, Int))</p><div class="doc"><p>A helper that shall ease the use of the registers.
+   A registry to which a call wants to connect is described as
+</p><ul><li> The <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code> through which the registry receives requests;
+</li><li> The <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:Timeout">Timeout</a></code> in microseconds, <em>i.e.</em> the time the caller
+                   will wait before the request fails;
+</li><li> A triple of heartbeat specifications:
+     the <em>best</em> value, <em>i.e.</em> 
+          the rate at which the caller 
+                   prefers to send heartbeats,
+     the <em>minimum</em> rate at which the caller 
+                   can accept to send heartbeats,
+     the <em>maximum</em> rate at which the caller 
+                   can accept to send heartbeats.
+     Note that all these values are in milliseconds!
+</li></ul></div></div><h1 id="g:5">Pusher
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:PusherA" class="def">PusherA</a> o </p><div class="doc"><p>The Pusher data type, which implements
+   the consumer side of the pipeline protocol.
+   Note that, when we say <a href="consumer.html">consumer</a> here,
+   the pusher is actually a data producer,
+   but consumes the effect of having a task done.
+   The pusher can be seen as a client
+   that does not expect a reply.
+</p></div></div><div class="top"><p class="src"><a name="v:pushName" class="def">pushName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; String</p><div class="doc"><p>Access to the pusher's name
+</p></div></div><div class="top"><p class="src"><a name="v:withPusher" class="def">withPusher</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Create a <code>Pusher</code> with the lifetime of the action passed in:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the pusher, which may be used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the job requested by this pusher;
+</li><li> <code>WriterDesc</code> o: <code>Writer</code> queue through which 
+                              the job request is pushed;
+</li><li> (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a></code> o -&gt; IO r): Action that defines the lifetime of
+                            the pusher; the result <em>r</em> is also
+                            the result of <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withPusher">withPusher</a></code>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:push" class="def">push</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a> o -&gt; Type -&gt; [Header] -&gt; o -&gt; IO ()</p><div class="doc"><p>Push a <code>Job</code>:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:PusherA">PusherA</a></code> o: The pusher to be used;
+</li><li> <code>Type</code>: The MIME Type of the message to be sent;
+</li><li> [<code>Header</code>]: The headers to be sent with the message;
+</li><li> <em>o</em>: The message contents.
+</li></ul></div></div><h1 id="g:6">Worker
+</h1><div class="top"><p class="src"><a name="v:withTaskThread" class="def">withTaskThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; (Message i -&gt; IO ()) -&gt; ReaderDesc i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>On the other side of the pipeline,
+   there sits a worker waiting for requests.
+   Note that no <em>Worker</em> data type is defined.
+   Instead, there is only a <em>withTaskThread</em> function
+   that, internally, creates a worker acting in a background thread.
+   The rationale is that it does not make too much sense
+   to have a pipeline with only one worker. 
+   It is in fact part of the idea of the pipeline pattern 
+   that several workers are used through a balancer.
+   <em>withTaskThread</em> implements the interaction with the registry
+   internally and frees the programmer from concerns related
+   to registration. If you really need a single worker,
+   you can call the function with an empty RegistryDesc, 
+   <em>i.e.</em> with an empty queue name.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the worker used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the job, the worker provides;
+</li><li> (<code>Message</code> i  -&gt; IO ()): The job provided by the worker.
+                              Note that the function does not
+                              return a value: Since workers do
+                              not produce a reply, no result
+                              is necessary;
+</li><li> <code>ReaderDesc</code> i: Queue through which the worker receives
+                     requests;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a></code>: The registry to which the worker connects;
+</li><li> OnError: Error handler;
+</li><li> IO r: Action that defines the worker's lifetime.
+</li></ul></div></div><h1 id="g:7">More about Registries
+</h1><div class="doc"><p>Until now, we have only looked at how to connect to a registry,
+     not at how to use it and what a registry actually is in terms of
+     data types.
+     Well, answering the second question is simple:
+     a registry, from the perspective of the user application,
+     is an opaque data type with a set of functions:
+</p></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Registry" class="def">Registry</a>  </p><div class="doc"><p>Registry: An opaque data type
+</p></div></div><div class="top"><p class="src"><a name="v:withRegistry" class="def">withRegistry</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; IO r) -&gt; IO r</p><div class="doc"><p>A registry is used through a function 
+   that, internally, creates a registry
+   and defines its lifetime in terms of the scope of an action
+   passed in to the function:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the registry used for error handling;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Name of the registration queue.
+              It is this queue to which <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:register">register</a></code>
+              sends a registration request;
+</li><li> (Int, Int): Minimal and maximal accepted heartbeat interval;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handler;
+</li><li> (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a></code> -&gt; IO r): The action that defines 
+                           the registry's lifetime;
+                           the result of this action, <em>r</em>, 
+                           is also the result of <em>withRegistry</em>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:mapR" class="def">mapR</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a> -&gt; IO ()) -&gt; IO Bool</p><div class="doc"><p>Map action to <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a></code>s of job <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>;
+   mapping means different things for:
+</p><ul><li> Serice, Task: action is applied to the first
+                   active provider of a list of providers
+                   and this provider
+                   is then sent to the back of the list,
+                   hence, implementing a balancer.
+</li><li> Topic: action is applied to all providers,
+            hence, implementing a publisher.
+</li></ul><p>Parameters:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a></code>: The registry to use;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The job to which to apply the action;
+</li><li> (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a></code> -&gt; IO ()): The action to apply.
+</li></ul><p>The function returns False iff the requested job is not available
+   and True otherwise. (Note that a job without providers is removed;
+   when the function returns True, the job, thus, 
+   was applied at least once.
+</p></div></div><div class="top"><p class="src"><a name="v:getProvider" class="def">getProvider</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Int -&gt; IO [<a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a>]</p><div class="doc"><p>Retrieves <em>n</em> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a></code>s of a certain job;
+   getProvider works, for all <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></code>s
+   according to the work balancer logic, <em>i.e.</em>:
+   it returns the first n providers of the list for this job
+   and moves them to the end of the list.
+   <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:getProvider">getProvider</a></code> is used, for instance, in the Desk pattern. 
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a></code>: The registry in use;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The job for which the caller needs a provider;
+</li><li> Int: The number <em>n</em> of providers to retrieve; 
+          if less than <em>n</em> providers are available for this job,
+          all available providers will be returned,
+          but no error event is created.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:showRegistry" class="def">showRegistry</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a> -&gt; IO ()</p><div class="doc"><p>This function shows all jobs with all their providers
+   in a registry; the function is intended for debugging only.
+</p></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:Provider" class="def">Provider</a>  </p><div class="doc"><p>A provider is an opaque data type;
+   most of its attributes are used only internally by the registry.
+   Interesting for user applications, however, is the queue
+   that identifies the provider.
+</p></div><div class="subs instances"><p id="control.i:Provider" class="caption collapser" onclick="toggleSection('i:Provider')">Instances</p><div id="section.i:Provider" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:prvQ" class="def">prvQ</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:Provider">Provider</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></p><div class="doc"><p>Queue through which the job is provided 
+</p></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:JobType" class="def">JobType</a>  </p><div class="doc"><p>JobType: Service, Task or Topic
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:Service" class="def">Service</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:Task" class="def">Task</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:Topic" class="def">Topic</a></td><td class="doc empty">&nbsp;</td></tr></table></div><div class="subs instances"><p id="control.i:JobType" class="caption collapser" onclick="toggleSection('i:JobType')">Instances</p><div id="section.i:JobType" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="doc"><p>A typical example of how to use a registry in practice 
+     is the balancer pattern, which is shown (without error handling)
+     below:
+</p><pre> -- The definition of the variables
+ -- c, n qn, mn, mx, onErr, rq
+ -- is out of the scope of this listing;
+ -- their data type and meaning 
+ -- can be inferred from the context.
+
+ withRegistry c n qn (mn, mx) onErr $ \reg -&gt;
+   withPair c n (rq,        [], [], bytesIn) 
+                (&quot;unknown&quot;, [], [], bytesOut) $ \(r,w) -&gt; 
+     forever $ do
+       m  &lt;- readQ r        -- receive a request
+       jn &lt;- getJobName m   -- get the job name from the request 
+       t  &lt;- mapR reg jn (send2Prov w m)   -- apply job
+       unless t $ throwIO $ NoProviderX jn -- throw exception
+                                           -- when job is not provided
+ where send2Prov w m p = writeAdHoc w (prvQ p) nullType 
+                                      (msgHdrs m) $ msgContent m
+</pre><p>User applications, usually, do not need to use registries directly.
+     Registries are used in patterns, namely in Desks, Balancers
+     and in <em>Pub</em>s.
+</p></div><h1 id="g:8">Publisher
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:PubA" class="def">PubA</a> o </p><div class="doc"><p>The publisher data type
+</p></div></div><div class="top"><p class="src"><a name="v:pubName" class="def">pubName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; String</p><div class="doc"><p>Access to the name of the publisher
+</p></div></div><div class="top"><p class="src"><a name="v:withPub" class="def">withPub</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; WriterDesc o -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Create a publisher with the lifetime of the scope
+   of the user action passed in.
+   The publisher, internally, creates a registry
+   to which subscribers will connect to obtain the topic data.
+   The registry will not expect heartbeats from subscribers,
+   since the dependability relation is the other way round:
+   the publisher does not depend on subscribers,
+   but subscribers depend on a publisher.
+   The publisher, usually, does not send heartbeats either.
+   For exceptions to this rule, see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withPubProxy">withPubProxy</a></code>.
+</p><ul><li> <code>Con</code>: Connect to a Stomp broker;
+</li><li> String: Name of the publisher used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: The name of the topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Name of the registration queue (see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withRegistry">withRegistry</a></code>);
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error Handler passed to the registry;
+</li><li> <code>WriterDesc</code>: Queue through which data are published;
+                   note that the queue name is irrelevant.
+                   The publisher will send data to the queues
+                   of registered subscribers (see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:mapR">mapR</a></code>);
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a></code> -&gt; IO r: Action that defines the lifetime
+                     of the publisher; the result (<em>r</em>)
+                     is also the result of <em>withPub</em>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:publish" class="def">publish</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a> o -&gt; Type -&gt; [Header] -&gt; o -&gt; IO ()</p><div class="doc"><p>Publish data of type <em>o</em>:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a></code> o: Publisher to use;
+</li><li> <code>Type</code>: MIME Type of the message to be sent;
+</li><li> [<code>Header</code>]: Additional headers to be sent with the message;
+</li><li> <em>o</em>: The message content.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:withPubThread" class="def">withPubThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Type -&gt; [Header] -&gt; IO o -&gt; WriterDesc o -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a publisher that works in a background thread
+   publishing periodically at a monotonic rate,
+   <em>i.e.</em> it creates data and publishes them,
+          computes the difference 
+             of the publication rate minus the time needed
+                to create and publish the data 
+          and will then suspend the thread for this period.
+          For a publication rate of <em>p</em> microseconds,
+              the thread will be delayed for <em>p - x</em> microseconds,
+              if <em>x</em> corresponds to the time that was spent
+                 on creating and publishing the data.
+</p><p>The precision depends of course on your system and
+  its current workload.
+  For most cases, this will be equal to just suspending the thread
+  for the publication rate.
+</p><p>Parameters:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the publisher used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue;
+</li><li> Type: MIME Type of the published message;
+</li><li> [<code>Header</code>]: Additional headers to be sent
+                  with the message;
+</li><li> IO o: Action to create the message content;
+</li><li> <code>WriterDesc</code> o: Queue through which the message
+                    will be published (remember, however,
+                    that the queue name is irrelevant);
+</li><li> Int: Publication rate in microseconds;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handler for the registry
+               and the publisher;
+</li><li> IO r: Action that defines the lifetime of the publisher;
+          The result <em>r</em> is also the result of <em>withPubThread</em>.   
+</li></ul></div></div><h1 id="g:9">Subscriber
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:SubA" class="def">SubA</a> i </p><div class="doc"><p>Subscriber data type
+</p></div></div><div class="top"><p class="src"><a name="v:subName" class="def">subName</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; String</p><div class="doc"><p>Access to the subscriber name
+</p></div></div><div class="top"><p class="src"><a name="v:withSub" class="def">withSub</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; IO r) -&gt; IO r</p><div class="doc"><p>Create a subscriber with the lifetime 
+   of the user action passed in.
+   The subscriber will internally connect to a publisher's
+   registry and receive data as long as it stays connected.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Subscriber name useful for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Subscribed topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Queue of a registry to connect to
+              (the <code>Pub</code>s registration queue!)
+</li><li> Int: Registration timeout in microseconds;
+</li><li> <code>ReaderDesc</code>: This is the queue through which
+                   the subscriber will receive data.
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a></code> i -&gt; IO r: Action that defines the lifetime
+                       of the subscriber. Its result <em>r</em>
+                       is also the result of <em>withSub</em>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:checkIssue" class="def">checkIssue</a> ::  <a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a> i -&gt; Int -&gt; IO (Maybe (Message i))</p><div class="doc"><p>Check if data have been arrived for this subscriber;
+   if data are available before the timeout expires,
+   the function results in <code>Just</code> (<code>Message</code> i);
+   if the timeout expires first, the result is <code>Nothing</code>.
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:SubA">SubA</a></code> i: The subscriber to check 
+</li><li> Int: Timeout in microseconds
+</li></ul></div></div><div class="top"><p class="src"><a name="v:withSubThread" class="def">withSubThread</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; (Message i -&gt; IO ()) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a subscriber that works in a background thread;
+   Whenever data are available, an application callback passed in
+   to the function is called with the message that has arrived.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Subscriber name used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Subscribed topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The publisher's registration queue;
+</li><li> Int: Registration timeout in microseconds;
+</li><li> <code>ReaderDesc</code> i: Queue through which the subscriber
+                     shall receive data;
+</li><li> <code>Message</code> i -&gt; IO (): Application callback;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handler; 
+</li><li> IO r: Action that defines the lifetime of the subscriber;
+           the result <em>r</em> is also the result of <em>withSubThread</em>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:withSubMVar" class="def">withSubMVar</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; ReaderDesc i -&gt; MVar i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a subscriber that works in a background thread 
+   and updates an MVar, whenever new data are available;
+   the function is in fact a special case of <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withSubThread">withSubThread</a></code>,
+   where the application callback updates an MVar.
+   Note that the MVar must not be empty when the function
+   is called, otherwise, it will block on modifying the MVar.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Subscriber name used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Subscribed topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: The publisher's registration queue;
+</li><li> Int: Registration timeout in microseconds;
+</li><li> <code>ReaderDesc</code> i: Queue through which the subscriber
+                     shall receive data;
+</li><li> <code>MVar</code> i: MVar to update;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handler; 
+</li><li> IO r: Action that defines the lifetime of the subscriber;
+           the result <em>r</em> is also the result of <em>withSubMVar</em>.
+</li></ul></div></div><h1 id="g:10">Heartbeats for Pub
+</h1><div class="top"><p class="src"><a name="v:withPubProxy" class="def">withPubProxy</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; ReaderDesc i -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Unlike servers and workers,
+   publishers have no interface to connect 
+   internally to a registry.
+   The rationale for this is that
+   publishers do not need load balancers or similar means
+   that would require registration.
+   As a consequence, there is no means to send heartbeats internally.
+   Sometimes, however, the need to connect to a registry may arise.
+   The Desk pattern is an example where it makes sense 
+   to register a publisher.
+   But then, there is no means to internally send heartbeats
+   proving that the publisher is still alive.
+   For this case, a simple solution 
+   for periodic publishers is available:
+   a heartbeat proxy that is implemented as a subscriber
+   receiving data from the publisher and 
+   sending a heartbeat on every dataset that arrives.
+</p><p>This function provides a proxy that internally
+   connects to a registry on behalf of a publisher
+   and sends heartbeats.
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the proxy used for error reporting;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the topic, the publisher provides;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue of the publisher -
+              this is the queue 
+              to which the internal subscriber connects;
+</li><li> <code>ReaderDesc</code> i: The queue through which the internal
+                     subscriber receives data;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:RegistryDesc">RegistryDesc</a></code>: The other registry - 
+                     it is this registry to which the 
+                     proxy will send heartbeats;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error Handler;
+</li><li> IO r: Action that definex the proxy's lifetime;
+           its result <em>r</em> is also the result of <em>withPubProxy</em>.
+</li></ul></div></div><h1 id="g:11">Exceptions and Error Handling
+</h1><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:PatternsException" class="def">PatternsException</a>  </p><div class="doc"><p>Patterns Exception
+</p></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:TimeoutX" class="def">TimeoutX</a> String</td><td class="doc"><p>Timout expired
+</p></td></tr><tr><td class="src"><a name="v:BadStatusCodeX" class="def">BadStatusCodeX</a> String</td><td class="doc"><p>Invalid status code 
+</p></td></tr><tr><td class="src"><a name="v:NotOKX" class="def">NotOKX</a> <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a> String</td><td class="doc"><p>Status code other than OK
+</p></td></tr><tr><td class="src"><a name="v:HeaderX" class="def">HeaderX</a> String String</td><td class="doc"><p>Error on Header identified by the first String
+</p></td></tr><tr><td class="src"><a name="v:MissingHbX" class="def">MissingHbX</a> String</td><td class="doc"><p>Thrown on missing heartbeat 
+   (after tolerance of 10 missing heartbeats)
+</p></td></tr><tr><td class="src"><a name="v:UnacceptableHbX" class="def">UnacceptableHbX</a> Int</td><td class="doc"><p>Heartbeat proposed by registry
+   out of acceptable range
+</p></td></tr><tr><td class="src"><a name="v:NoProviderX" class="def">NoProviderX</a> String</td><td class="doc"><p>No provider for the requested job available
+</p></td></tr><tr><td class="src"><a name="v:AppX" class="def">AppX</a> String</td><td class="doc"><p>Application-defined exception
+</p></td></tr></table></div><div class="subs instances"><p id="control.i:PatternsException" class="caption collapser" onclick="toggleSection('i:PatternsException')">Instances</p><div id="section.i:PatternsException" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PatternsException">PatternsException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Read <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PatternsException">PatternsException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PatternsException">PatternsException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Typeable <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PatternsException">PatternsException</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Exception <a href="Network-Mom-Stompl-Patterns-Basic.html#t:PatternsException">PatternsException</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:OnError" class="def">OnError</a> = SomeException -&gt; String -&gt; IO ()</p><div class="doc"><p>Error Handler:
+</p><ul><li> <code>SomeException</code>: Exception that led the invocation;
+</li><li> String: Name of the entity (client name, server name, <em>etc.</em>)
+</li></ul></div></div><div class="top"><p class="src"><span class="keyword">data</span>  <a name="t:StatusCode" class="def">StatusCode</a>  </p><div class="doc"><p>Status code to communicate the state of a request
+   between two applications. 
+   The wire format is inspired by HTTP status codes:
+</p><ul><li> OK (200): Everything is fine
+</li><li> BadRequest (400): Syntax error in the request message
+</li><li> Forbidden (403): Not used
+</li><li> NotFound (404): For the requested job no provider is available
+</li><li> Timeout (408): Timeout expired
+</li></ul></div><div class="subs constructors"><p class="caption">Constructors</p><table><tr><td class="src"><a name="v:OK" class="def">OK</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:BadRequest" class="def">BadRequest</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:Forbidden" class="def">Forbidden</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:NotFound" class="def">NotFound</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src"><a name="v:Timeout" class="def">Timeout</a></td><td class="doc empty">&nbsp;</td></tr></table></div><div class="subs instances"><p id="control.i:StatusCode" class="caption collapser" onclick="toggleSection('i:StatusCode')">Instances</p><div id="section.i:StatusCode" class="show"><table><tr><td class="src">Eq <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Read <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></td><td class="doc empty">&nbsp;</td></tr><tr><td class="src">Show <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></td><td class="doc empty">&nbsp;</td></tr></table></div></div></div><div class="top"><p class="src"><a name="v:readStatusCode" class="def">readStatusCode</a> :: String -&gt; Either String <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></p><div class="doc"><p>Safe StatusCode parser 
+   (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> is instance of <code>Read</code>,
+    but <code>read</code> would cause an error on an invalid StatusCode)
+</p></div></div><h1 id="g:12">Useful Types and Helpers
+</h1><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:JobName" class="def">JobName</a> = String</p><div class="doc"><p>Name of a service, task or topic
+</p></div></div><div class="top"><p class="src"><span class="keyword">type</span> <a name="t:QName" class="def">QName</a> = String</p><div class="doc"><p>Name of a Stomp queue
+</p></div></div><div class="top"><p class="src"><a name="v:nobody" class="def">nobody</a> :: OutBound ()</p><div class="doc"><p>OutBound converter for messages of type ()
+</p></div></div><div class="top"><p class="src"><a name="v:ignorebody" class="def">ignorebody</a> :: InBound ()</p><div class="doc"><p>InBound converter for messages of type ()
+</p></div></div><div class="top"><p class="src"><a name="v:bytesOut" class="def">bytesOut</a> :: OutBound ByteString</p><div class="doc"><p>OutBound converter for messages of type <code>ByteString</code>
+</p></div></div><div class="top"><p class="src"><a name="v:bytesIn" class="def">bytesIn</a> :: InBound ByteString</p><div class="doc"><p>InBound converter for messages of type <code>ByteString</code>
+</p></div></div><div class="top"><p class="src"><a name="v:getJobName" class="def">getJobName</a> ::  Message m -&gt; IO String</p><div class="doc"><p>Get Job name from headers
+   (and throw an exception if the header does not exist)
+</p></div></div><div class="top"><p class="src"><a name="v:getJobType" class="def">getJobType</a> ::  Message m -&gt; IO <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobType">JobType</a></p><div class="doc"><p>Get Job type from headers
+   (and throw an exception if the header does not exist
+        or contains an invalid value)
+</p></div></div><div class="top"><p class="src"><a name="v:getQueue" class="def">getQueue</a> ::  Message m -&gt; IO String</p><div class="doc"><p>Get Queue name from headers
+   (and throw an exception if the header does not exist)
+</p></div></div><div class="top"><p class="src"><a name="v:getChannel" class="def">getChannel</a> ::  Message m -&gt; IO String</p><div class="doc"><p>Get Reply queue (channel) from headers
+   (and throw an exception if the header does not exist)
+</p></div></div><div class="top"><p class="src"><a name="v:getHB" class="def">getHB</a> ::  Message m -&gt; IO Int</p><div class="doc"><p>Get Heartbeat specification from headers
+   (and throw an exception if the header does not exist
+        or if its value is not numeric)
+</p></div></div><div class="top"><p class="src"><a name="v:getSC" class="def">getSC</a> ::  Message m -&gt; IO (Either String <a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>)</p><div class="doc"><p>Get Status code from headers
+   (and throw an exception if the header does not exist)
+</p></div></div><div class="top"><p class="src"><a name="v:getHeader" class="def">getHeader</a> ::  String -&gt; String -&gt; Message m -&gt; IO String</p><div class="doc"><p>Get Generic function to retrieve a header value
+   (and throw an exception if the header does not exist):
+</p><ul><li> String: Key of the wanted header
+</li><li> String: Error message in case there is no such header
+</li><li> <code>Message</code> m: The message whose headers we want to search
+</li></ul></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

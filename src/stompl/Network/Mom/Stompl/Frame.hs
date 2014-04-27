@@ -79,8 +79,9 @@ where
   import           Data.List (find, sortBy, foldl', nub)
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes, fromMaybe)
-  import           Codec.MIME.Type as Mime (showType, Type, nullType)
-  import           Codec.MIME.Parse        (parseMIMEType)
+  import qualified Codec.MIME.Type as Mime (showType, Type, nullType)
+  import qualified Codec.MIME.Parse as MP  (parseMIMEType)
+  import qualified Data.Text as T
 
   ------------------------------------------------------------------------
   -- | Tuple of (key, value)
@@ -140,6 +141,15 @@ where
 
   noBeat :: Heart
   noBeat = (0,0)
+
+  -------------------------------------------------------------------------
+  -- Convert MIME Type
+  -------------------------------------------------------------------------
+  showType :: Mime.Type -> String
+  showType = T.unpack . Mime.showType
+
+  parseMIMEType :: String -> Maybe Mime.Type
+  parseMIMEType = MP.parseMIMEType . T.pack
 
   defMime :: Mime.Type
   defMime =  Mime.nullType

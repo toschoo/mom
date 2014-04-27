@@ -1,0 +1,82 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Patterns.Desk</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Patterns-Desk.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-patterns-0.0.1: Stompl MOM Stomp Patterns</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Patterns.Desk</p></div><div id="description"><p class="caption">Description</p><div class="doc"><p>A Desk is a server that supplies information
+ about providers. A client requests providers
+ for a specific job (service, task or topic)
+ and the desk will reply with a list of queue names
+ of providers of the enquired job.
+</p><p>The desk is not statically configured,
+ but uses a registry to which providers connect.
+ Providers that cease to work can disconnect or,
+ if heartbeats are required, will be removed from the
+ list of available providers internally when no more heartbeats
+ are sent. This way, the information provided by a desk is 
+ always up-to-date.
+</p><p>Desk balances providers, <em>i.e.</em> providers rotate in a list
+ from which always the first <em>n</em> providers are handed out
+ to requesting consumers (where <em>n</em> corresponds to the number of 
+ providers requested by the consumer.) 
+</p><p>Since providers are managed dynamically, 
+ the result of two consecutive calls is probably not the same.
+ Desk is thus not idempotent in the strict sense.
+ But, since the call itself does only cause 
+ a change of the order of providers
+ (and since it should be irrelevant for the consumer
+  which provider is actually used),
+ two consecutive calls will have the same effect
+ -- if not all providers disconnect between the two calls.
+</p><p>Internally, the Desk protocol uses the following headers:
+</p><ul><li> __jobs__: Comma-separated list of providers;
+</li><li> __redundancy__: Requested number of providers.
+</li></ul></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><a href="#v:withDesk">withDesk</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; IO r -&gt; IO r</li><li class="src short"><a href="#v:requestProvider">requestProvider</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> () () -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Int -&gt; IO (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>, [<a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a>])</li></ul></div><div id="interface"><h1>Documentation</h1><div class="top"><p class="src"><a name="v:withDesk" class="def">withDesk</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Creates a desk with the lifetime of the application-defined
+   action:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the desk, used for error handling;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue -- this queue is used
+              by providers to connect to the registry,
+              it is not used for consumer requests;
+</li><li> (Int, Int): Heartbeat range of the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a></code> 
+                 (see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withRegistry">withRegistry</a></code> for details);
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handling;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Request queue -- this queue is used
+              by consumers to request information about
+              available providers;
+</li><li> IO r: Action that defines the lifetime of the desk;
+           the result is also the result of <em>withDesk</em>.
+</li></ul></div></div><div class="top"><p class="src"><a name="v:requestProvider" class="def">requestProvider</a> :: <a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a> () () -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; Int -&gt; IO (<a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a>, [<a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a>])</p><div class="doc"><p>Function used by consumer to request provider information 
+   from a desk:
+</p><ul><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a></code> () (): The request to the desk is sent
+                      through a client of type () ().
+                      This client must be created by 
+                      the application beforehand
+                      (<em>e.g.</em>: the client could be created
+                               once during initialisation
+                               and then be used repeatedly
+                               to obtain or update information 
+                               on providers according to the
+                               application needs);
+</li><li> Int: Timeout in microseconds;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Name of the job for which the consumer
+                needs providers;
+</li><li> Int: Number of providers needed by the consumer.
+          This can be used for redundancy:
+          if one provider fails, 
+          the consumer passes to the next.
+          Be aware, however, that the information, 
+          at the point in time, when a provider fails, 
+          may already be outdated.
+          Therefore, the redundant providers should be used
+          immediately and, when the main provider fails later,
+          the information should be updated by requesting
+          new providers from the desk.
+</li></ul><p>The result is a tuple of (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code>, [<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>]).
+  If the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> is not <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:OK">OK</a></code>, 
+  the list of <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code> will be empty;
+  otherwise, it will contain at least one provider
+  and maximum <em>n</em> providers (where <em>n</em> is the number of providers
+  requested). If fewer providers than requested are available,
+  the list will contain less than <em>n</em> providers. 
+  But note that this, as long as there is at least one provider,
+  does not count as an error, <em>i.e.</em> the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:StatusCode">StatusCode</a></code> is still <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:OK">OK</a></code>.
+</p></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

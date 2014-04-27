@@ -1,0 +1,74 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8" /><title>Network.Mom.Stompl.Patterns.Balancer</title><link href="ocean.css" rel="stylesheet" type="text/css" title="Ocean" /><script src="haddock-util.js" type="text/javascript"></script><script type="text/javascript">//<![CDATA[
+window.onload = function () {pageLoad();setSynopsis("mini_Network-Mom-Stompl-Patterns-Balancer.html");};
+//]]>
+</script></head><body><div id="package-header"><ul class="links" id="page-menu"><li><a href="index.html">Contents</a></li><li><a href="doc-index.html">Index</a></li></ul><p class="caption">stomp-patterns-0.0.1: Stompl MOM Stomp Patterns</p></div><div id="content"><div id="module-header"><table class="info"><tr><th>Portability</th><td>portable</td></tr><tr><th>Stability</th><td>experimental</td></tr><tr><th>Safe Haskell</th><td>None</td></tr></table><p class="caption">Network.Mom.Stompl.Patterns.Balancer</p></div><div id="table-of-contents"><p class="caption">Contents</p><ul><li><a href="#g:1">Balancer
+</a></li><li><a href="#g:2">Router 
+</a></li></ul></div><div id="description"><p class="caption">Description</p><div class="doc"><p>This module provides a balancer for services and tasks
+ and a topic router.
+ Balancers for services and tasks improve scalability and reliability
+ of servers and workers. Workers should always be used with a balancer
+ (since balancing workload is the main idea of workers);
+ servers can very well be used without a balancer, but won't scale
+ with increasing numbers of clients.
+</p><p>A balancer consists of a registry to which 
+ servers and workers connect;
+ servers and workers are maintained in lists 
+ according to the job they provide.
+ Clients and pushers send requests to the balancer,
+ which then forwards the request to a server or worker.
+ The client will receive the reply not through the balancer,
+ but directly from the server (to which the reply queue
+ was forwarded as part of the request message -- 
+ see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:ClientA">ClientA</a></code> for details).
+</p><p>With servers and workers sending heartbeats,
+ a balancer also improves reliability
+ in contrast to a topology
+ where a task is pushed to a single worker or 
+ a request is sent to only one server.
+</p><p>A router is a forwarder of a topic.
+ A router is very similar to a publisher (<code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:PubA">PubA</a></code>)
+ with the difference that the router
+ does not create new topic data, 
+ but uses topic data received from a publisher
+ (a router, hence, is a subscriber and a publisher).
+ Routers can be used to balance the workload of publishers:
+ Instead of one publisher serving thousands of subscribers,
+ the initial publisher would serve thousands of routers,
+ which, in their turn, serve thousands of subscribers 
+ (or even other routers).
+</p></div></div><div id="synopsis"><p id="control.syn" class="caption expander" onclick="toggleSection('syn')">Synopsis</p><ul id="section.syn" class="hide" onclick="toggleSection('syn')"><li class="src short"><a href="#v:withBalancer">withBalancer</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li><li class="src short"><a href="#v:withRouter">withRouter</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</li></ul></div><div id="interface"><h1 id="g:1">Balancer
+</h1><div class="top"><p class="src"><a name="v:withBalancer" class="def">withBalancer</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; (Int, Int) -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a Service and Task Balancer with the lifetime
+   of the application-defined action passed in
+   and start it in a background thread:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the balancer, used for error handling;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue -- this queue is used
+              by providers to connect to the registry,
+              it is not used for consumer requests;
+</li><li> (Int, Int): Heartbeat range of the <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:Registry">Registry</a></code> 
+                 (see <code><a href="Network-Mom-Stompl-Patterns-Basic.html#v:withRegistry">withRegistry</a></code> for details);
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Request queue -- this queue is used
+              for consumer requests;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handling;
+</li><li> IO r: Action that defines the lifetime of the balancer;
+           the result <em>r</em> is also the result of <em>withBalancer</em>.
+</li></ul></div></div><h1 id="g:2">Router 
+</h1><div class="top"><p class="src"><a name="v:withRouter" class="def">withRouter</a> ::  Con -&gt; String -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a> -&gt; Int -&gt; <a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a> -&gt; IO r -&gt; IO r</p><div class="doc"><p>Create a router with the lifetime of the 
+   application-defined action passed in
+   and start it in a background thread:
+</p><ul><li> <code>Con</code>: Connection to a Stomp broker;
+</li><li> String: Name of the router, used for error handling;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:JobName">JobName</a></code>: Routed topic;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue of the source publisher;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Queue through which the internal subscriber
+              will receive the topic data from the source publisher;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Registration queue of the target publisher
+              to which subscribers will connect;
+</li><li> Int: Registration timeout 
+          (timeout to register at the source publisher);
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:QName">QName</a></code>: Request queue -- this queue is used
+              for consumer requests;
+</li><li> <code><a href="Network-Mom-Stompl-Patterns-Basic.html#t:OnError">OnError</a></code>: Error handling;
+</li><li> IO r: Action that defines the lifetime of the router;
+           the result <em>r</em> is also the result of <em>withRouter</em>.
+</li></ul></div></div></div></div><div id="footer"><p>Produced by <a href="http://www.haskell.org/haddock/">Haddock</a> version 2.11.0</p></div></body></html>

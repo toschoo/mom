@@ -1,8 +1,8 @@
 Name:            stompl
 Category:        Message-Oriented Middleware, Network, Stomp, Parser
-Version:         0.1.1
+Version:         0.2.0
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2013
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2014
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
@@ -36,6 +36,11 @@ Description:
   .
 
   Release History:
+
+  .
+
+  [0.2.0] The mime package (Codec.MIME) switched from String
+          to Text in 0.4. We follow. Thanks, Dave!
 
   .
 
@@ -122,7 +127,8 @@ Library
                    utf8-string >= 0.3.6,
                    attoparsec  >= 0.10,
                    split       >= 0.1.4.1,
-                   mime        >= 0.3.3
+                   mime        >= 0.4,
+                   text        >= 1.0
                    -- 3.0.3.2,
                    
   Exposed-Modules: Network.Mom.Stompl.Frame, Network.Mom.Stompl.Parser

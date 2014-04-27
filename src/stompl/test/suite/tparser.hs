@@ -20,6 +20,7 @@ where
   import Control.Applicative ((<$>))
 
   import Codec.MIME.Type (showType)
+  import qualified Data.Text as T (unpack)
 
   main :: IO ()
   main = do 
@@ -486,7 +487,7 @@ where
       "destination"    -> getDest
       "subscription"   -> getSub
       "content-length" -> show . getLength
-      "content-type"   -> showType . getMime
+      "content-type"   -> T.unpack . showType . getMime
       "transaction"    -> getTrans
       "id"             -> getId
       "ack"            -> ackToVal . getAcknow

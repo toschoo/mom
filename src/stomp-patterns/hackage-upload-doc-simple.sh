@@ -28,7 +28,10 @@ then
 fi
 mkdir $docs
 
-cp dist/doc/html/$short/Network-Mom-Stompl-Client-Conduit.html $docs
+cp dist/doc/html/$short/Network-Mom-Stompl-Patterns-Basic.html $docs
+cp dist/doc/html/$short/Network-Mom-Stompl-Patterns-Balancer.html $docs
+cp dist/doc/html/$short/Network-Mom-Stompl-Patterns-Desk.html $docs
+cp dist/doc/html/$short/Network-Mom-Stompl-Patterns-Bridge.html $docs
 cp dist/doc/html/$short/ocean.css $docs
 
 tar --format=ustar -caf $docs.tar.gz $docs
