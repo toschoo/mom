@@ -38,7 +38,7 @@ where
     c <- getCon cid
     let x = "hello world!"
     let s = B.pack x
-    let m = P.mkMessage P.NoMsg NoSub "/q/test"
+    let m = P.mkMessage P.NoMsg NoSub "/q/test" ""
                                 nullType (B.length s) NoTx s x
     P.send (conCon c) m (show NoRec) []
     -- threadDelay delay

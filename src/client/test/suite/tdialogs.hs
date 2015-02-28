@@ -139,7 +139,7 @@ where
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
     in  mkGroup "Dialogs" (Stop (Fail "")) 
         [ t1,   t2,          t4,
-          t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75,  t76,  t80,  t90, t100,
+          t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
@@ -390,7 +390,7 @@ where
                  Nothing -> return Pass
                  Just l  -> return $ Fail $ "conent-length: " ++ l
           else return $ Fail $ "Unexpected message: " ++ 
-                                msgContent m
+                                msgContent m ++ " - expected: " ++ text1
 
   ------------------------------------------------------------------------
   -- Send without ONoContentLen
@@ -430,7 +430,7 @@ where
   testTx1 :: Con -> IO TestResult
   testTx1 c = do
     iQ <- newReader c "IN"  tQ1 [] [] iconv
-    oQ <- newWriter c "OUT" tQ1 []    [] oconv
+    oQ <- newWriter c "OUT" tQ1 [] [] oconv
     ok <- withTransaction c [] $ \_ -> do
         writeQ oQ nullType [] text1
         writeQ oQ nullType [] text2
@@ -1504,3 +1504,12 @@ where
     case eiR of
        Left  e -> return $ Fail $ show e
        Right r -> return r
+
+  cleanQueue :: Con -> String -> IO ()
+  cleanQueue c q = withReader c "Cleaner" q [] [] (\_ _ _ -> return) loop
+    where loop r = do
+            mbM <- tmo $ readQ r
+            case mbM of
+              Nothing -> return ()
+              Just _  -> loop r
+      

@@ -19,7 +19,7 @@ SUBSRC = $(SUTDIR)/Client/Socket.hs \
 	 $(SUTDIR)/Client/Patterns.hs
 
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all -fforce-recomp
+FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all
 #-fforce-recomp
 # -D_DEBUG
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
@@ -40,7 +40,12 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/luke \
         $(SMOKEDIR)/psend \
         $(SMOKEDIR)/ping \
-        $(SMOKEDIR)/demo1
+        $(SMOKEDIR)/ping2 \
+        $(SMOKEDIR)/demo1 \
+        $(SMOKEDIR)/tls1 \
+        $(SMOKEDIR)/tlssrv \
+        $(SMOKEDIR)/tlsbridge \
+        $(SMOKEDIR)/bridgetls
 
 $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -81,7 +86,22 @@ $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(SMOKEDIR)/ping2:	$(SMOKEDIR)/ping2.hs $(SMOKEDIR)/Ping2.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) -itest/smoke $@
+
 $(SMOKEDIR)/demo1:	$(SMOKEDIR)/demo1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/tls1:	$(SMOKEDIR)/tls1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/tlssrv:	$(SMOKEDIR)/tlssrv.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/tlsbridge:	$(SMOKEDIR)/tlsbridge.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
+$(SMOKEDIR)/bridgetls:	$(SMOKEDIR)/bridgetls.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/conduit1:	$(SMOKEDIR)/conduit1.hs $(SUBSRC)
@@ -145,7 +165,12 @@ clean:
 	rm -f $(SMOKEDIR)/sendjp
 	rm -f $(SMOKEDIR)/sendforever
 	rm -f $(SMOKEDIR)/ping
+	rm -f $(SMOKEDIR)/ping2
 	rm -f $(SMOKEDIR)/demo1
+	rm -f $(SMOKEDIR)/tls1
+	rm -f $(SMOKEDIR)/tlssrv
+	rm -f $(SMOKEDIR)/tlsbridge
+	rm -f $(SMOKEDIR)/bridgetls
 	rm -f $(SMOKEDIR)/frost
 	rm -f $(SMOKEDIR)/luke
 	rm -f $(SMOKEDIR)/psend

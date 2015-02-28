@@ -22,7 +22,7 @@ where
  
   main :: IO ()
   main = withSocketsDo $ 
-           withConnection_ "localhost" 61613 [] $ \c -> do
+           withConnection "localhost" 61613 [] [] $ \c -> do
              _ <- forkIO (consume c q)
              produce c q
           

@@ -14,8 +14,8 @@ module Network.Mom.Stompl.Parser (
                       )
 where
 
-  import           Data.Attoparsec hiding (take, takeWhile, takeTill)
-  import qualified Data.Attoparsec as A   (takeWhile, takeTill)
+  import           Data.Attoparsec.ByteString hiding (take, takeWhile, takeTill)
+  import qualified Data.Attoparsec.ByteString as A   (takeWhile, takeTill)
   import qualified Data.ByteString as B
   import qualified Data.ByteString.UTF8 as U
   import           Data.Word 

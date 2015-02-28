@@ -22,7 +22,7 @@ where
  
   main :: IO ()
   main = withSocketsDo $ 
-           withConnection_ "localhost" 61613 [] $ \cn -> do
+           withConnection "localhost" 61613 [] [] $ \cn -> do
              withClient cn "TestClient" "/q/client/test"
                                         "/q/server/test"
                                         (\_ _ _ -> return . U.toString)

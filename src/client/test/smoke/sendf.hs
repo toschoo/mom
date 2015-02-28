@@ -3,8 +3,8 @@ where
 
   import Network.Mom.Stompl.Client.Queue
   import qualified Data.ByteString.Char8 as B
+  import Data.Char (isDigit)
   import System.Environment
-  import System.Exit
   import Network.Socket
   import Codec.MIME.Type (nullType)
 
@@ -12,15 +12,16 @@ where
   main = do
     os <- getArgs
     case os of
-      [q, f] -> withSocketsDo $ conAndSend q f
-      _      -> do
-        putStrLn "I need a queue name and a message and nothing else."
-        exitFailure
+      [p,q,f] -> if all isDigit p
+                   then withSocketsDo $ conAndSend (read p) q f
+                   else error ("Port is not numeric: " ++ p)
+      _      -> error ("I need a port, a queue name and a message " ++
+                       "and nothing else.")
 
-  conAndSend :: String -> String -> IO ()
-  conAndSend qn f = do
+  conAndSend :: Int -> String -> String -> IO ()
+  conAndSend p qn f = do
     m <- B.readFile f
-    withConnection_ "127.0.0.1" 61613 [] $ \c -> do
+    withConnection "127.0.0.1" p [] [] $ \c -> do
       let conv = return 
       q <- newWriter c "Test-Q" qn [] [] conv
       writeQ q nullType [] m

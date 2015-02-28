@@ -6,7 +6,6 @@ where
 
   import Network.Mom.Stompl.Client.Queue
 
-  import System.Exit
   import System.Environment
 
   import Network.Socket (withSocketsDo)
@@ -14,19 +13,21 @@ where
   import Control.Exception (finally)
 
   import qualified Data.ByteString.UTF8  as U
+  import           Data.Char (isDigit)
 
   main :: IO ()
   main = do
     os <- getArgs
     case os of
-      [q] -> withSocketsDo $ conAndListen q
-      _   -> do
-        putStrLn "I need a queue name (and only a queue name)."
-        exitFailure
+      [p,q] -> if all isDigit p 
+                 then withSocketsDo $ conAndListen (read p) q
+                 else error ("Port is not numeric: " ++ p)
+      _     -> error ("I need a port and a queue name " ++
+                      "(and only a port and a queue name).")
 
-  conAndListen :: String -> IO ()
-  conAndListen qn = withSocketsDo $ do -- connectAndGo
-    withConnection "127.0.0.1" 61613 [] [] $ \c -> do
+  conAndListen :: Int -> String -> IO ()
+  conAndListen p qn = withSocketsDo $ 
+    withConnection "127.0.0.1" p [] [] $ \c -> do
       let conv _ _ _ = return . U.toString
       q <- newReader c "Q-Hof" qn [] [] conv
       listen2 q `finally` destroyReader q
@@ -35,8 +36,6 @@ where
   listen2 q = forever $ do
     eiM <- try $ readQ q 
     case eiM of
-      Left  e -> do
-        putStrLn $ "Error: " ++ (show (e::StomplException))
-      Right m -> do
-        putStrLn (msgContent m)
+      Left  e -> putStrLn $ "Error: " ++ show (e::StomplException)
+      Right m -> putStrLn (msgContent m)
 

@@ -30,6 +30,7 @@ publish w = go 1
                   threadDelay delay >> go 1
         go 1 = do writeAdHoc w q2 nullType [] msg -- this one is not for us
                   threadDelay delay >> go 0
+        go x = error ("Not matched: " ++ show x)
         msg = "hello world"
         q2  = "/q/otherQ"
 
