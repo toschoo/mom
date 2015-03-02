@@ -142,7 +142,7 @@ where
           t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
-         t310, t320, t330, t340, t350, t360, t370, t375, t380, t390, t400] 
+         t310, t320, t330, t340, t350, t360, t370, {- t375, -} t380, t390, t400] 
 
   ------------------------------------------------------------------------
   -- Connect with IP Address
@@ -1332,7 +1332,7 @@ where
   -- connect with WaitBroker
   -- shall not throw exception
   -- BUT: will probably throw an exception
-  --      since most broker do not send the final receipt
+  --      since most brokers do not send the final receipt
   --      or close the socket immediately after sending the receipt
   --      so we accept the case, where the socket is closed 
   --      by the broker, instead of sending a receipt

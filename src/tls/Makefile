@@ -77,8 +77,11 @@ clean:
 	rm -f $(TDIR)/tstate
 	rm -f $(SMOKEDIR)/tlssrv
 	rm -f $(SMOKEDIR)/tlsbridge
+	rm -f $(SMOKEDIR)/bridgetls
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
+	rm -f $(SUTDIR)/*.o
+	rm -f $(SUTDIR)/*.hi
 
 dist-clean:	clean
 		cabal clean

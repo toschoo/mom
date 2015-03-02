@@ -38,9 +38,9 @@ module Network.Mom.Stompl.Client.Queue (
                    writeQ, writeQWith,
                    writeAdHoc, writeAdHocWith,
                    -- * Messages
-                   P.Message, 
-                   msgContent, P.msgRaw, 
-                   P.msgType, P.msgLen, P.msgHdrs,
+                   Message, 
+                   msgContent, msgRaw, 
+                   msgType, msgLen, msgHdrs,
                    -- * Receipts
                    -- $stomp_receipts
                    Factory.Rec(..), Receipt,
@@ -54,7 +54,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
 #ifdef TEST
-                   frmToMsg, P.msgAck,
+                   frmToMsg, msgAck,
 #endif
                    -- * Exceptions
                    module Network.Mom.Stompl.Client.Exception
@@ -69,23 +69,26 @@ where
   -- - test/check for deadlocks
   ----------------------------------------------------------------
 
-  import qualified Socket   as S
-  import qualified Protocol as P
+  import           Stream
   import           Factory  
   import           State
 
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
 
+  import qualified Network.Connection as NC
+
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.List (find)
   import           Data.Time.Clock
-  import           Data.Maybe (isJust, fromJust)
+  import           Data.Maybe (isJust, isNothing, fromJust)
+  import           Data.Conduit.Network
+  import           Data.Conduit.Network.TLS
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
-  import           Control.Monad
+  import           Control.Monad (when, unless, void, forever)
   import           Control.Exception (bracket, finally, catches, onException,
                                       AsyncException(..), Handler(..),
                                       throwIO, SomeException)
@@ -175,8 +178,8 @@ where
      to ignore this feature by declaring queues
      as '()' or 'B.ByteString'.
      In the first case, the /raw/ bytestring
-     may be read from the 'P.Message';
-     in the second case, the contents of the 'P.Message'
+     may be read from the 'Message';
+     in the second case, the contents of the 'Message'
      will be a 'B.ByteString'.
 
      In the Stompl library, queues 
@@ -395,40 +398,89 @@ where
     let mx    = oMaxRecv   os
     let (u,p) = oAuth      os
     let (ci)  = oCliId     os
+    let tm    = oTmo       os
+    let cfg   = oSecurity  host port os
     let t | oStomp os = F.Stomp
           | otherwise = F.Connect
-    bracket (P.connect host port mx u p ci t vers beat hs)
-            P.disc -- important: At the end, we close the socket!
-            (whenConnected os act)
+    runTLSClient cfg $ \ad -> do
+      cid <- mkUniqueConId  -- connection id
+      me  <- myThreadId     -- connection owner
+      now <- getCurrentTime -- heartbeat
+      ch  <- newChan        -- sender
+      bracket (do addCon $ mkConnection cid host port 
+                                            mx   u p ci 
+                                            vers beat ch 
+                                            me now os
+                  getCon cid)
+              (\_ -> rmCon cid) $ \c -> 
+        withSender ad ch $ do
+          w <- newEmptyMVar
+          withListener ad cid w $ do
+            connectBroker mx t vers beat hs c
+            whenConnected cid tm w act 
+    {-
+    where tlss = NC.TLSSettingsSimple {
+                    NC.settingDisableCertificateValidation = True,
+                    NC.settingDisableSession               = False,
+                    NC.settingUseServerName                = False} 
+          dcfg = (tlsClientConfig port $ B.pack host){
+                    tlsClientUseTLS=False,
+                    tlsClientConfigTLSSettings = tlss} 
+    -}
 
-  whenConnected :: [Copt] -> (Con -> IO a) -> P.Connection -> IO a
-  whenConnected os act c = 
-    if not $ P.connected c 
-      then throwIO $ ConnectException $ P.getErr c
-      else do
-        cid <- mkUniqueConId  -- connection id
-        me  <- myThreadId     -- connection owner
-        now <- getCurrentTime -- heartbeat
-        finally (do addCon $ mkConnection cid c me now os
-                    whenListening cid $ whenBeating cid)
-                (rmCon cid)
-    where period = snd . P.conBeat 
-          whenListening cid = bracket (forkIO $ listen cid) killThread
-          whenBeating cid _ = bracket 
-            (if period c > 0 
-               then Just <$> forkIO (heartBeat cid $ period c)
-               else return Nothing)
-            (\b -> when (isThrd b) (killThread $ thrd b))
-            (\_ -> do r  <- act cid
-                      c' <- getCon cid
-                      -- wait for receipt on disconnect ----
-                      if conWait c' <= 0 then return r
-                        else do
-                          rc <- mkUniqueRecc 
-                          _  <- P.disconnect c (show rc)
-                          addRec cid rc
-                          waitCon cid rc (conWait c') `onException` rmRec cid rc
-                          return r)
+  withSender :: AppData -> Chan F.Frame -> IO a -> IO a
+  withSender ad ch = withThread (sender ad ch) -- alert when we lose the sender!
+
+  withListener :: AppData -> Con -> MVar () -> IO a -> IO a
+  withListener ad cid m = withThread (listen ad cid m) -- alert when we lose the listener!
+
+  ---------------------------------------------------------------------
+  -- the hard work on connecting to a broker
+  ---------------------------------------------------------------------
+  connectBroker :: Int -> F.FrameType -> 
+                   [F.Version] -> F.Heart -> [F.Header] ->
+                   Connection -> IO ()
+  connectBroker mx t vs beat hs c = 
+    let mk = case t of
+               F.Connect -> F.mkConFrame
+               F.Stomp   -> F.mkStmpFrame
+               _         -> error "Ouch: Unknown Connect-type"
+     in case mkConF mk
+                (conAddr c) 
+                (conUsr  c) (conPwd c) 
+                (conCli  c) vs beat hs of
+          Left e  -> throwIO (ConnectException e)
+          Right f -> writeChan (conChn $ c) f 
+
+  whenConnected :: Con -> Int -> MVar () -> (Con -> IO a) -> IO a
+  whenConnected cid tm m act = do
+    mbT <- if tm <= 0 then Just <$> takeMVar m 
+                      else timeout (ms tm) (takeMVar m)
+    when (isNothing mbT) (throwIO $ ConnectException "Timeout expired!")
+    finally (act cid) (do
+      c <- getCon cid
+      let t = conHThrd c
+      when (isThrd t)    $ killThread (thrd t)
+      -- wait for receipt on disconnect ----
+      unless (conWait c <= 0) $ do
+        rc <- mkUniqueRecc 
+        disconnect c (show rc)
+        addRec cid rc
+        waitCon cid rc (conWait c) `onException` rmRec cid rc)
+
+  ---------------------------------------------------------------------
+  -- disconnect either on broker level or on tcp/ip level
+  ---------------------------------------------------------------------
+  disconnect :: Connection -> String -> IO ()
+  disconnect c r
+    | conBrk c  = case mkDiscF r of
+                    Left  e -> throwIO (ConnectException $
+                                   "Cannot create Disconnect Frame: " ++ e)
+                    Right f -> writeChan (conChn c) f 
+    | otherwise = throwIO (ConnectException $ "Not connected")
+
+  period :: Connection -> Int
+  period = snd . conBeat
 
   isThrd :: Maybe a -> Bool
   isThrd = isJust
@@ -674,7 +726,7 @@ where
                InBound a -> IO (Reader a)
   newReader cid qn dst os hs conv = do
     c <- getCon cid
-    if not $ P.connected (conCon c)
+    if not $ connected c
       then throwIO $ ConnectException $ 
                  "Not connected (" ++ show cid ++ ")"
       else newRecvQ cid c qn dst os hs conv
@@ -711,7 +763,7 @@ where
                OutBound a -> IO (Writer a)
   newWriter cid qn dst os _ conv = do
     c <- getCon cid
-    if not $ P.connected (conCon c)
+    if not $ connected c
       then throwIO $ ConnectException $ 
                  "Not connected (" ++ show cid ++ ")"
       else newSendQ cid qn dst os conv
@@ -861,7 +913,7 @@ where
     sid <- mkUniqueSubId
     rc  <- if with then mkUniqueRecc else return NoRec
     logSend cid
-    P.subscribe (conCon c) (P.mkSub sid dst am) (show rc) hs
+    fSubscribe c(mkSub sid dst am) (show rc) hs
     ch <- newChan 
     addSub  cid (sid, ch) 
     addDest cid (dst, ch) 
@@ -888,16 +940,16 @@ where
     rc <- if rRec q then mkUniqueRecc else return NoRec
     c  <- getCon cid
     logSend cid
-    finally (P.unsubscribe (conCon c) 
-                           (P.mkSub sid dst F.Client)
-                           (show rc) [])
+    finally (fUnsubscribe c
+               (mkSub sid dst F.Client)
+               (show rc) [])
             (do rmSub  cid sid
                 rmDest cid dst)
     when (rRec q) $ waitReceipt cid rc
 
   ------------------------------------------------------------------------
   -- | Removes the oldest message from the queue
-  --   and returns it as 'P.Message'.
+  --   and returns it as 'Message'.
   --   The message cannot be read from the queue
   --   by another call to 'readQ' within the same connection.
   --   Wether other connections will receive the message as well
@@ -930,10 +982,10 @@ where
   --   and use 'ackWith' to acknowledge 
   --   the message explicitly.
   ------------------------------------------------------------------------
-  readQ :: Reader a -> IO (P.Message a)
+  readQ :: Reader a -> IO (Message a)
   readQ q = do
     c <- getCon (rCon q)
-    if not $ P.connected (conCon c)
+    if not $ connected c
       then throwIO $ QueueException $ "Not connected: " ++ show (rCon q)
       else case getSub (rSub q) c of
              Nothing -> throwIO $ QueueException $ 
@@ -943,7 +995,7 @@ where
                when (rMode q /= F.Auto) $
                  if rAuto q
                    then ack    (rCon q) m
-                   else addAck (rCon q) (P.msgId m)
+                   else addAck (rCon q) (msgId m)
                return m
 
   ------------------------------------------------------------------------
@@ -1040,7 +1092,7 @@ where
                   Mime.Type -> [F.Header] -> a -> IO Receipt
   writeGeneric q dest mime hs x = do
     c <- getCon (wCon q)
-    if not $ P.connected (conCon c)
+    if not $ connected c
       then throwIO $ ConnectException $
                  "Not connected (" ++ show (wCon q) ++ ")"
       else do
@@ -1057,30 +1109,30 @@ where
             s  <- conv x
             rc <- if wRec q then mkUniqueRecc else return NoRec
             let l = if wCntl q then -1 else B.length s
-            let m = P.mkMessage P.NoMsg NoSub dest "" mime l tx s x
+            let m = mkMessage NoMsg NoSub dest "" mime l tx s x
             when (wRec q) $ addRec (wCon q) rc 
             logSend $ wCon q
-            P.send (conCon c) m (show rc) hs 
+            fSend c m (show rc) hs 
             when (wRec q && wWait q) $ waitReceipt (wCon q) rc 
             return rc
 
   ------------------------------------------------------------------------
-  -- | Acknowledges the arrival of 'P.Message' to the broker.
-  --   It is used with a 'Connection' /c/ and a 'P.Message' /x/ like:
+  -- | Acknowledges the arrival of 'Message' to the broker.
+  --   It is used with a 'Connection' /c/ and a 'Message' /x/ like:
   --
   --   > ack c x
   ------------------------------------------------------------------------
-  ack :: Con -> P.Message a -> IO ()
+  ack :: Con -> Message a -> IO ()
   ack cid msg = do
     ack'  cid True False msg
-    rmAck cid $ P.msgId msg
+    rmAck cid $ msgId msg
 
   ------------------------------------------------------------------------
-  -- | Acknowledges the arrival of 'P.Message' to the broker,
+  -- | Acknowledges the arrival of 'Message' to the broker,
   --   requests a receipt and waits until it is confirmed.
   --   Since it preempts the calling thread,
   --   it is usually used with /timeout/,
-  --   for a 'Connection' /c/, a 'P.Message' /x/ 
+  --   for a 'Connection' /c/, a 'Message' /x/ 
   --   and a /timeout/ in microseconds /tmo/ like:
   --
   --   > mbR <- timeout tmo $ ackWith c x   
@@ -1088,57 +1140,57 @@ where
   --   >   Nothing -> -- error handling
   --   >   Just _  -> do -- ...
   ------------------------------------------------------------------------
-  ackWith :: Con -> P.Message a -> IO ()
+  ackWith :: Con -> Message a -> IO ()
   ackWith cid msg = do
     ack'  cid True True msg  
-    rmAck cid $ P.msgId msg
+    rmAck cid $ msgId msg
 
   ------------------------------------------------------------------------
-  -- | Negatively acknowledges the arrival of 'P.Message' to the broker.
+  -- | Negatively acknowledges the arrival of 'Message' to the broker.
   --   For more details see 'ack'.
   ------------------------------------------------------------------------
-  nack :: Con -> P.Message a -> IO ()
+  nack :: Con -> Message a -> IO ()
   nack cid msg = do
     ack' cid False False msg
-    rmAck cid $ P.msgId msg
+    rmAck cid $ msgId msg
 
   ------------------------------------------------------------------------
-  -- | Negatively acknowledges the arrival of 'P.Message' to the broker,
+  -- | Negatively acknowledges the arrival of 'Message' to the broker,
   --   requests a receipt and waits until it is confirmed.
   --   For more details see 'ackWith'.
   ------------------------------------------------------------------------
-  nackWith :: Con -> P.Message a -> IO ()
+  nackWith :: Con -> Message a -> IO ()
   nackWith cid msg = do
     ack' cid False True msg
-    rmAck cid $ P.msgId msg
+    rmAck cid $ msgId msg
 
   ------------------------------------------------------------------------
   -- Checks for Transaction,
   -- if a transaction is ongoing,
   -- the TxId is added to the message
-  -- and calls P.ack on the message.
+  -- and calls ack on the message.
   -- If called with True for "with receipt"
   -- the function creates a receipt and waits for its confirmation. 
   ------------------------------------------------------------------------
-  ack' :: Con -> Bool -> Bool -> P.Message a -> IO ()
+  ack' :: Con -> Bool -> Bool -> Message a -> IO ()
   ack' cid ok with msg = do
     c <- getCon cid
-    if not $ P.connected (conCon c) 
+    if not $ connected c
       then throwIO $ ConnectException $ 
              "Not connected (" ++ show cid ++ ")"
-      else if null (show $ P.msgAck msg)
+      else if null (show $ msgAck msg)
            then throwIO $ ProtocolException "No ack in message!"
            else do
              tx <- getCurTx c >>= (\mbT -> 
                        case mbT of
                          Nothing -> return NoTx
                          Just x  -> return x)
-             let msg' = msg {P.msgTx = tx}
+             let msg' = msg {msgTx = tx}
              rc <- if with then mkUniqueRecc else return NoRec
              when with $ addRec cid rc
              logSend cid
-             if ok then P.ack  (conCon c) msg' $ show rc
-                   else P.nack (conCon c) msg' $ show rc
+             if ok then fAck  c msg' $ show rc
+                   else fNack c msg' $ show rc
              when with $ waitReceipt cid rc 
 
   ------------------------------------------------------------------------
@@ -1187,7 +1239,7 @@ where
     tx <- mkUniqueTxId
     let t = mkTrn tx os
     c <- getCon cid
-    if not $ P.connected (conCon c)
+    if not $ connected c
       then throwIO $ ConnectException $
              "Not connected (" ++ show cid ++ ")"
       else finally (do addTx t cid
@@ -1265,7 +1317,7 @@ where
     rc <- if txAbrtRc t then mkUniqueRecc else return NoRec
     when (txAbrtRc t) $ addRec cid rc 
     logSend cid
-    P.begin (conCon c) (show $ txId t) (show rc)
+    fBegin c (show $ txId t) (show rc)
 
   -----------------------------------------------------------------------
   -- Send commit or abort frame
@@ -1278,8 +1330,8 @@ where
     rc <- if w then mkUniqueRecc else return NoRec
     when w $ addRec cid rc 
     logSend cid
-    if x then P.commit (conCon c) (show tx) (show rc)
-         else P.abort  (conCon c) (show tx) (show rc)
+    if x then fCommit c (show tx) (show rc)
+         else fAbort  c (show tx) (show rc)
     mbR <- if w then timeout (ms $ txTmo t) $ waitReceipt cid rc
                 else return $ Just ()
     rmTx cid
@@ -1313,49 +1365,79 @@ where
   -- Transform a frame into a message
   -- using the queue's application callback
   -----------------------------------------------------------------------
-  frmToMsg :: Reader a -> F.Frame -> IO (P.Message a)
+  frmToMsg :: Reader a -> F.Frame -> IO (Message a)
   frmToMsg q f = do
     let b = F.getBody f
     let conv = rFrom q
     let sid  = if  null (F.getSub f) || not (numeric $ F.getSub f)
                  then NoSub else Sub $ read $ F.getSub f
     x <- conv (F.getMime f) (F.getLength f) (F.getHeaders f) b
-    let m = P.mkMessage (P.MsgId $ F.getId f) sid
-                        (F.getDest   f) 
-                        (F.getMsgAck f) 
-                        (F.getMime   f)
-                        (F.getLength f)
-                        NoTx 
-                        b -- raw bytestring
-                        x -- converted context
-    return m {P.msgHdrs = F.getHeaders f}
+    let m = mkMessage (MsgId $ F.getId f) sid
+                      (F.getDest   f) 
+                      (F.getMsgAck f) 
+                      (F.getMime   f)
+                      (F.getLength f)
+                      NoTx 
+                      b -- raw bytestring
+                      x -- converted context
+    return m {msgHdrs = F.getHeaders f}
 
   -----------------------------------------------------------------------
   -- Connection listener
   -----------------------------------------------------------------------
-  listen :: Con -> IO ()
-  listen cid = forever $ do
+  listen :: AppData -> Con -> MVar () -> IO ()
+  listen ad cid w = do 
     c   <- getCon cid
-    let cc = conCon c
-    eiF <- catches (S.receive (P.getRc cc) (P.getSock cc) (P.conMax cc))
-                   [Handler (\e -> case e of
-                                     ThreadKilled -> throwIO e
-                                     _ -> return $ Left $ show e),
-                    Handler (\e -> return $ Left $ 
-                                        show (e::SomeException))]
-    case eiF of
-      Left e  -> throwToOwner c $ 
-                   ProtocolException $ "Receive Error: " ++ e
-      Right f -> do
+    ch  <- newChan
+    withThread (receiver ad ch `catches`
+                  [Handler (\e -> case e of
+                                    ThreadKilled -> throwIO e
+                                    _            -> throwIO e),
+                   Handler (\e -> throwToOwner c $ ProtocolException (show (e::SomeException)))]) $ 
+      forever $ do
+        f <- readChan ch
         logReceive cid
         case F.typeOf f of
-          F.Message   -> handleMessage cid f
-          F.Error     -> handleError   cid f
-          F.Receipt   -> handleReceipt cid f
-          F.HeartBeat -> handleBeat    cid f
+          F.Connected -> handleConnected cid f w
+          F.Message   -> handleMessage   cid f
+          F.Error     -> handleError     cid f
+          F.Receipt   -> handleReceipt   cid f
+          F.HeartBeat -> handleBeat      cid f
           _           -> throwToOwner c $ 
-                           ProtocolException $ "Unexpected Frame: " ++
-                           show (F.typeOf f)
+                             ProtocolException $ "Unexpected Frame: " ++
+                             show (F.typeOf f)
+
+  withThread :: IO () -> IO r -> IO r
+  withThread th act = newEmptyMVar >>= \m -> do
+    tid <- forkIO (finally th $ putMVar m ())
+    act `finally` (killThread tid >> takeMVar m)
+
+  -----------------------------------------------------------------------
+  -- Handle Connected Frame
+  -----------------------------------------------------------------------
+  handleConnected :: Con -> F.Frame -> MVar () -> IO ()
+  handleConnected cid f m = withCon cid $ \c -> 
+     if conBrk c 
+      then do throwToOwner c $
+                ProtocolException "Unexptected Connected frame"
+              return (c,())
+      else let beat = conBeat c1
+               c1   = c {conSrv  =  let srv = F.getServer f
+                                     in F.getSrvName srv ++ "/"  ++
+                                        F.getSrvVer  srv ++ " (" ++
+                                        F.getSrvCmts srv ++ ")",
+                         conBeat =  F.getBeat    f,
+                         conVers = [F.getVersion f],
+                         conSes  =  F.getSession f}
+            in if period c1 > 0 && period c1 < fst beat
+                 then return (c1 {conErrM = "Beat frequency too high"},())
+                 else do
+                   t <- if period c1 > 0 
+                          then Just <$> forkIO (heartBeat cid $ period c1)
+                          else return Nothing
+                   putMVar m () 
+                   return (c1 {conHThrd = t,
+                               conBrk   = True}, ())
 
   -----------------------------------------------------------------------
   -- Handle Message Frame
@@ -1393,9 +1475,7 @@ where
   --            causing another exception
   -----------------------------------------------------------------------
   throwToOwner :: Connection -> StomplException -> IO ()
-  throwToOwner c e = do
-    throwTo (conOwner c) e
-    threadDelay 10000
+  throwToOwner c e = throwTo (conOwner c) e
 
   -----------------------------------------------------------------------
   -- Handle Receipt Frame
@@ -1418,7 +1498,7 @@ where
   -- My Beat 
   -----------------------------------------------------------------------
   heartBeat :: Con -> Int -> IO ()
-  heartBeat cid period = forever $ do
+  heartBeat cid p = forever $ do
     now <- getCurrentTime
     c   <- getCon cid
     let me = myMust  c 
@@ -1428,15 +1508,15 @@ where
                            "Missing HeartBeat, last was " ++
                            show (now `diffUTCTime` he)    ++ 
                            " seconds ago!"
-    when (now >= me) $ P.sendBeat $ conCon c
-    threadDelay $ ms period
+    when (now >= me) $ fSendBeat c
+    threadDelay $ ms p
 
   -----------------------------------------------------------------------
   -- When we should have sent last heartbeat
   -----------------------------------------------------------------------
   myMust :: Connection -> UTCTime
   myMust c = let t = conMyBeat c
-                 p = snd $ P.conBeat $ conCon c
+                 p = snd $ conBeat c
              in  timeAdd t p
 
   -----------------------------------------------------------------------
@@ -1445,7 +1525,7 @@ where
   hisMust :: Connection -> UTCTime
   hisMust c = let t   = conHisBeat c
                   tol = 4
-                  b   = fst $ P.conBeat $ conCon c
+                  b   = fst $ conBeat c
                   p   = tol * b
               in  timeAdd t p
 
@@ -1460,4 +1540,151 @@ where
   -----------------------------------------------------------------------
   ms2nominal :: Int -> NominalDiffTime
   ms2nominal m = fromIntegral m / (1000::NominalDiffTime)
+
+  ---------------------------------------------------------------------
+  -- begin transaction
+  ---------------------------------------------------------------------
+  fBegin :: Connection -> String -> String -> IO ()
+  fBegin c tx receipt = sendFrame c tx receipt [] mkBeginF
+
+  ---------------------------------------------------------------------
+  -- commit transaction
+  ---------------------------------------------------------------------
+  fCommit :: Connection -> String -> String -> IO ()
+  fCommit c tx receipt = sendFrame c tx receipt [] mkCommitF
+
+  ---------------------------------------------------------------------
+  -- abort transaction
+  ---------------------------------------------------------------------
+  fAbort :: Connection -> String -> String -> IO ()
+  fAbort c tx receipt = sendFrame c tx receipt [] mkAbortF
+
+  ---------------------------------------------------------------------
+  -- ack
+  ---------------------------------------------------------------------
+  fAck :: Connection -> Message a -> String -> IO ()
+  fAck c m receipt = sendFrame c m receipt []  (mkAckF True)
+
+  ---------------------------------------------------------------------
+  -- nack
+  ---------------------------------------------------------------------
+  fNack :: Connection -> Message a -> String -> IO ()
+  fNack c m receipt = sendFrame c m receipt [] (mkAckF False)
+
+  ---------------------------------------------------------------------
+  -- subscribe
+  ---------------------------------------------------------------------
+  fSubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
+  fSubscribe c sub receipt hs = sendFrame c sub receipt hs mkSubF
+
+  ---------------------------------------------------------------------
+  -- unsubscribe
+  ---------------------------------------------------------------------
+  fUnsubscribe :: Connection -> Subscription -> String -> [F.Header] -> IO ()
+  fUnsubscribe c sub receipt hs = sendFrame c sub receipt hs mkUnSubF
+
+  ---------------------------------------------------------------------
+  -- send
+  ---------------------------------------------------------------------
+  fSend :: Connection -> Message a -> String -> [F.Header] -> IO ()
+  fSend c msg receipt hs = sendFrame c msg receipt hs mkSendF
+
+  ---------------------------------------------------------------------
+  -- heart beat
+  ---------------------------------------------------------------------
+  fSendBeat :: Connection -> IO ()
+  fSendBeat c = sendFrame c () "" [] (\_ _ _ -> Right F.mkBeat)
+
+  ---------------------------------------------------------------------
+  -- generic sendFrame:
+  -- takes a connection some data (like subscribe, message, etc.)
+  -- some headers, a function that creates a frame or returns an error
+  -- creates the frame and sends it
+  ---------------------------------------------------------------------
+  sendFrame :: Connection -> a -> String -> [F.Header] -> 
+               (a -> String -> [F.Header] -> Either String F.Frame) -> IO ()
+  sendFrame c m receipt hs mkF = 
+    if not (connected c) then throwIO $ ConnectException "Not connected!"
+      else case mkF m receipt hs of
+             Left  e -> throwIO $ ProtocolException $
+                          "Cannot create Frame: " ++ e
+             Right f -> 
+#ifdef _DEBUG
+               do when (not $ F.complies (1,2) f) $
+                    putStrLn $ "Frame does not comply with 1.2: " ++ show f 
+#endif
+                  writeChan (conChn c) f
+ 
+
+  ---------------------------------------------------------------------
+  -- transform an error frame into a string
+  ---------------------------------------------------------------------
+  errToMsg :: F.Frame -> String
+  errToMsg f = F.getMsg f ++ if B.length (F.getBody f) == 0 
+                                   then "."
+                                   else ": " ++ U.toString (F.getBody f)
+ 
+  ---------------------------------------------------------------------
+  -- frame constructors
+  -- this needs review...
+  ---------------------------------------------------------------------
+  mkReceipt :: String -> [F.Header]
+  mkReceipt receipt = if null receipt then [] else [F.mkRecHdr receipt]
+
+  mkConF :: ([F.Header] -> Either String F.Frame) ->
+            String -> String -> String -> String  -> 
+            [F.Version] -> F.Heart -> [F.Header]  -> Either String F.Frame
+  mkConF mk host usr pwd cli vs beat hs = 
+    let uHdr = if null usr then [] else [F.mkLogHdr  usr]
+        pHdr = if null pwd then [] else [F.mkPassHdr pwd]
+        cHdr = if null cli then [] else [F.mkCliIdHdr cli]
+     in mk $ [F.mkHostHdr host,
+              F.mkAcVerHdr $ F.versToVal vs, 
+              F.mkBeatHdr  $ F.beatToVal beat] ++
+             uHdr ++ pHdr ++ cHdr ++ hs
+
+  mkDiscF :: String -> Either String F.Frame
+  mkDiscF receipt =
+    F.mkDisFrame $ mkReceipt receipt
+
+  mkSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
+  mkSubF sub receipt hs = 
+    F.mkSubFrame $ [F.mkIdHdr   $ show $ subId sub,
+                    F.mkDestHdr $ subName sub,
+                    F.mkAckHdr  $ show $ subMode sub] ++ 
+                   mkReceipt receipt ++ hs
+
+  mkUnSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
+  mkUnSubF sub receipt hs =
+    let dh = if null (subName sub) then [] else [F.mkDestHdr $ subName sub]
+    in  F.mkUSubFrame $ [F.mkIdHdr $ show $ subId sub] ++ dh ++ 
+                        mkReceipt receipt ++ hs
+
+  mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
+  mkSendF msg receipt hs = 
+    Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
+                     (msgType msg) (msgLen msg) hs -- escape headers! 
+                     (msgRaw  msg) 
+
+  mkAckF :: Bool -> Message a -> String -> [F.Header] -> Either String F.Frame
+  mkAckF ok msg receipt _ =
+    let sh = if null $ show $ msgSub msg then [] 
+               else [F.mkSubHdr $ show $ msgSub msg]
+        th = if null $ show $ msgTx msg 
+               then [] else [F.mkTrnHdr $ show $ msgTx msg]
+        rh = mkReceipt receipt
+        mk = if ok then F.mkAckFrame else F.mkNackFrame
+    in mk $ F.mkIdHdr (msgAck msg) : (sh ++ rh ++ th)
+
+  mkBeginF :: String -> String -> [F.Header] -> Either String F.Frame
+  mkBeginF tx receipt _ = 
+    F.mkBgnFrame $ F.mkTrnHdr tx : mkReceipt receipt
+
+  mkCommitF :: String -> String -> [F.Header] -> Either String F.Frame
+  mkCommitF tx receipt _ =
+    F.mkCmtFrame $ F.mkTrnHdr tx : mkReceipt receipt
+
+  mkAbortF :: String -> String -> [F.Header] -> Either String F.Frame
+  mkAbortF tx receipt _ =
+    F.mkAbrtFrame $ F.mkTrnHdr tx : mkReceipt receipt
 

@@ -11,8 +11,8 @@ SUTDIR = Network/Mom/Stompl
 
 CLIENT = Client
 
-SUBSRC = $(SUTDIR)/Client/Socket.hs \
-         $(SUTDIR)/Client/Protocol.hs \
+SUBSRC = $(SUTDIR)/Client/Stream.hs \
+         $(SUTDIR)/Client/Socket.hs \
          $(SUTDIR)/Client/Factory.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs \

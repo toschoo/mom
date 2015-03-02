@@ -1,17 +1,19 @@
-{-# Language BangPatterns #-}
+{-# Language BangPatterns,CPP #-}
 module State (
          msgContent, numeric, ms,
-         Connection(..),
+         Connection(..), mkConnection,
+         connected, getVersion, getErr,
          Copt(..),
          oHeartBeat, oMaxRecv,
-         oAuth, oCliId, oStomp,
+         oAuth, oCliId, oStomp, oTmo, oSecurity,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
          Receipt,
-         mkConnection,
+         Message(..), mkMessage, MsgId(..),
+         Subscription(..), mkSub,
          logSend, logReceive,
-         addCon, rmCon, getCon,
+         addCon, rmCon, getCon, withCon,
          addSub, addDest, getSub, getDest,
          rmSub, rmDest,
          mkTrn,
@@ -21,11 +23,10 @@ module State (
          txPendingAck, txReceipts,
          addAck, rmAck, addRec, rmRec,
          forceRmRec,
-         checkReceipt)
+         checkReceipt) 
 where
 
-  import qualified Protocol as P
-  import           Factory  
+  import qualified Factory  as Fac
 
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
@@ -38,13 +39,21 @@ where
   import           Data.List (find)
   import           Data.Char (isDigit)
   import           Data.Time.Clock
+  
+  import           Data.Conduit.Network.TLS (TLSClientConfig, 
+                                             tlsClientConfig,
+                                             tlsClientUseTLS)
+
+  import qualified Data.ByteString.Char8 as B
+
+  import           Codec.MIME.Type as Mime (Type) 
 
   ------------------------------------------------------------------------
   -- | Returns the content of the message in the format 
   --   produced by an in-bound converter
   ------------------------------------------------------------------------
-  msgContent :: P.Message a -> a
-  msgContent = P.msgCont
+  msgContent :: Message a -> a
+  msgContent = msgCont
 
   ------------------------------------------------------------------------
   -- some helpers
@@ -77,14 +86,29 @@ where
   eq x y = fst x == fst y
 
   -- | Just a nicer word for 'Rec'
-  type Receipt = Rec
+  type Receipt = Fac.Rec
 
   ------------------------------------------------------------------------
   -- Connection
   ------------------------------------------------------------------------
   data Connection = Connection {
-                      conId      :: Con,
-                      conCon     :: P.Connection,
+                      conId      :: Fac.Con,
+                      conAddr    :: String,   -- the broker's IP address
+                      conPort    :: Int,      -- the broker's port
+                      conMax     :: Int,         -- max receive
+                      conUsr     :: String,      -- user
+                      conPwd     :: String,      -- passcode
+                      conCli     :: String,      -- client-id
+                      conSrv     :: String, -- server description
+                      conSes     :: String, -- session identifier (from broker)
+                      conVers    :: [F.Version], -- the accepted versions
+                                               -- the agreed version 
+                                               -- after connect
+                      conBeat    :: F.Heart, -- the heart beat
+                      conChn     :: Chan F.Frame, -- sender channel
+                      conHThrd   :: Maybe ThreadId, -- heart beat thread
+                      conErrM    :: String, -- connection error
+                      conBrk     :: Bool,
                       conOwner   :: ThreadId,
                       conHisBeat :: UTCTime,
                       conMyBeat  :: UTCTime, 
@@ -94,10 +118,19 @@ where
                       conThrds   :: [ThreadEntry],
                       conErrs    :: [F.Frame],
                       conRecs    :: [Receipt],
-                      conAcks    :: [P.MsgId]}
+                      conAcks    :: [MsgId]}
 
   instance Eq Connection where
     c1 == c2 = conId c1 == conId c2
+
+  mkConnection :: Fac.Con -> String -> Int         -> 
+                             Int    -> String      -> String   -> 
+                             String -> [F.Version] -> F.Heart  -> 
+                             Chan F.Frame          -> ThreadId -> 
+                             UTCTime               -> [Copt]   -> Connection
+  mkConnection cid host port mx usr pwd ci vs hs chn myself t os = 
+    Connection cid host port mx usr pwd ci "" "" vs hs chn Nothing "" False 
+                   myself t t (oWaitBroker os) [] [] [] [] [] []
 
   -------------------------------------------------------------------------
   -- | Options passed to a connection
@@ -119,9 +152,11 @@ where
     OWaitBroker Int |
 
     -- | The maximum size of TCP/IP packets.
-    --   Indirectly, this options also defines the
-    --   maximum message size which is /10 * maxReceive/.
-    --   By default, the maximum packet size is 1024 bytes.
+    --   This option is currently ignored.
+    --   Instead, 'Data.Conduit.Network' defines
+    --   the packet size (currently hard-wired 4KB).
+    --   The maximum message size is 1000 times this value,
+    --   /i.e./ 4000KB.
     OMaxRecv    Int |
 
     -- | This option defines the client\'s bid
@@ -132,14 +167,45 @@ where
     -- | Authentication: user and password
     OAuth String String |
 
-    -- | Identification: specifies the JMS Client ID for persistant connections
+    -- | Identification: specifies the JMS Client ID for persistent connections
     OClientId String |
 
     -- | With this option set, "connect" will use 
     --   a "STOMP" frame instead of a "CONNECT" frame
-    OStomp 
+    OStomp |
 
-    deriving (Eq, Show)
+    -- | Connect timeout in milliseconds;
+    --   if the broker does not respond to a connect request
+    --   within this time frame, a 'ConnectException' is thrown.
+    --   If the value is <= 0, the program will wait forever.
+    OTmo Int |
+
+    -- | Security: 'TLSClientConfig'
+    --             (see 'Data.Conduit.Network.TLS' for details).
+    --   If the parameter is not given, no security measure is taken.
+    OSecurity TLSClientConfig
+
+  instance Show Copt where
+    show (OWaitBroker i) = "OWaitBroker" ++ show i
+    show (OMaxRecv    i) = "OMaxRecv "   ++ show i
+    show (OHeartBeat  h) = "OHeartBeat " ++ show h
+    show (OAuth     u p) = "OAuth " ++ u ++ "/" ++ p
+    show (OClientId   u) = "OClientId "  ++ u
+    show  OStomp         = "OStomp"  
+    show (OTmo        i) = "OTmo"        ++ show i
+    show (OSecurity   c) = "OSecurity "  ++ show (tlsClientUseTLS c)
+
+  instance Eq Copt where
+    (OWaitBroker i1) == (OWaitBroker i2) = i1 == i2
+    (OMaxRecv    i1) == (OMaxRecv    i2) = i1 == i2 
+    (OHeartBeat  h1) == (OHeartBeat  h2) = h1 == h2
+    (OAuth    u1 p1) == (OAuth    u2 p2) = u1 == u2 && p1 == p2
+    (OClientId   u1) == (OClientId   u2) = u1 == u2
+    (OTmo        i1) == (OTmo        i2) = i1 == i2
+    (OSecurity   c1) == (OSecurity   c2) = tlsClientUseTLS c1 && 
+                                           tlsClientUseTLS c2
+    OStomp           == OStomp           = True
+    _                == _                = False
 
   ------------------------------------------------------------------------
   -- Same constructor
@@ -151,6 +217,8 @@ where
   is (OAuth     _ _) (OAuth     _ _) = True
   is (OClientId   _) (OClientId  _)  = True
   is (OStomp       ) (OStomp      )  = True
+  is (OTmo _       ) (OTmo _      )  = True
+  is (OSecurity _  ) (OSecurity _ )  = True
   is _               _               = False
 
   noWait :: Int
@@ -198,17 +266,24 @@ where
                 Just _  -> True
                 Nothing -> False
 
-  findCon :: Con -> [Connection] -> Maybe Connection
+  oTmo :: [Copt] -> Int
+  oTmo os = case find (is $ OTmo 0) os of
+              Just (OTmo i) -> i
+              _             -> 0
+
+  oSecurity :: String -> Int -> [Copt] -> TLSClientConfig
+  oSecurity h p os = case find (is $ OSecurity dcfg) os of
+                       Just (OSecurity cfg) -> cfg
+                       _                    -> dcfg
+    where dcfg = (tlsClientConfig p $ B.pack h){tlsClientUseTLS=False}
+
+  findCon :: Fac.Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)
 
-  mkConnection :: Con -> P.Connection -> ThreadId -> UTCTime -> [Copt] -> Connection
-  mkConnection cid c myself t os = Connection cid c myself t t (oWaitBroker os)
-                                              [] [] [] [] [] []
-
-  addAckToCon :: P.MsgId -> Connection -> Connection
+  addAckToCon :: MsgId -> Connection -> Connection
   addAckToCon mid c = c {conAcks = mid : conAcks c} 
 
-  rmAckFromCon :: P.MsgId -> Connection -> Connection
+  rmAckFromCon :: MsgId -> Connection -> Connection
   rmAckFromCon mid c = c {conAcks = delete' mid $ conAcks c}
 
   addRecToCon :: Receipt -> Connection -> Connection
@@ -222,17 +297,31 @@ where
                          Nothing -> True
                          Just _  -> False
 
+  ---------------------------------------------------------------------
+  -- Connection interfaces
+  ---------------------------------------------------------------------
+  connected :: Connection -> Bool
+  connected c = conBrk c
+
+  getErr :: Connection -> String
+  getErr = conErrM
+
+  getVersion :: Connection -> F.Version
+  getVersion c = if null (conVers c) 
+                   then defVersion
+                   else head $ conVers c
+
   ------------------------------------------------------------------------
   -- Sub, Dest and Thread Entry
   ------------------------------------------------------------------------
-  type SubEntry    = (Sub, Chan F.Frame)
+  type SubEntry    = (Fac.Sub, Chan F.Frame)
   type DestEntry   = (String, Chan F.Frame)
   type ThreadEntry = (ThreadId, [Transaction])
 
   addSubToCon :: SubEntry -> Connection -> Connection
   addSubToCon s c = c {conSubs = s : conSubs c}
 
-  getSub :: Sub -> Connection -> Maybe (Chan F.Frame)
+  getSub :: Fac.Sub -> Connection -> Maybe (Chan F.Frame)
   getSub sid c = lookup sid (conSubs c)
 
   rmSubFromCon :: SubEntry -> Connection -> Connection
@@ -262,22 +351,22 @@ where
   -- Transaction 
   ------------------------------------------------------------------------
   data Transaction = Trn {
-                       txId      :: Tx,
+                       txId      :: Fac.Tx,
                        txState   :: TxState,
                        txTmo     :: Int,
                        txAbrtAck :: Bool,
                        txAbrtRc  :: Bool,
-                       txAcks    :: [P.MsgId],
+                       txAcks    :: [MsgId],
                        txRecs    :: [Receipt]
                      }
 
   instance Eq Transaction where
     t1 == t2 = txId t1 == txId t2
 
-  findTx :: Tx -> [Transaction] -> Maybe Transaction
+  findTx :: Fac.Tx -> [Transaction] -> Maybe Transaction
   findTx tx = find (\x -> txId x == tx) 
 
-  mkTrn :: Tx -> [Topt] -> Transaction
+  mkTrn :: Fac.Tx -> [Topt] -> Transaction
   mkTrn tx os = Trn {
                   txId      = tx,
                   txState   = TxStarted,
@@ -351,10 +440,10 @@ where
   setTxState :: TxState -> Transaction -> Transaction
   setTxState st t = t {txState = st}
 
-  addAckToTx :: P.MsgId -> Transaction -> Transaction
+  addAckToTx :: MsgId -> Transaction -> Transaction
   addAckToTx mid t = t {txAcks = mid : txAcks t}
 
-  rmAckFromTx :: P.MsgId -> Transaction -> Transaction
+  rmAckFromTx :: MsgId -> Transaction -> Transaction
   rmAckFromTx mid t = t {txAcks = delete' mid $ txAcks t}
 
   addRecToTx :: Receipt -> Transaction -> Transaction
@@ -388,13 +477,13 @@ where
   ------------------------------------------------------------------------
   -- get connection from state
   ------------------------------------------------------------------------
-  getCon :: Con -> IO Connection
+  getCon :: Fac.Con -> IO Connection
   getCon cid = withCon cid $ \c -> return (c, c) 
 
   ------------------------------------------------------------------------
   -- remove connection from state
   ------------------------------------------------------------------------
-  rmCon :: Con -> IO ()
+  rmCon :: Fac.Con -> IO ()
   rmCon cid = modifyMVar_ con $ \cs -> 
     case findCon cid cs of
       Nothing -> return cs
@@ -403,7 +492,7 @@ where
   ------------------------------------------------------------------------
   -- Apply an action that may change a connection to the state
   ------------------------------------------------------------------------
-  withCon :: Con -> (Connection -> IO (Connection, a)) -> IO a
+  withCon :: Fac.Con -> (Connection -> IO (Connection, a)) -> IO a
   withCon cid op = modifyMVar con (\cs -> 
      case findCon cid cs of
        Nothing   -> 
@@ -417,32 +506,32 @@ where
   ------------------------------------------------------------------------
   -- Log heart-beats
   ------------------------------------------------------------------------
-  logTime :: Con -> (UTCTime -> Connection -> Connection) -> IO ()
+  logTime :: Fac.Con -> (UTCTime -> Connection -> Connection) -> IO ()
   logTime cid f = 
     getCurrentTime >>= \t -> withCon cid (\c -> return (f t c, ()))
 
-  logSend :: Con -> IO ()
+  logSend :: Fac.Con -> IO ()
   logSend cid = logTime cid setMyTime
 
-  logReceive :: Con -> IO ()
+  logReceive :: Fac.Con -> IO ()
   logReceive cid = logTime cid setHisTime
 
   ------------------------------------------------------------------------
   -- add and remove sub and dest
   ------------------------------------------------------------------------
-  addSub :: Con -> SubEntry -> IO ()
+  addSub :: Fac.Con -> SubEntry -> IO ()
   addSub cid s  = withCon cid $ \c -> return (addSubToCon s c, ())
 
-  addDest :: Con -> DestEntry -> IO ()
+  addDest :: Fac.Con -> DestEntry -> IO ()
   addDest cid d = withCon cid $ \c -> return (addDestToCon d c, ())
 
-  rmSub :: Con -> Sub -> IO ()
+  rmSub :: Fac.Con -> Fac.Sub -> IO ()
   rmSub cid sid = withCon cid rm
     where rm c = case getSub sid c of 
                    Nothing -> return (c, ())
                    Just ch -> return (rmSubFromCon (sid, ch) c, ())
 
-  rmDest :: Con -> String -> IO ()
+  rmDest :: Fac.Con -> String -> IO ()
   rmDest cid dst = withCon cid rm
     where rm c = case getDest dst c of 
                    Nothing -> return (c, ())
@@ -452,7 +541,7 @@ where
   -- add transaction to connection
   -- Note: transactions are kept per threadId
   ------------------------------------------------------------------------
-  addTx :: Transaction -> Con -> IO ()
+  addTx :: Transaction -> Fac.Con -> IO ()
   addTx t cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -467,7 +556,7 @@ where
   -- get transaction from connection
   -- Note: transactions are kept per threadId
   ------------------------------------------------------------------------
-  getTx :: Tx -> Connection -> IO (Maybe Transaction)
+  getTx :: Fac.Tx -> Connection -> IO (Maybe Transaction)
   getTx tx c = do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -477,7 +566,7 @@ where
   ------------------------------------------------------------------------
   -- apply an action that may change a transaction to the state
   ------------------------------------------------------------------------
-  updTx :: Tx -> Con -> (Transaction -> Transaction) -> IO ()
+  updTx :: Fac.Tx -> Fac.Con -> (Transaction -> Transaction) -> IO ()
   updTx tx cid f = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -498,13 +587,13 @@ where
   ------------------------------------------------------------------------
   -- update transaction state
   ------------------------------------------------------------------------
-  updTxState :: Tx -> Con -> TxState -> IO ()
+  updTxState :: Fac.Tx -> Fac.Con -> TxState -> IO ()
   updTxState tx cid st = updTx tx cid (setTxState st)
 
   ------------------------------------------------------------------------
   -- get current transaction for thread
   ------------------------------------------------------------------------
-  getCurTx :: Connection -> IO (Maybe Tx)
+  getCurTx :: Connection -> IO (Maybe Fac.Tx)
   getCurTx c = do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -538,7 +627,7 @@ where
   -- add a pending ack either to the current transaction
   -- or - if there is no transaction - to the connection
   ------------------------------------------------------------------------
-  addAck :: Con -> P.MsgId -> IO ()
+  addAck :: Fac.Con -> MsgId -> IO ()
   addAck cid mid = do
     let toTx  = addAckToTx  mid
     let toCon = addAckToCon mid
@@ -548,7 +637,7 @@ where
   -- remove a pending ack either from the current transaction
   -- or - if there is no transaction - from the connection
   ------------------------------------------------------------------------
-  rmAck :: Con -> P.MsgId -> IO ()
+  rmAck :: Fac.Con -> MsgId -> IO ()
   rmAck cid mid = do
     let fromTx  = rmAckFromTx  mid
     let fromCon = rmAckFromCon mid
@@ -558,7 +647,7 @@ where
   -- add a pending receipt either to the current transaction
   -- or - if there is no transaction - to the connection
   ------------------------------------------------------------------------
-  addRec :: Con -> Receipt -> IO ()
+  addRec :: Fac.Con -> Receipt -> IO ()
   addRec cid r = do
     let toTx  = addRecToTx  r
     let toCon = addRecToCon r
@@ -568,7 +657,7 @@ where
   -- remove a pending receipt either from the current transaction
   -- or - if there is no transaction - from the connection
   ------------------------------------------------------------------------
-  rmRec :: Con -> Receipt -> IO ()
+  rmRec :: Fac.Con -> Receipt -> IO ()
   rmRec cid r = do
     let fromTx  = rmRecFromTx  r
     let fromCon = rmRecFromCon r
@@ -578,7 +667,7 @@ where
   -- search for a receipt either in connection or transactions.
   -- this is used by the listener (which is not in the thread list)
   ------------------------------------------------------------------------
-  forceRmRec :: Con -> Receipt -> IO ()
+  forceRmRec :: Fac.Con -> Receipt -> IO ()
   forceRmRec cid r = withCon cid doRmRec 
     where doRmRec c = 
             case find (== r) $ conRecs c of
@@ -594,7 +683,7 @@ where
   ------------------------------------------------------------------------
   checkCurTx :: (Transaction -> Bool) ->
                 (Connection  -> Bool) -> 
-                Con -> IO Bool
+                Fac.Con -> IO Bool
   checkCurTx onTx onCon cid = do
     c   <- getCon cid
     tid <- myThreadId
@@ -606,7 +695,7 @@ where
   ------------------------------------------------------------------------
   -- check a receipt
   ------------------------------------------------------------------------
-  checkReceipt :: Con -> Receipt -> IO Bool
+  checkReceipt :: Fac.Con -> Receipt -> IO Bool
   checkReceipt cid r = do
     let onTx  = checkReceiptTx r
     let onCon = checkReceiptCon r
@@ -615,7 +704,7 @@ where
   ------------------------------------------------------------------------
   -- remove a specific transaction
   ------------------------------------------------------------------------
-  rmThisTx :: Tx -> Con -> IO ()
+  rmThisTx :: Fac.Tx -> Fac.Con -> IO ()
   rmThisTx tx cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -637,7 +726,7 @@ where
   ------------------------------------------------------------------------
   -- remove the current transaction
   ------------------------------------------------------------------------
-  rmTx :: Con -> IO ()
+  rmTx :: Fac.Con -> IO ()
   rmTx cid = withCon cid $ \c -> do
     tid <- myThreadId
     case lookup tid (conThrds c) of
@@ -652,4 +741,86 @@ where
                                deleteBy' eq (tid, ts) (conThrds c)},  ())
               else return (c {conThrds = (tid, ts') : 
                                deleteBy' eq (tid, ts) (conThrds c)}, ())
+
+  ---------------------------------------------------------------------
+  -- Default version, when broker does not send a version
+  ---------------------------------------------------------------------
+  defVersion :: F.Version
+  defVersion = (1,2)
+
+  ---------------------------------------------------------------------
+  -- Subscribe abstraction
+  ---------------------------------------------------------------------
+  data Subscription = Subscription {
+                        subId   :: Fac.Sub,   -- subscribe identifier
+                        subName :: String,    -- queue name
+                        subMode :: F.AckMode  -- ack mode
+                      }
+    deriving (Show)
+
+  mkSub :: Fac.Sub -> String -> F.AckMode -> Subscription
+  mkSub sid qn am = Subscription {
+                      subId   = sid,
+                      subName = qn,
+                      subMode = am}
+
+  ---------------------------------------------------------------------
+  -- | Message Identifier
+  ---------------------------------------------------------------------
+  data MsgId = MsgId String | NoMsg
+    deriving (Eq)
+
+  instance Show MsgId where
+    show (MsgId s) = s
+    show (NoMsg)   = ""
+
+  ------------------------------------------------------------------------
+  -- | Any content received from a queue
+  --   is wrapped in a message.
+  --   It is, in particular, the return value of /readQ/.
+  ------------------------------------------------------------------------
+  data Message a = Msg {
+                     -- | The message Identifier
+                     msgId   :: MsgId,
+                     -- | The subscription
+                     msgSub  :: Fac.Sub,
+                     -- | The destination
+                     msgDest :: String,
+                     -- | The Ack identifier
+                     msgAck  :: String,
+                     -- | The Stomp headers
+                     --   that came with the message
+                     msgHdrs :: [F.Header],
+                     -- | The /MIME/ type of the content
+                     msgType :: Mime.Type,
+                     -- | The length of the 
+                     --   encoded content
+                     msgLen  :: Int,
+                     -- | The transaction, in which 
+                     --   the message was received
+                     msgTx   :: Fac.Tx,
+                     -- | The encoded content             
+                     msgRaw  :: B.ByteString,
+                     -- | The content             
+                     msgCont :: a}
+  
+  ---------------------------------------------------------------------
+  -- Create a message
+  ---------------------------------------------------------------------
+  mkMessage :: MsgId -> Fac.Sub -> String -> String ->
+               Mime.Type -> Int -> Fac.Tx -> 
+               B.ByteString -> a -> Message a
+  mkMessage mid sub dst ak typ len tx raw cont = Msg {
+                                             msgId   = mid,
+                                             msgSub  = sub,
+                                             msgDest = dst,
+                                             msgAck  = ak,
+                                             msgHdrs = [], 
+                                             msgType = typ, 
+                                             msgLen  = len, 
+                                             msgTx   = tx,
+                                             msgRaw  = raw,
+                                             msgCont = cont}
+
+    
 

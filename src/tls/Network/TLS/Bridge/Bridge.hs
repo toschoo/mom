@@ -6,6 +6,7 @@ where
   import           Data.Conduit (($$),(=$))
   import           Data.Conduit.Network
   import           Data.Conduit.Network.TLS
+  import           Network.Connection
   import           Control.Monad (forever)
   import           Control.Monad.Trans (liftIO)
   import           Control.Concurrent

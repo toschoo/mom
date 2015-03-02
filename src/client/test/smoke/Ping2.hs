@@ -20,8 +20,8 @@ where
                   "PONG" -> return Pong
                   _      -> convertError $ "Not a Ping: '" ++ s ++ "'"
 
-  withPingPong :: (Con -> IO ()) -> IO ()
-  withPingPong = withConnection "localhost" 61618 [] [] 
+  withPingPong :: Int -> (Con -> IO ()) -> IO ()
+  withPingPong p = withConnection "localhost" p [] [] 
 
   ping :: String -> Con -> IO ()
   ping qn c = do 

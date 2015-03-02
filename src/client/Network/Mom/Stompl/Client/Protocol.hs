@@ -1,9 +1,5 @@
 {-# Language CPP #-}
-module Protocol (Connection, mkConnection, 
-                 conBeat, getVersion,
-                 getSock, getWr, getRc,
-                 connected, getErr, conMax,
-                 connect, disconnect, disc,
+module Protocol (
                  Subscription, mkSub,
                  subscribe, unsubscribe,
                  begin, commit, abort, sendBeat,
@@ -12,7 +8,13 @@ module Protocol (Connection, mkConnection,
                  send, ack, nack)
 where
 
-  import qualified Socket  as S
+  import           Stream
+
+  import           Data.Conduit (($$))
+  import qualified Data.Conduit.List  as CL
+  import           Data.Conduit.Network
+  import           Data.Conduit.Network.TLS
+
   import qualified Factory as Fac
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
@@ -25,6 +27,7 @@ where
   import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catch, 
                                       SomeException, bracketOnError)
+  import           Control.Concurrent
 #ifdef _DEBUG
   import           Control.Monad (when)
 #endif
@@ -35,29 +38,6 @@ where
   ---------------------------------------------------------------------
   defVersion :: F.Version
   defVersion = (1,2)
-
-  ---------------------------------------------------------------------
-  -- Connection 
-  ---------------------------------------------------------------------
-  data Connection = Connection {
-                       conAddr :: String,   -- the broker's IP address
-                       conPort :: Int,      -- the broker's port
-                       conVers :: [F.Version], -- the accepted versions
-                                               -- the agreed version 
-                                               -- after connect
-                       conBeat :: F.Heart, -- the heart beat
-                       conSrv  :: String, -- server description
-                       conSes  :: String, -- session identifier (from broker)
-                       conUsr  :: String,      -- user
-                       conPwd  :: String,      -- passcode
-                       conCli  :: String,      -- client-id
-                       conMax  :: Int,         -- max receive
-                       conSock :: Maybe Socket,     -- if connected: socket
-                       conRcv  :: Maybe S.Receiver, -- if connected: receiver
-                       conWrt  :: Maybe S.Writer,   -- if connected: writer
-                       conErrM :: String, -- connection error
-                       conTcp  :: Bool,  -- flag for tcp/ip connect
-                       conBrk  :: Bool}  -- flag fror broker connect
 
   ---------------------------------------------------------------------
   -- Subscribe abstraction
@@ -134,89 +114,6 @@ where
                                              msgCont = cont}
 
   ---------------------------------------------------------------------
-  -- Make a connection
-  ---------------------------------------------------------------------
-  mkConnection :: String -> Int    -> Int    -> 
-                  String -> String -> String -> 
-                  [F.Version] -> F.Heart     -> Connection
-  mkConnection host port mx usr pwd cli vers beat = 
-    Connection {
-       conAddr = host,
-       conPort = port,
-       conVers = vers,
-       conBeat = beat,
-       conSrv  = "",
-       conSes  = "",
-       conUsr  = usr, 
-       conPwd  = pwd,
-       conCli  = cli,
-       conMax  = mx,
-       conSock = Nothing,
-       conRcv  = Nothing,
-       conWrt  = Nothing,
-       conErrM = "",
-       conTcp  = False,
-       conBrk  = False}
-
-  ---------------------------------------------------------------------
-  -- Error: we are not connected!
-  ---------------------------------------------------------------------
-  incompleteErr :: String
-  incompleteErr = "incomplete Connection touched!"
-
-  ---------------------------------------------------------------------
-  -- Connection interfaces
-  ---------------------------------------------------------------------
-  getSock :: Connection -> Socket
-  getSock = fromMaybe (error incompleteErr) . conSock 
-
-  getWr :: Connection -> S.Writer
-  getWr = fromMaybe (error incompleteErr) . conWrt
-
-  getRc :: Connection -> S.Receiver
-  getRc = fromMaybe (error incompleteErr) . conRcv
-
-  connected :: Connection -> Bool
-  connected c = conTcp c && conBrk c
-
-  getErr :: Connection -> String
-  getErr = conErrM
-
-  getVersion :: Connection -> F.Version
-  getVersion c = if null (conVers c) 
-                   then defVersion
-                   else head $ conVers c
-
-  ---------------------------------------------------------------------
-  -- connect
-  ---------------------------------------------------------------------
-  connect :: String -> Int -> Int -> 
-             String -> String -> String -> F.FrameType -> 
-             [F.Version] -> F.Heart -> [F.Header] -> IO Connection
-  connect host port mx usr pwd cli t vers beat hs = 
-    bracketOnError (do s <- S.connect host port
-                       let c = mkConnection host port mx 
-                                            usr  pwd cli vers beat
-                       return c {conSock = Just s, conTcp = True}) 
-                   disc
-                   (connectBroker mx t vers beat hs) 
-
-  ---------------------------------------------------------------------
-  -- disconnect either on broker level or on tcp/ip level
-  ---------------------------------------------------------------------
-  disconnect :: Connection -> String -> IO Connection
-  disconnect c r
-    | conBrk c  = case mkDiscF r of
-                    Left  e -> return c {
-                                 conErrM = 
-                                   "Cannot create Frame: " ++ e}
-                    Right f -> do
-                      S.send (getWr c) (getSock c) f 
-                      return c {conBrk = False}
-    | conTcp c  = disc c
-    | otherwise = return c {conErrM = "Not connected!"}
-
-  ---------------------------------------------------------------------
   -- begin transaction
   ---------------------------------------------------------------------
   begin :: Connection -> String -> String -> IO ()
@@ -288,71 +185,8 @@ where
                do when (not $ F.complies (1,2) f) $
                     putStrLn $ "Frame does not comply with 1.2: " ++ show f 
 #endif
-                  S.send (getWr c) (getSock c) f
-
-  ---------------------------------------------------------------------
-  -- hard disconnect (on tcp/ip) level
-  ---------------------------------------------------------------------
-  disc :: Connection -> IO Connection
-  disc c = do
-    let c' = c {conTcp  = False,
-                conBrk  = False,
-                conWrt  = Nothing,
-                conRcv  = Nothing,
-                conSock = Nothing}
-    S.disconnect (getSock c)
-    return c'
-
-  ---------------------------------------------------------------------
-  -- the hard work on connecting to a broker
-  ---------------------------------------------------------------------
-  connectBroker :: Int -> F.FrameType -> 
-                   [F.Version] -> F.Heart -> [F.Header] ->
-                   Connection -> IO Connection
-  connectBroker mx t vers beat hs c = 
-    let mk = case t of
-               F.Connect -> F.mkConFrame
-               F.Stomp   -> F.mkStmpFrame
-               _         -> error "Ouch: Unknown Connect-type"
-     in case mkConF mk
-                (conAddr c) 
-                (conUsr  c) (conPwd c) 
-                (conCli  c) vers beat hs of
-          Left e  -> return c {conErrM = e}
-          Right f -> do
-            rc  <- S.initReceiver
-            wr  <- S.initWriter
-            S.send wr (getSock c) f 
-            eiC <- catch (S.receive rc (getSock c) mx) -- no timeout?
-                         (\e -> return $ Left $ show (e::SomeException)) 
-            case eiC of
-              Left  e -> return c {conErrM = e}
-              Right r -> 
-                let c' = handleConnected r c
-                 in if period c' > 0 && period c' < fst beat
-                      then return c  {conErrM = "Beat frequency too high"}
-                      else return c' {conBrk = True,
-                                  conRcv = Just rc,
-                                  conWrt = Just wr}
-    where period = snd . conBeat
-
-  ---------------------------------------------------------------------
-  -- handle broker response to connect frame
-  ---------------------------------------------------------------------
-  handleConnected :: F.Frame -> Connection -> Connection
-  handleConnected f c = 
-    case F.typeOf f of
-      F.Connected -> c {
-                      conSrv  =  let srv = F.getServer f
-                                  in F.getSrvName srv ++ "/"  ++
-                                     F.getSrvVer  srv ++ " (" ++
-                                     F.getSrvCmts srv ++ ")",
-                      conBeat =  F.getBeat    f,
-                      conVers = [F.getVersion f],
-                      conSes  =  F.getSession f}
-      F.Error     -> c {conErrM = errToMsg f}
-      _           -> c {conErrM = "Unexpected Frame: " ++ 
-                                  U.toString (F.putCommand f)}
+                  writeChan (getChn c) f
+ 
 
   ---------------------------------------------------------------------
   -- transform an error frame into a string
@@ -361,7 +195,7 @@ where
   errToMsg f = F.getMsg f ++ if B.length (F.getBody f) == 0 
                                    then "."
                                    else ": " ++ U.toString (F.getBody f)
-
+ 
   ---------------------------------------------------------------------
   -- frame constructors
   -- this needs review...
@@ -425,4 +259,6 @@ where
   mkAbortF :: String -> String -> [F.Header] -> Either String F.Frame
   mkAbortF tx receipt _ =
     F.mkAbrtFrame $ F.mkTrnHdr tx : mkReceipt receipt
+    
+
 
