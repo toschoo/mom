@@ -399,7 +399,7 @@ where
     let (u,p) = oAuth      os
     let (ci)  = oCliId     os
     let tm    = oTmo       os
-    let cfg   = oSecurity  host port os
+    let cfg   = oTLS       host port os
     let t | oStomp os = F.Stomp
           | otherwise = F.Connect
     runTLSClient cfg $ \ad -> do
@@ -413,26 +413,17 @@ where
                                             me now os
                   getCon cid)
               (\_ -> rmCon cid) $ \c -> 
-        withSender ad ch $ do
+        withSender c ad ch $ do
           w <- newEmptyMVar
-          withListener ad cid w $ do
+          withListener c ad cid w $ do
             connectBroker mx t vers beat hs c
-            whenConnected cid tm w act 
-    {-
-    where tlss = NC.TLSSettingsSimple {
-                    NC.settingDisableCertificateValidation = True,
-                    NC.settingDisableSession               = False,
-                    NC.settingUseServerName                = False} 
-          dcfg = (tlsClientConfig port $ B.pack host){
-                    tlsClientUseTLS=False,
-                    tlsClientConfigTLSSettings = tlss} 
-    -}
+            whenConnected cid tm beat w act 
 
-  withSender :: AppData -> Chan F.Frame -> IO a -> IO a
-  withSender ad ch = withThread (sender ad ch) -- alert when we lose the sender!
+  withSender :: Connection -> AppData -> Chan F.Frame -> IO a -> IO a
+  withSender c ad ch = withThread c "sender" (sender ad ch) -- alert when we lose the sender!
 
-  withListener :: AppData -> Con -> MVar () -> IO a -> IO a
-  withListener ad cid m = withThread (listen ad cid m) -- alert when we lose the listener!
+  withListener :: Connection -> AppData -> Con -> MVar () -> IO a -> IO a
+  withListener c ad cid m = withThread c "listener" (listen ad cid m) -- alert when we lose the listener!
 
   ---------------------------------------------------------------------
   -- the hard work on connecting to a broker
@@ -452,21 +443,29 @@ where
           Left e  -> throwIO (ConnectException e)
           Right f -> writeChan (conChn $ c) f 
 
-  whenConnected :: Con -> Int -> MVar () -> (Con -> IO a) -> IO a
-  whenConnected cid tm m act = do
+  whenConnected :: Con -> Int -> F.Heart -> MVar () -> (Con -> IO a) -> IO a
+  whenConnected cid tm bt m act = do
     mbT <- if tm <= 0 then Just <$> takeMVar m 
                       else timeout (ms tm) (takeMVar m)
     when (isNothing mbT) (throwIO $ ConnectException "Timeout expired!")
-    finally (act cid) (do
-      c <- getCon cid
-      let t = conHThrd c
-      when (isThrd t)    $ killThread (thrd t)
-      -- wait for receipt on disconnect ----
-      unless (conWait c <= 0) $ do
-        rc <- mkUniqueRecc 
-        disconnect c (show rc)
-        addRec cid rc
-        waitCon cid rc (conWait c) `onException` rmRec cid rc)
+    c <- getCon cid
+    if period c > 0 
+      then if period c < fst bt
+           then throwIO (ConnectException $ "Beat frequency too high: " ++ 
+                                            show (period c))
+           else withThread c "heartbeat" (heartBeat cid $ period c) $ go c
+      else go c
+    where  go c = do
+             putMVar m () 
+             updCon cid c {conBrk = True} 
+             finally (act cid) (do
+               c' <- getCon cid
+               -- wait for receipt on disconnect ----
+               unless (conWait c' <= 0) $ do
+                 rc <- mkUniqueRecc 
+                 disconnect c' (show rc)
+                 addRec cid rc
+                 waitCon cid rc (conWait c') `onException` rmRec cid rc)
 
   ---------------------------------------------------------------------
   -- disconnect either on broker level or on tcp/ip level
@@ -482,12 +481,6 @@ where
   period :: Connection -> Int
   period = snd . conBeat
 
-  isThrd :: Maybe a -> Bool
-  isThrd = isJust
-
-  thrd :: Maybe a -> a
-  thrd = fromJust
-
   ------------------------------------------------------------------------
   -- wait for receipt
   ------------------------------------------------------------------------
@@ -501,9 +494,8 @@ where
           then throwIO $ ConnectException $ 
                             "No receipt on disconnect (" ++ 
                             show cid ++ ")."
-          else do
-            threadDelay $ ms 1
-            waitCon cid rc (delay - 1)
+          else do threadDelay $ ms 1
+                  waitCon cid rc (delay - 1)
     
   ------------------------------------------------------------------------
   -- | A Queue for sending messages.
@@ -1389,11 +1381,7 @@ where
   listen ad cid w = do 
     c   <- getCon cid
     ch  <- newChan
-    withThread (receiver ad ch `catches`
-                  [Handler (\e -> case e of
-                                    ThreadKilled -> throwIO e
-                                    _            -> throwIO e),
-                   Handler (\e -> throwToOwner c $ ProtocolException (show (e::SomeException)))]) $ 
+    withThread c "receiver" (receiver ad ch (throwToOwner c)) $
       forever $ do
         f <- readChan ch
         logReceive cid
@@ -1407,37 +1395,43 @@ where
                              ProtocolException $ "Unexpected Frame: " ++
                              show (F.typeOf f)
 
-  withThread :: IO () -> IO r -> IO r
-  withThread th act = newEmptyMVar >>= \m -> do
-    tid <- forkIO (finally th $ putMVar m ())
-    act `finally` (killThread tid >> takeMVar m)
+  withThread :: Connection -> String -> IO () -> IO r -> IO r
+  withThread c nm th act = do
+    m   <- newEmptyMVar
+    x   <- newMVar False
+    tid <- forkIO ((theThread x) `finally` (putMVar m ()))
+    (act >>= signalOk x) `finally` (killThread tid >> takeMVar m)
+    where theThread x = (th >> signalEnd x) `catches` hndls
+          hndls = [Handler (\e -> case e of
+                                    ThreadKilled -> throwIO e
+                                    _            -> throwIO e),
+                   Handler (\e -> throwToOwner c $ 
+                                    WorkerException (
+                                      nm ++ " terminated: " ++
+                                      show (e::SomeException)))
+                  ]
+          signalEnd x = do t <- readMVar x
+                           unless t $ throwToOwner c $ WorkerException (
+                                                         nm ++ " terminated")
+          signalOk x r = modifyMVar x $ \_ -> return (True,r)
 
   -----------------------------------------------------------------------
   -- Handle Connected Frame
   -----------------------------------------------------------------------
   handleConnected :: Con -> F.Frame -> MVar () -> IO ()
-  handleConnected cid f m = withCon cid $ \c -> 
-     if conBrk c 
-      then do throwToOwner c $
+  handleConnected cid f m = do -- withCon cid $ \c -> 
+     c <- getCon cid
+     if connected c 
+      then throwToOwner c $
                 ProtocolException "Unexptected Connected frame"
-              return (c,())
-      else let beat = conBeat c1
-               c1   = c {conSrv  =  let srv = F.getServer f
+      else updCon cid c {conSrv  =  let srv = F.getServer f
                                      in F.getSrvName srv ++ "/"  ++
                                         F.getSrvVer  srv ++ " (" ++
                                         F.getSrvCmts srv ++ ")",
                          conBeat =  F.getBeat    f,
                          conVers = [F.getVersion f],
                          conSes  =  F.getSession f}
-            in if period c1 > 0 && period c1 < fst beat
-                 then return (c1 {conErrM = "Beat frequency too high"},())
-                 else do
-                   t <- if period c1 > 0 
-                          then Just <$> forkIO (heartBeat cid $ period c1)
-                          else return Nothing
-                   putMVar m () 
-                   return (c1 {conHThrd = t,
-                               conBrk   = True}, ())
+           >> putMVar m () 
 
   -----------------------------------------------------------------------
   -- Handle Message Frame
@@ -1447,7 +1441,7 @@ where
     c <- getCon cid
     case getCh c of
       Nothing -> throwToOwner c $ 
-                 ProtocolException $ "Unknown Queue: " ++ show f
+                 ProtocolException $ "Unknown Channel: " ++ show f
       Just ch -> writeChan ch f
     where getCh c = let dst = F.getDest f
                         sid = F.getSub  f

@@ -8,7 +8,7 @@ where
   import qualified Network.Socket as S
   import qualified Network.Socket.ByteString as SB
   import           Network.BSD (getProtocolNumber) 
-  import           Control.Monad (forever)
+  import           Control.Monad (forever, void)
   import           Control.Exception (bracket, SomeException, throwIO)
   import qualified Control.Exception as Ex (catch) 
   import qualified Data.ByteString.Char8 as B
@@ -58,6 +58,7 @@ where
         case F.typeOf f of
           F.Connect    -> connect s rc f
           F.Disconnect -> S.sClose s
+          F.Send       -> handleSend s f >> session beats s rc
           _ | not beats && F.typeOf f == F.HeartBeat -> session beats s rc
             | otherwise -> do
                 let b = F.putFrame f
@@ -66,6 +67,11 @@ where
                   else do
                     putStrLn "Cannot send Frame!"
                     S.sClose s
+
+  handleSend :: S.Socket -> F.Frame -> IO ()
+  handleSend s _ = let nonsense = B.pack "MESSAGE\n\nrubbish\n\NUL"
+                    in void $ SB.send s nonsense
+                        
 
   connect :: S.Socket -> Sock.Receiver -> F.Frame -> IO ()
   connect s rc fc = 

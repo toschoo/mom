@@ -7,7 +7,10 @@ where
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Queue
 
-  import           Control.Exception (throwIO)
+  import           Network.Connection 
+  import           Data.Conduit.Network.TLS
+
+  import           Control.Exception (catch, throwIO, SomeException)
   import           Control.Concurrent
   import           Control.Monad (unless)
 
@@ -28,6 +31,10 @@ where
   host, nHost :: String
   host  = "127.0.0.1"
   nHost = "localhost"
+
+  port, sPort :: Int
+  port  = 61613
+  sPort = 61619
 
   beat :: Heart
   beat = (0,0)
@@ -61,21 +68,20 @@ where
 
   main :: IO ()
   main = do
-    os <- getArgs
-    case os of
-      [p] -> 
-        if not (all isDigit p)
-          then do
-            putStrLn $ "Port number '" ++ p ++ "' is not numeric!"
-            exitFailure
-          else do
-            r <- runTests $ mkTests (read p) 
-            case r of
-              Pass   -> exitSuccess
-              Fail _ -> exitFailure
-      _   -> do
-        putStrLn "I need a port number"
-        exitFailure
+    os  <- getArgs
+    let eiP = case os of
+               [p] -> 
+                 if not (all isDigit p)
+                   then Left $ "Port number '" ++ p ++ "' is not numeric!"
+                   else Right (read p)
+               _  -> Right port
+    case eiP of
+      Left  e -> error e
+      Right p -> do
+        r <- runTests $ mkTests p
+        case r of
+          Pass   -> exitSuccess
+          Fail _ -> exitFailure
 
   runTests :: TestGroup IO -> IO TestResult
   runTests g = do
@@ -90,16 +96,28 @@ where
         -- stompserver does not support stomp frame!
         -- t3    = mkTest "Connect with Stomp       " $ testNConnect  F.Stomp   p
         t4    = mkTest "Connect with Auth        " $ testAuth      p
+        t5    = mkTest "Connect with timeout     " $ testTmoOk     p
+        t6    = mkTest "Connect with timeout fail" $ testTmoFail   p
         t10   = mkTest "Create Reader            " $ testWith p testMkInQueue 
+        t510  = mkTest "Create Reader (secure)   " $ testSecure sPort testMkInQueue 
         t20   = mkTest "Create Writer            " $ testWith p testMkOutQueue 
+        t520  = mkTest "Create Writer (secure)   " $ testSecure sPort testMkOutQueue 
         t30   = mkTest "Create Reader wait Rc    " $ testWith p testMkInQueueWaitRc 
+        t530  = mkTest "Create Reader (secure)   " $ testSecure sPort testMkInQueueWaitRc
         t40   = mkTest "Create Reader with Rc    " $ testWith p testMkInQueueWithRc 
+        t540  = mkTest "Create Reader with Rc    " $ testSecure sPort testMkInQueueWithRc 
         t50   = mkTest "Send and Receive         " $ testWith p testSndRcv 
+        t550  = mkTest "Send and Receive (secure)" $ testSecure sPort testSndRcv 
         t60   = mkTest "Unicode                  " $ testWith p testUTF8 
+        t560  = mkTest "Unicode (secure)         " $ testSecure sPort testUTF8 
         t70   = mkTest "withReader               " $ testWith p testWithQueue 
+        t570  = mkTest "withReader (secure)      " $ testSecure sPort testWithQueue 
         t75   = mkTest "No Content Length        " $ testWith p testNoContentLen
+        t575  = mkTest "No Content Length (sec.) " $ testSecure sPort testNoContentLen
         t76   = mkTest "Content Length           " $ testWith p testContentLen
+        t576  = mkTest "Content Length (sec.)    " $ testSecure sPort testContentLen
         t80   = mkTest "Transaction              " $ testWith p testTx1 
+        t580  = mkTest "Transaction (sec.)       " $ testSecure sPort testTx1 
         t90   = mkTest "Abort                    " $ testWith p testAbort 
         t100  = mkTest "Abort on exception       " $ testWith p testTxException 
         t110  = mkTest "ForceTX                  " $ testWith p testForceTx 
@@ -133,16 +151,23 @@ where
         t350  = mkTest "Nested con - independent " $ testNstConInd  p
         t360  = mkTest "Nested con - interleaved " $ testNstConX    p
         t370  = mkTest "Nested con - inner fails " $ testNstConFail p
+        -- Socket closed, before receipt is received... 
         t375  = mkTest "Wait Broker              " $ testWaitBroker p
         t380  = mkTest "HeartBeat                " $ testBeat       p
         t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
+        t410  = mkTest "Exception in worker      " $ testExc        22222
+        t420  = mkTest "Continue after exception " $ testExc2       22222
+        t430  = mkTest "Worker terminates        " $ testWith p testDeadWorker
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t1,   t2,          t4,
+        [ t1,   t2,          t4,   t5,   t6, 
           t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
-         t210, t220, t230, t240, t250, t260, t270,       t280, t290, t300,
-         t310, t320, t330, t340, t350, t360, t370, {- t375, -} t380, t390, t400] 
+         t210, t220, t230, t240, t250, t260, t270, t280, t290, t300,
+         t310, t320, t330, t340, t350, t360, t370, {- t375 -}  t380, t390, t400,
+         t410, t420, t430,
+         -- secure tests
+         t510, t520, t530, t540, t550, t560, t570, t575, t576, t580] 
 
   ------------------------------------------------------------------------
   -- Connect with IP Address
@@ -186,6 +211,36 @@ where
     case eiC of
       Left  e -> return $ Fail $ show e
       Right _ -> return Pass
+
+  ------------------------------------------------------------------------
+  -- Connect with Timeout
+  ------------------------------------------------------------------------
+  -- Shall connect
+  -- Shall not throw an exception
+  ------------------------------------------------------------------------
+  testTmoOk :: Int -> IO TestResult
+  testTmoOk p = do
+    eiC <- try $ withConnection "localhost" p 
+                 [OTmo 100] [] (\_ -> return ())
+    case eiC of
+      Left  e -> return $ Fail $ show e
+      Right _ -> return Pass
+
+  ------------------------------------------------------------------------
+  -- Connect with Timeout, fail
+  ------------------------------------------------------------------------
+  -- Shall connect
+  -- Shall throw an exception
+  ------------------------------------------------------------------------
+  testTmoFail :: Int -> IO TestResult
+  testTmoFail p = do
+    eiC <- try $ withConnection "localhost" p 
+                 [OTmo 1] [] (\_ -> return ())
+    case eiC of
+      Left  e -> case e of
+                   ConnectException _ -> return Pass
+                   _                  -> return $ Fail $ show e
+      Right _ -> return $ Fail "timeout ignored"
   
   ------------------------------------------------------------------------
   -- Create a Reader without options
@@ -915,24 +970,57 @@ where
   ------------------------------------------------------------------------
   -- Broker Exception
   -- the trick is that some brokers do not support nack
+  -- we need two exception handlers,
+  -- because the broker will close the connection
+  -- after receiving an invalid frame, which will cause
+  -- a "receiver terminated" exception.
+  -- But that is not the one, we want to handle!
   ------------------------------------------------------------------------
   testBrokerEx :: Con -> IO TestResult
   testBrokerEx c = do
-    eiR <- try $ do 
       iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
       oQ <- newWriter c "OUT" tQ1 [] [] oconv
-      writeQ oQ nullType [] text1
-      m <- readQ iQ
-      nack c m
-      threadDelay 50000
-    case eiR of
-      Left (BrokerException   _) -> return Pass
-      Left (ProtocolException e) -> 
-        if "Peer disconnected" `isSuffixOf` e then return Pass
-          else  
-            return $ Fail $ "Not suffixOf: " ++ show e -- Unexpected Exception: " ++ (show e)
-      Left e  -> return $ Fail $ "Unexpected Exception: " ++ show e
-      Right _ -> return $ Fail "Double Ack had no effect!"
+      t  <- action iQ oQ `catch` handler1
+      threadDelay 1000000
+      return t
+    where action iQ oQ = do
+            writeQ oQ nullType [] text1
+            m <- readQ iQ
+            catch (nack c m >> threadDelay 1000000) handler0
+            return $ Fail "Nack had no effect!" 
+          handler0 e = 
+            case e of
+              WorkerException _ -> return ()
+              _                 -> putStrLn $ 
+                                     "Unexpected Exception: " ++ show e
+          handler1 e = 
+            case e of
+              (BrokerException   _) -> return Pass
+              _  -> return $ Fail $ "Unexpected Exception: " ++ show e
+
+  ------------------------------------------------------------------------
+  -- Dead Worker
+  -- Cause the receiver to terminate (using the nack trick)
+  -- If we receive a WorkerException, we are done,
+  -- but have to make sure that the following BrokerException is ignored
+  ------------------------------------------------------------------------
+  testDeadWorker :: Con -> IO TestResult
+  testDeadWorker c = do
+      iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
+      oQ <- newWriter c "OUT" tQ1 [] [] oconv
+      t  <- action iQ oQ `catch` handler
+      return t
+    where action iQ oQ = do
+            writeQ oQ nullType [] text1
+            m <- readQ iQ
+            (do nack c m 
+                threadDelay 1000000
+                return $ Fail "Nack had no effect!") `catch` handler
+          handler e = 
+            case e of
+              WorkerException _   -> return Pass
+              BrokerException _   -> return Pass
+              _  -> return $ Fail $ "Unexpected Exception: " ++ show e
 
   ------------------------------------------------------------------------
   -- NestedTx
@@ -1340,7 +1428,7 @@ where
   testWaitBroker :: Int -> IO TestResult
   testWaitBroker p = do
     eiR <- try $ withConnection host p 
-                               [OWaitBroker 100] [] $ \_ -> return Pass
+                               [OWaitBroker 1000] [] $ \_ -> return Pass
     case eiR of
        Left (ProtocolException e) -> 
          if "Peer disconnected" `isSuffixOf` e then return Pass
@@ -1415,6 +1503,48 @@ where
          if "Missing HeartBeat," `isInfixOf` e then return Pass
            else return $ Fail $ "Unexpected Protocol Exception: " ++ e
        Left  e -> return $ Fail $ "Unexpected Exception: " ++ show e
+
+  ------------------------------------------------------------------------
+  -- Cause Exception in receiver
+  ------------------------------------------------------------------------
+  -- connect 
+  -- send anything (responder answers with nonsense)
+  -- catch exception in main thread
+  ------------------------------------------------------------------------
+  testExc :: Int -> IO TestResult
+  testExc p = 
+    withConnection host p [] [] $ \c -> (
+      withWriter c "test" "/q/out" [] [] (return . U.fromString) $ \w -> do
+        writeQ w nullType [] "cause exception"
+        threadDelay 1000000 
+        return (Fail "No Exception")) `catch` (\e -> 
+          case e of
+            ProtocolException _ -> return Pass
+            _                   -> return $ Fail $ show e)
+
+  ------------------------------------------------------------------------
+  -- Cause Exception in receiver and continue
+  ------------------------------------------------------------------------
+  -- connect 
+  -- send anything (responder answers with nonsense)
+  -- catch exception in main thread
+  -- repeat
+  ------------------------------------------------------------------------
+  testExc2 :: Int -> IO TestResult
+  testExc2 p = 
+    withConnection host p [] [] $ \c -> 
+      withWriter c "test" "/q/out" [] [] (return . U.fromString) $ \w -> do
+        t <- action w
+        case t of
+          Fail e -> return (Fail $ "First failed: " ++ show e)
+          Pass   -> action w
+    where action w = (do
+            writeQ w nullType [] "cause exception"
+            threadDelay 1000000 
+            return (Fail "No Exception")) `catch` (\e -> 
+              case e of
+                ProtocolException _ -> return Pass
+                _                   -> return $ Fail $ show e)
 
   ------------------------------------------------------------------------
   -- Simple Tx
@@ -1496,11 +1626,30 @@ where
   -- shall connect with passed parameters
   ------------------------------------------------------------------------
   stdCon :: Int -> (Con -> IO TestResult) -> IO TestResult
-  stdCon port = withConnection host port [] []
+  stdCon p = withConnection host p [] []
+
+  ------------------------------------------------------------------------
+  -- Secure Connection
+  ------------------------------------------------------------------------
+  secureCon :: Int -> (Con -> IO TestResult) -> IO TestResult
+  secureCon p = withConnection host p [OTLS cfg] []
+    where tlss = TLSSettingsSimple {
+                    settingDisableCertificateValidation = True,
+                    settingDisableSession               = False,
+                    settingUseServerName                = False}
+          cfg  = (tlsClientConfig p $ U.fromString host){
+                  tlsClientTLSSettings=tlss}
 
   testWith :: Int -> (Con -> IO TestResult) -> IO TestResult
-  testWith port act = do
-    eiR <- try $ stdCon port act
+  testWith p act = do
+    eiR <- try $ stdCon p act
+    case eiR of
+       Left  e -> return $ Fail $ show e
+       Right r -> return r
+
+  testSecure :: Int -> (Con -> IO TestResult) -> IO TestResult
+  testSecure p act = do
+    eiR <- try $ secureCon p act
     case eiR of
        Left  e -> return $ Fail $ show e
        Right r -> return r

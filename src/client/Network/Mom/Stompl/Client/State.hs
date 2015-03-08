@@ -5,7 +5,7 @@ module State (
          connected, getVersion, getErr,
          Copt(..),
          oHeartBeat, oMaxRecv,
-         oAuth, oCliId, oStomp, oTmo, oSecurity,
+         oAuth, oCliId, oStomp, oTmo, oTLS,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -13,7 +13,7 @@ module State (
          Message(..), mkMessage, MsgId(..),
          Subscription(..), mkSub,
          logSend, logReceive,
-         addCon, rmCon, getCon, withCon,
+         addCon, rmCon, getCon, withCon, updCon,
          addSub, addDest, getSub, getDest,
          rmSub, rmDest,
          mkTrn,
@@ -106,7 +106,6 @@ where
                                                -- after connect
                       conBeat    :: F.Heart, -- the heart beat
                       conChn     :: Chan F.Frame, -- sender channel
-                      conHThrd   :: Maybe ThreadId, -- heart beat thread
                       conErrM    :: String, -- connection error
                       conBrk     :: Bool,
                       conOwner   :: ThreadId,
@@ -129,7 +128,7 @@ where
                              Chan F.Frame          -> ThreadId -> 
                              UTCTime               -> [Copt]   -> Connection
   mkConnection cid host port mx usr pwd ci vs hs chn myself t os = 
-    Connection cid host port mx usr pwd ci "" "" vs hs chn Nothing "" False 
+    Connection cid host port mx usr pwd ci "" "" vs hs chn "" False 
                    myself t t (oWaitBroker os) [] [] [] [] [] []
 
   -------------------------------------------------------------------------
@@ -180,10 +179,10 @@ where
     --   If the value is <= 0, the program will wait forever.
     OTmo Int |
 
-    -- | Security: 'TLSClientConfig'
-    --             (see 'Data.Conduit.Network.TLS' for details).
+    -- | TLS: 'TLSClientConfig'
+    --        (see 'Data.Conduit.Network.TLS' for details).
     --   If the parameter is not given, no security measure is taken.
-    OSecurity TLSClientConfig
+    OTLS TLSClientConfig
 
   instance Show Copt where
     show (OWaitBroker i) = "OWaitBroker" ++ show i
@@ -193,7 +192,7 @@ where
     show (OClientId   u) = "OClientId "  ++ u
     show  OStomp         = "OStomp"  
     show (OTmo        i) = "OTmo"        ++ show i
-    show (OSecurity   c) = "OSecurity "  ++ show (tlsClientUseTLS c)
+    show (OTLS        c) = "OTLS      "  ++ show (tlsClientUseTLS c)
 
   instance Eq Copt where
     (OWaitBroker i1) == (OWaitBroker i2) = i1 == i2
@@ -202,7 +201,7 @@ where
     (OAuth    u1 p1) == (OAuth    u2 p2) = u1 == u2 && p1 == p2
     (OClientId   u1) == (OClientId   u2) = u1 == u2
     (OTmo        i1) == (OTmo        i2) = i1 == i2
-    (OSecurity   c1) == (OSecurity   c2) = tlsClientUseTLS c1 && 
+    (OTLS        c1) == (OTLS        c2) = tlsClientUseTLS c1 && 
                                            tlsClientUseTLS c2
     OStomp           == OStomp           = True
     _                == _                = False
@@ -218,7 +217,7 @@ where
   is (OClientId   _) (OClientId  _)  = True
   is (OStomp       ) (OStomp      )  = True
   is (OTmo _       ) (OTmo _      )  = True
-  is (OSecurity _  ) (OSecurity _ )  = True
+  is (OTLS      _  ) (OTLS      _ )  = True
   is _               _               = False
 
   noWait :: Int
@@ -271,10 +270,10 @@ where
               Just (OTmo i) -> i
               _             -> 0
 
-  oSecurity :: String -> Int -> [Copt] -> TLSClientConfig
-  oSecurity h p os = case find (is $ OSecurity dcfg) os of
-                       Just (OSecurity cfg) -> cfg
-                       _                    -> dcfg
+  oTLS :: String -> Int -> [Copt] -> TLSClientConfig
+  oTLS h p os = case find (is $ OTLS dcfg) os of
+                  Just (OTLS cfg) -> cfg
+                  _               -> dcfg
     where dcfg = (tlsClientConfig p $ B.pack h){tlsClientUseTLS=False}
 
   findCon :: Fac.Con -> [Connection] -> Maybe Connection
@@ -344,8 +343,8 @@ where
   setMyTime  :: UTCTime -> Connection -> Connection
   setMyTime t c = c {conMyBeat = t}
 
-  updCon :: Connection -> [Connection] -> [Connection]
-  updCon c cs = let !c' = delete' c cs in c:c'
+  _updCon :: Connection -> [Connection] -> [Connection]
+  _updCon c cs = let !c' = delete' c cs in c:c'
   
   ------------------------------------------------------------------------
   -- Transaction 
@@ -481,6 +480,12 @@ where
   getCon cid = withCon cid $ \c -> return (c, c) 
 
   ------------------------------------------------------------------------
+  -- update connection 
+  ------------------------------------------------------------------------
+  updCon :: Fac.Con -> Connection -> IO ()
+  updCon cid c = withCon cid $ \_ -> return (c, ()) 
+
+  ------------------------------------------------------------------------
   -- remove connection from state
   ------------------------------------------------------------------------
   rmCon :: Fac.Con -> IO ()
@@ -500,7 +505,7 @@ where
                  "No such Connection: " ++ show cid
        Just c    -> do
          (c', x) <- op c
-         let cs' = updCon c' cs
+         let cs' = _updCon c' cs
          return (cs', x))
 
   ------------------------------------------------------------------------

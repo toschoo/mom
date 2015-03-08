@@ -12,11 +12,10 @@ SUTDIR = Network/Mom/Stompl
 CLIENT = Client
 
 SUBSRC = $(SUTDIR)/Client/Stream.hs \
-         $(SUTDIR)/Client/Socket.hs \
+         $(SUTDIR)/Client/Exception.hs \
          $(SUTDIR)/Client/Factory.hs \
          $(SUTDIR)/Client/State.hs \
-         $(SUTDIR)/Client/Queue.hs \
-	 $(SUTDIR)/Client/Patterns.hs
+         $(SUTDIR)/Client/Queue.hs 
 
 GHC = ghc
 FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all
@@ -113,15 +112,14 @@ $(SMOKEDIR)/cl1:	$(SMOKEDIR)/cl1.hs $(SUBSRC)
 $(SMOKEDIR)/contx1:	$(SMOKEDIR)/contx1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
-suite:	$(TDIR)/tprotocol \
-	$(TDIR)/tstate    \
-	$(TDIR)/responder \
+# Review and add tstate
+suite:	$(TDIR)/responder \
         $(TDIR)/tdialogs
 
+# Review and add tstate
 run:	$(suite)
 	$(TDIR)/responder &
-	$(TDIR)/tprotocol
-	$(TDIR)/tstate
+	../tls/test/smoke/bridgetls 61619 61613 &
 	$(TDIR)/tdialogs 61613
 
 $(TDIR)/responder:	$(TDIR)/responder.hs $(SUBSRC)

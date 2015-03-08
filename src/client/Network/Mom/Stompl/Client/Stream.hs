@@ -17,7 +17,7 @@ where
   import           Control.Concurrent.MVar
   import           Control.Applicative ((<$>))
   import           Control.Monad (unless, when)
-  import           Control.Exception (throwIO, finally, SomeException)
+  import           Control.Exception (finally, SomeException)
   import qualified Control.Exception as Ex (try)
   import           Control.Monad (forever)
   import           Control.Monad.Trans (liftIO)
@@ -25,17 +25,19 @@ where
 
   import qualified Data.Attoparsec.ByteString as A 
 
+  type EH = StomplException -> IO ()
+
   maxStep :: Int
   maxStep = 1000
 
   sender :: AppData -> Chan F.Frame -> IO ()
   sender ad ip =  pipeSource ip $$ stream =$ appSink ad
 
-  receiver :: AppData -> Chan F.Frame -> IO ()
-  receiver ad ip = appSource ad $$ parseC =$ pipeSink ip -- wohin? 
+  receiver :: AppData -> Chan F.Frame -> EH -> IO ()
+  receiver ad ip eh = appSource ad $$ parseC eh =$ pipeSink ip 
 
   pipeSink :: Chan F.Frame -> C.Sink F.Frame IO ()
-  pipeSink ch = C.awaitForever (\i -> liftIO (writeChan ch i))
+  pipeSink ch = C.awaitForever (liftIO . writeChan ch)
 
   pipeSource :: Chan F.Frame -> C.Source IO F.Frame
   pipeSource ch = forever (liftIO (readChan ch) >>= C.yield)
@@ -43,20 +45,24 @@ where
   stream :: C.ConduitM F.Frame B.ByteString IO ()
   stream = C.awaitForever (C.yield . F.putFrame)
 
-  parseC :: C.ConduitM B.ByteString F.Frame IO ()
-  parseC = go (A.parse stompParser) 0
-    where go prs step = do
+  parseC :: EH -> C.ConduitM B.ByteString F.Frame IO ()
+  parseC eh = goOn
+    where goOn = go (A.parse stompParser) 0
+          go prs step = do
             mbNew <- C.await
             case mbNew of 
               Nothing -> return ()
               Just s  -> case parseAll prs s of
-                           Left e -> liftIO (throwP e)
+                           Left e -> liftIO (eh $ ProtocolException e)
+                                     >> goOn
                            Right (prs', fs) -> do
                              step' <- if null fs then return (step+1) 
                                                  else mapM_ C.yield fs >>
                                                       return 0
                              if step' > maxStep 
-                               then liftIO (throwP "Message too long!")
+                               then liftIO (eh $ ProtocolException 
+                                                 "Message too long!") 
+                                    >> goOn
                                else go prs' step'
 
   type Parser = B.ByteString -> A.Result F.Frame
@@ -73,5 +79,3 @@ where
                                 Left e           -> Left e
                                 Right (prs', fs) -> Right (prs',f:fs)
 
-  throwP :: String -> IO a
-  throwP e = throwIO $ ProtocolException e

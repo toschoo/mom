@@ -14,7 +14,6 @@ module Network.Mom.Stompl.Client.Exception (
 where
 
   import Control.Exception hiding (try)
-  import Prelude           hiding (catch)
   import Control.Applicative ((<$>))
   import Data.Typeable (Typeable)
 
@@ -23,10 +22,17 @@ where
   --   to the user application.
   ------------------------------------------------------------------------
   data StomplException =
-                       -- | Thrown
-                       --   on problems with the socket, /e.g./
-                       --   when a message cannot be sent
+                       -- | Currently not used
                        SocketException   String
+                       -- | Thrown
+                       --   when a worker thread terminates
+                       --   unexpectedly;
+                       --   usually, this is a consequence 
+                       --   of another error (/e.g./ the broker
+                       --   closed the socket) and you will
+                       --   probably receive another exception
+                       --   (/e.g./ a BrokerException)
+                       | WorkerException String
                        -- | Thrown when something 
                        --   against the protocol happens, /e.g./
                        --   an unexpected frame is received

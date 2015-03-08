@@ -16,7 +16,6 @@ where
 
   import State
   import Factory
-  import qualified Protocol as P
   import qualified Network.Mom.Stompl.Frame as F
 
   --------------------------------------------------------
@@ -186,7 +185,7 @@ where
   -------------------------------------------------------------
   prp_addOneAckCon :: Property
   prp_addOneAckCon = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testCon2 (tstAddAck msg) (conHas conAcks msg)
     where tstAddAck m cid = addAck cid m
 
@@ -195,7 +194,7 @@ where
   -------------------------------------------------------------
   prp_addOneAckTx :: Property
   prp_addOneAckTx = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testTx (tstAddAck msg) (txHas conAcks txAcks msg)
     where tstAddAck m cid = addAck cid m
 
@@ -204,7 +203,7 @@ where
   -------------------------------------------------------------
   prp_addRmOneAckCon :: Property
   prp_addRmOneAckCon = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testCon2 (tstAddRmAck msg) (conHasNo conAcks)
     where tstAddRmAck m cid = addAck cid m >> rmAck cid m
 
@@ -213,7 +212,7 @@ where
   -------------------------------------------------------------
   prp_addRmOneAckTx :: Property
   prp_addRmOneAckTx = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testTx (tstAddAck msg) (txHasNot conAcks txAcks msg)
     where tstAddAck m cid = addAck cid m >> rmAck cid m
 
@@ -222,7 +221,7 @@ where
   -------------------------------------------------------------
   prp_addAckCon :: Number -> Property
   prp_addAckCon (No n) = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testCon2 (tstAddAck msg) (conHas conAcks msg)
     where tstAddAck msg cid = addAcks n cid >> addAck cid msg
 
@@ -231,7 +230,7 @@ where
   -------------------------------------------------------------
   prp_addRmAckCon :: Number -> Property
   prp_addRmAckCon (No n) = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testCon2 (tstAddAck msg) (conHasNot conAcks msg)
     where tstAddAck msg cid = addAck cid msg >> addAcks n cid >> rmAck cid msg
 
@@ -240,7 +239,7 @@ where
   -------------------------------------------------------------
   prp_addAckTx :: Number -> Property
   prp_addAckTx (No n) = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testTx (tstAddAck msg) (txHas conAcks txAcks msg)
     where tstAddAck msg cid = addAcks n cid >> addAck cid msg
 
@@ -249,7 +248,7 @@ where
   -------------------------------------------------------------
   prp_addRmAckTx :: Number -> Property
   prp_addRmAckTx (No n) = monadicIO $ do
-    let msg = P.MsgId "100"
+    let msg = MsgId "100"
     testTx (tstAddRmAck msg) (txHasNot conAcks txAcks msg)
     where tstAddRmAck msg cid = addAck cid msg >> addAcks n cid >> rmAck cid msg
 
@@ -467,11 +466,15 @@ where
   -- some magic do get a connection
   -------------------------------------------------------------
   {-# NOINLINE con #-}
-  con :: MVar P.Connection
+  con :: MVar Connection
   con = unsafePerformIO $ do
-    c <- P.connect "127.0.0.1" 22222 1024 "guest" "guest" "" F.Connect
-                   [(1,0), (1,1)] (0,0) []
-    _ <- P.disc c
+    cid <- mkUniqueConId
+    ch  <- newChan
+    me  <- myThreadId
+    now <- getCurrentTime
+    let c = mkConnection cid "localhost" 22222
+                         0 "guest" "guest" "" [(1,2)] [(0,0)] 
+                         ch me now []
     newMVar c
 
   -------------------------------------------------------------
@@ -524,7 +527,7 @@ where
   -------------------------------------------------------------
   addAcks :: Int -> Con -> IO ()
   addAcks n = add addAck mkMsg n 
-    where mkMsg = return . P.MsgId . show 
+    where mkMsg = return . MsgId . show 
 
   -------------------------------------------------------------
   -- addRecs
