@@ -30,7 +30,7 @@ where
                        "and nothing else.")
 
   bridge :: Int -> Int -> IO ()
-  bridge c s = client2TLS (serverSettings c hp) cfg $ meep False
+  bridge c s = client2TLS out (serverSettings c hp) cfg $ meep False
                  
     where tlss = TLSSettingsSimple {
                     settingDisableCertificateValidation = True,

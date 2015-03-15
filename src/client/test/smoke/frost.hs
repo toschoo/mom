@@ -4,11 +4,11 @@ where
   import Network.Mom.Stompl.Client.Queue
   import qualified Data.ByteString.Char8 as B
   import System.Environment
-  import System.Exit
   import Network.Socket
   import Codec.MIME.Type    (nullType)
   import Control.Monad      (forever)
   import Control.Concurrent (threadDelay)
+  import Data.Char (isDigit)
 
   delay :: Int
   delay = 500000
@@ -17,14 +17,14 @@ where
   main = do
     os <- getArgs
     case os of
-      [q] -> withSocketsDo $ conAndSend q 
-      _   -> do
-        putStrLn "I need a queue name."
-        exitFailure
+      [p, q] -> if all isDigit p 
+                  then withSocketsDo $ conAndSend (read p) q 
+                  else error $ "port is not numeric: " ++ p
+      _   -> error "I need a port and a queue name."
 
-  conAndSend :: String -> IO ()
-  conAndSend qn = do
-    withConnection "127.0.0.1" 61613 [] [] $ \c -> do
+  conAndSend :: Int -> String -> IO ()
+  conAndSend p qn = do
+    withConnection "127.0.0.1" p [] [] $ \c -> do
       let conv = return . B.pack
       q <- newWriter c "Test-Q" qn [] [] conv
       forever $ frost q

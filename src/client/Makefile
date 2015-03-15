@@ -114,13 +114,16 @@ $(SMOKEDIR)/contx1:	$(SMOKEDIR)/contx1.hs $(SUBSRC)
 
 # Review and add tstate
 suite:	$(TDIR)/responder \
-        $(TDIR)/tdialogs
+        $(TDIR)/tdialogs \
+        $(TDIR)/tstate
 
 # Review and add tstate
 run:	$(suite)
 	$(TDIR)/responder &
-	../tls/test/smoke/bridgetls 61619 61613 &
+	../tls/test/smoke/bridgetls 61619 61613 >/dev/null 2>&1 &
+	$(TDIR)/tstate
 	$(TDIR)/tdialogs 61613
+	for proc in $$(ps -fu ts | grep bridgetls | grep -v grep | awk '{print $$2}');do kill $$proc ;done
 
 $(TDIR)/responder:	$(TDIR)/responder.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@

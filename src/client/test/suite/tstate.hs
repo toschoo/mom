@@ -465,17 +465,6 @@ where
   -------------------------------------------------------------
   -- some magic do get a connection
   -------------------------------------------------------------
-  {-# NOINLINE con #-}
-  con :: MVar Connection
-  con = unsafePerformIO $ do
-    cid <- mkUniqueConId
-    ch  <- newChan
-    me  <- myThreadId
-    now <- getCurrentTime
-    let c = mkConnection cid "localhost" 22222
-                         0 "guest" "guest" "" [(1,2)] [(0,0)] 
-                         ch me now []
-    newMVar c
 
   -------------------------------------------------------------
   -- before/after apply action n connections
@@ -555,10 +544,13 @@ where
   -------------------------------------------------------------
   mkC :: Con -> IO Connection
   mkC cid = do
+    ch  <- newChan
     me  <- myThreadId
     now <- getCurrentTime
-    c   <- readMVar con
-    return $ mkConnection cid c me now []
+    return $ mkConnection cid "localhost" 22222 -- why not addCon
+                              0 "guest" "guest" ""
+                              [(1,2)] (0,0) 
+                              ch me now []
 
   -------------------------------------------------------------
   -- controlled quickcheck, arbitrary tests

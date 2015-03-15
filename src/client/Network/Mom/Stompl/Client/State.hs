@@ -2,7 +2,7 @@
 module State (
          msgContent, numeric, ms,
          Connection(..), mkConnection,
-         connected, getVersion, getErr,
+         connected, getVersion, 
          Copt(..),
          oHeartBeat, oMaxRecv,
          oAuth, oCliId, oStomp, oTmo, oTLS,
@@ -106,7 +106,6 @@ where
                                                -- after connect
                       conBeat    :: F.Heart, -- the heart beat
                       conChn     :: Chan F.Frame, -- sender channel
-                      conErrM    :: String, -- connection error
                       conBrk     :: Bool,
                       conOwner   :: ThreadId,
                       conHisBeat :: UTCTime,
@@ -128,7 +127,7 @@ where
                              Chan F.Frame          -> ThreadId -> 
                              UTCTime               -> [Copt]   -> Connection
   mkConnection cid host port mx usr pwd ci vs hs chn myself t os = 
-    Connection cid host port mx usr pwd ci "" "" vs hs chn "" False 
+    Connection cid host port mx usr pwd ci "" "" vs hs chn False 
                    myself t t (oWaitBroker os) [] [] [] [] [] []
 
   -------------------------------------------------------------------------
@@ -154,12 +153,14 @@ where
     --   This option is currently ignored.
     --   Instead, 'Data.Conduit.Network' defines
     --   the packet size (currently hard-wired 4KB).
-    --   The maximum message size is 1000 times this value,
-    --   /i.e./ 4000KB.
+    --   The maximum message size is 1024 times this value,
+    --   /i.e./ 4MB.
     OMaxRecv    Int |
 
     -- | This option defines the client\'s bid
-    --   for negotiating heart beats (see 'F.HeartBeat'). 
+    --   for negotiating heartbeats providing 
+    --   an accepted lower and upper bound
+    --   expessed as milliseconds between heartbeats.
     --   By default, no heart beats are sent or accepted
     OHeartBeat  (F.Heart) |
 
@@ -173,15 +174,17 @@ where
     --   a "STOMP" frame instead of a "CONNECT" frame
     OStomp |
 
-    -- | Connect timeout in milliseconds;
+    -- | Connection timeout in milliseconds;
     --   if the broker does not respond to a connect request
     --   within this time frame, a 'ConnectException' is thrown.
     --   If the value is <= 0, the program will wait forever.
     OTmo Int |
 
-    -- | TLS: 'TLSClientConfig'
-    --        (see 'Data.Conduit.Network.TLS' for details).
-    --   If the parameter is not given, no security measure is taken.
+    -- | 'TLSClientConfig'
+    --        (see 'Data.Conduit.Network.TLS' for details)
+    --   for TLS connections.
+    --   If the parameter is not given, 
+    --      a plain TCP/IP connection is used.
     OTLS TLSClientConfig
 
   instance Show Copt where
@@ -300,10 +303,7 @@ where
   -- Connection interfaces
   ---------------------------------------------------------------------
   connected :: Connection -> Bool
-  connected c = conBrk c
-
-  getErr :: Connection -> String
-  getErr = conErrM
+  connected = conBrk 
 
   getVersion :: Connection -> F.Version
   getVersion c = if null (conVers c) 
@@ -406,10 +406,11 @@ where
             --   a value /> 0/ is given, the transaction will
             --   wait for pending receipts; otherwise
             --   the transaction will be aborted with 'TxException'.
-            --   Note that it, usually, does not make sense to use
-            --   this options without 'OTimeout',
-            --   since it is in all probability that a receipt 
-            --   has not yet been confirmed when the transaction terminates.
+            --   Note that it usually does not make sense to use
+            --   this option without 'OTimeout',
+            --   since, in all probability, there will be receipts 
+            --   that have not yet been confirmed 
+            --   when the transaction terminates.
             | OWithReceipts 
             -- | If a message has been received from a 
             --   queue with 'OMode' option other 
@@ -826,6 +827,4 @@ where
                                              msgTx   = tx,
                                              msgRaw  = raw,
                                              msgCont = cont}
-
-    
 

@@ -1,7 +1,7 @@
 Name:            stomp-queue
-Version:         0.1.4
+Version:         0.2.0
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2014
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2015
 License:         LGPL
 license-file:    license/lgpl-3.0.txt
 Author:          Tobias Schoofs
@@ -24,10 +24,8 @@ Description:
   The Stomp Queue library provides 
   a Stomp client, using abstractions like
   'Connection', 'Transaction', 'Queue' and 'Message'.
-  This basic abstractions are implemented in the module /Queue/.
-  The /Patterns/ module adds an abstraction layer
-  on top of queues, in particular an implementation
-  of the /client-server/ pattern.
+  The library may use TLS for secure connections 
+  to brokers that provide security over TLS.
 
   .
 
@@ -39,6 +37,29 @@ Description:
   .
 
   Release History:
+
+  .
+
+  [0.2.0] Changes:
+
+          .
+
+          - Low-level sockets were replaced by network-conduit-tls
+            (Be aware that this change might introduce some
+             subtle changes in behaviour concerning in particular 
+             performance and connection handling)
+
+          .
+
+          - OMaxRecv not used anymore
+
+          .
+
+          - New Option OTLS for TLS connections
+
+          .
+
+          - New Option OTmo to specify a connection timeout
 
   .
 
@@ -157,20 +178,23 @@ Description:
 
 
 Library
-  Build-Depends:   base        >= 4.0 && <= 5.0,
-                   bytestring  >= 0.10,
-                   utf8-string >= 0.3.6,
-                   attoparsec  >= 0.9.1.1,
-                   split       >= 0.1.4.1,
-                   network     >= 2.4.0.0,
-                   stompl      >= 0.1.1,
-                   mime        >= 0.3.3,
-                   time        >= 1.1.4
+  Build-Depends:   base                >= 4.0 && <= 5.0,
+                   bytestring          >= 0.10,
+                   utf8-string         >= 0.3.6,
+                   attoparsec          >= 0.9.1.1,
+                   split               >= 0.1.4.1,
+                   mtl                 >= 2.2.0.1,
+                   conduit             >= 1.2.3.1,
+                   conduit-extra       >= 1.1.6.2,
+                   network-conduit-tls >= 1.1.0.2,
+                   stompl              >= 0.1.1,
+                   mime                >= 0.3.3,
+                   time                >= 1.1.4
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, 
                    Network.Mom.Stompl.Client.Exception,
                    Network.Mom.Stompl.Client.Patterns
-  other-modules: Socket, Protocol, State, Factory
+  other-modules: Stream, State, Factory
 

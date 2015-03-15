@@ -7,7 +7,14 @@
 -- Stability  : experimental
 -- Portability: portable
 --
--- Exceptions for the Stompl Client
+-- Exceptions for the Stompl Client.
+-- Note that exceptions thrown in internal worker threads
+-- (sender and listener) will be forwarded to the connection owner,
+-- that is the thread that actually initialised the connection.
+-- Since, in some circumstances, several exceptions may be thrown
+-- in response to one error event (/e.g./ the broker sends an error frame
+-- and, immediately afterwards, closes the connection),
+-- the connection owner should implement a robust exception handling mechanism.
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Client.Exception (
                           StomplException(..), try, convertError)
@@ -18,8 +25,7 @@ where
   import Data.Typeable (Typeable)
 
   ------------------------------------------------------------------------
-  -- | The Stompl Client uses exceptions to communicate errors
-  --   to the user application.
+  -- The Stompl Exception
   ------------------------------------------------------------------------
   data StomplException =
                        -- | Currently not used
@@ -46,7 +52,7 @@ where
                        --   pending acks
                        | TxException       String
                        -- | Thrown on connection errors, /e.g./
-                       --   connection was disconnected
+                       --   connection was closed
                        | ConnectException  String
                        -- | Should be thrown 
                        --   by user-defined converters

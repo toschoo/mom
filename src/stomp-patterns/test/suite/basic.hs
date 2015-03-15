@@ -136,7 +136,7 @@ where
               Just m  -> msgContent m
           withReq m cl = 
             void $ forkIO (do
-              mbM <- request cl 100000 nullType [] is
+              mbM <- request cl 200000 nullType [] is
               modifyMVar_ m $ \rs -> return (mbM:rs))
 
   -- with error / with and without registry ------------------------------
@@ -215,7 +215,7 @@ where
     assert (s == is)
     where collectR m rs stp | stp > 10  = throwIO $ TimeoutX "on MVar!"
                             | otherwise = do 
-            mbR <- timeout 50000 $ takeMVar m
+            mbR <- timeout 100000 $ takeMVar m
             case mbR of
               Nothing -> collectR m rs (stp+1)
               Just r  -> let rs' = r:rs

@@ -125,34 +125,54 @@ where
         t130  = mkTest "Tx all ack'd             " $ testWith p testPendingAcksPass 
         t140  = mkTest "Auto Ack                 " $ testWith p testAutoAck 
         t150  = mkTest "With Receipt1            " $ testWith p testQWithReceipt
+        t590  = mkTest "With Receipt1 (sec.)     " $ testSecure sPort testQWithReceipt
         t160  = mkTest "Wait on Receipt1         " $ testWith p testQWaitReceipt
+        t600  = mkTest "Wait on Receipt1 (sec.)  " $ testSecure sPort testQWaitReceipt
         t170  = mkTest "ackWith                  " $ testWith p testTxAckWith
+        t610  = mkTest "ackWith (sec.)           " $ testSecure sPort testTxAckWith
         t175  = mkTest "frmToMsg with ack header " $ testWith p (testFrmToMsg True)
+        t620  = mkTest "frmToMsg w ack h. (sec.) " $ testSecure sPort (testFrmToMsg True)
         t176  = mkTest "frmToMsg w/o  ack header " $ testWith p (testFrmToMsg False)
+        t630  = mkTest "frmToMsg w/o ack h (sec.)" $ testSecure sPort (testFrmToMsg False)
         -- stompserver and coilmq do not support nack!
         -- t180  = mkTest "Tx all nack'd            " $ testWith p testPendingNacksPass 
         -- t190  = mkTest "nackWith                 " $ testWith p testTxNackWith
         t200  = mkTest "Begin Rec no Tmo, fast   " $ testWith p testTxRecsNoTmoFail
+        t640  = mkTest "Begin Rec no Tmo, fast se" $ testSecure sPort testTxRecsNoTmoFail
         t205  = mkTest "Begin Rec no Tmo, slow   " $ testWith p testTxRecsNoTmoPass
+        t650  = mkTest "Begin Rec no Tmo, slow se" $ testSecure sPort testTxRecsNoTmoPass
         t210  = mkTest "Pending Receipts    Tmo  " $ testWith p testTxRecsTmo
         t220  = mkTest "Receipts not cleared     " $ testWith p testTxQRec
         t230  = mkTest "Receipts cleared         " $ testWith p testTxQRecWait
         t240  = mkTest "Recs not cleared + Tmo   " $ testWith p testTxQRecTmo
         t250  = mkTest "Nested Transactions      " $ testWith p testNestedTx
+        t660  = mkTest "Nested Transactions (sec)" $ testSecure sPort testNestedTx
         t260  = mkTest "Nested Tx with foul one  " $ testWith p testNstTxAbort
+        t670  = mkTest "Nested Tx with foul (sec)" $ testSecure sPort testNstTxAbort
         t270  = mkTest "Nested Tx one missing Ack" $ testWith p testNstTxMissingAck
+        t680  = mkTest "Nested Tx one m. Ack (se)" $ testSecure sPort testNstTxMissingAck
         t280  = mkTest "BrokerException          " $ testWith p testBrokerEx 
+        -- Nice test, but:
+        -- since we are working with a bridge, the connection will not be closed
+        -- after the error message -- and we only have one exception...
+        -- t690  = mkTest "BrokerException (sec.)   " $ testSecure sPort testBrokerEx 
         t290  = mkTest "Converter error          " $ testWith p testConvertEx
+        t700  = mkTest "Converter error (sec.)   " $ testSecure sPort testConvertEx
         t300  = mkTest "Cassandra Complex        " $ testWith p testConvComplex
+        t710  = mkTest "Cassandra Complex (sec.) " $ testSecure sPort testConvComplex
         t310  = mkTest "Share connection         " $ testWith p testShareCon 
+        t720  = mkTest "Share connection (sec.)  " $ testSecure sPort testShareCon 
         t320  = mkTest "Share queue              " $ testWith p testShareQ 
+        t730  = mkTest "Share queue (sec.)       " $ testSecure sPort testShareQ 
         t330  = mkTest "Share tx                 " $ testWith p testShareTx
+        t740  = mkTest "Share tx (sec.)          " $ testSecure sPort testShareTx
         t340  = mkTest "Share tx with abort      " $ testWith p testShareTxAbort
+        t750  = mkTest "Share tx abort (sec.)    " $ testSecure sPort testShareTxAbort
         t350  = mkTest "Nested con - independent " $ testNstConInd  p
         t360  = mkTest "Nested con - interleaved " $ testNstConX    p
         t370  = mkTest "Nested con - inner fails " $ testNstConFail p
         -- Socket closed, before receipt is received... 
-        t375  = mkTest "Wait Broker              " $ testWaitBroker p
+        -- t375  = mkTest "Wait Broker              " $ testWaitBroker p
         t380  = mkTest "HeartBeat                " $ testBeat       p
         t390  = mkTest "HeartBeat Responder      " $ testBeatR      22222
         t400  = mkTest "HeartBeat Responder Fail " $ testBeatRfail  22222
@@ -164,10 +184,12 @@ where
           t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270, t280, t290, t300,
-         t310, t320, t330, t340, t350, t360, t370, {- t375 -}  t380, t390, t400,
+         t310, t320, t330, t340, t350, t360, t370, t380, t390, t400,
          t410, t420, t430,
          -- secure tests
-         t510, t520, t530, t540, t550, t560, t570, t575, t576, t580] 
+         t510, t520, t530, t540, t550, t560, t570, t575, t576, t580, t590, t600,
+         t610, t620, t630, t640, t650, t660, t670,             t680,       t700,
+         t710, t720, t730, t740, t750] 
 
   ------------------------------------------------------------------------
   -- Connect with IP Address
@@ -969,10 +991,10 @@ where
 
   ------------------------------------------------------------------------
   -- Broker Exception
-  -- the trick is that some brokers do not support nack
+  -- the trick is that some brokers create an error message on nack
   -- we need two exception handlers,
   -- because the broker will close the connection
-  -- after receiving an invalid frame, which will cause
+  -- after creating an error message, which will cause
   -- a "receiver terminated" exception.
   -- But that is not the one, we want to handle!
   ------------------------------------------------------------------------
@@ -980,22 +1002,32 @@ where
   testBrokerEx c = do
       iQ <- newReader c "IN"  tQ1 [OMode Client] [] iconv
       oQ <- newWriter c "OUT" tQ1 [] [] oconv
-      t  <- action iQ oQ `catch` handler1
-      threadDelay 1000000
-      return t
-    where action iQ oQ = do
+      x  <- newMVar (0::Int)
+      catch (action iQ oQ x
+               >> threadDelay 1000000 
+               >> return (Fail "Nack had no effect"))
+            (handler1 x)
+    where action iQ oQ x = do
             writeQ oQ nullType [] text1
             m <- readQ iQ
-            catch (nack c m >> threadDelay 1000000) handler0
-            return $ Fail "Nack had no effect!" 
-          handler0 e = 
+            catch (nack c m >> threadDelay 1000000) (handler0 x)
+          handler0 x e = 
             case e of
-              WorkerException _ -> return ()
-              _                 -> putStrLn $ 
-                                     "Unexpected Exception: " ++ show e
-          handler1 e = 
+              WorkerException _ -> modifyMVar_ x (\_ -> return 1) 
+              BrokerException _ -> modifyMVar_ x (\_ -> return 2)
+              _                 -> putStrLn (
+                                     "Unexpected Exception: " ++ show e) 
+                                   >> modifyMVar_ x (\_ -> return 3)
+          handler1 x e = 
             case e of
-              (BrokerException   _) -> return Pass
+              BrokerException _ -> withMVar x $ \i ->
+                                     if i == 1 then return Pass 
+                                               else return (Fail
+                                                "Two BrokerExceptions!")
+              WorkerException _ -> withMVar x $ \i ->
+                                     if i == 2 then return Pass
+                                               else return (Fail 
+                                                "Two WorkerExceptions!")
               _  -> return $ Fail $ "Unexpected Exception: " ++ show e
 
   ------------------------------------------------------------------------

@@ -33,7 +33,7 @@ where
                        "and nothing else.")
 
   bridge :: Int -> Int -> IO ()
-  bridge c s = tls2Server s (tlsConfig hp c certs keyStore) $ 
+  bridge c s = tls2Server s out (tlsConfig hp c certs keyStore) $ 
                  forever $ meep False
     where meep t = do threadDelay 100000
                       let o = if t then "\bo" else "\bO"

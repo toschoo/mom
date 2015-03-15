@@ -183,7 +183,7 @@ $(TDIR)/mem1:	$(TDIR)/Common.hs $(TDIR)/mem1.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
 run:	suite
-	stompserver -p61615 1>/dev/null &
+	stompserver -p61615 1>/dev/null 2>&1 &
 	sleep 1
 	$(TDIR)/registry 
 	$(TDIR)/basic

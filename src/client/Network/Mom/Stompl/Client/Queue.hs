@@ -50,7 +50,7 @@ module Network.Mom.Stompl.Client.Queue (
                    Tx,
                    withTransaction,
                    Topt(..), abort, 
-                   -- * Acknowledgements
+                   -- * Acknowledgement
                    -- $stomp_acks
                    ack, ackWith, nack, nackWith,
 #ifdef TEST
@@ -63,11 +63,6 @@ module Network.Mom.Stompl.Client.Queue (
                    )
 
 where
-  ----------------------------------------------------------------
-  -- todo
-  -- -- pass a logger (name) to withConnection
-  -- - test/check for deadlocks
-  ----------------------------------------------------------------
 
   import           Stream
   import           Factory  
@@ -76,19 +71,17 @@ where
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
 
-  import qualified Network.Connection as NC
-
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.List (find)
   import           Data.Time.Clock
-  import           Data.Maybe (isJust, isNothing, fromJust)
+  import           Data.Maybe (isNothing)
   import           Data.Conduit.Network
   import           Data.Conduit.Network.TLS
 
   import           Control.Concurrent 
   import           Control.Applicative ((<$>))
-  import           Control.Monad (when, unless, void, forever)
+  import           Control.Monad (when, unless, forever)
   import           Control.Exception (bracket, finally, catches, onException,
                                       AsyncException(..), Handler(..),
                                       throwIO, SomeException)
@@ -213,7 +206,7 @@ where
      On sending messages, 
      receipt handling can be made explict.
      The function 'writeQWith'
-     requests a receipt to the message
+     requests a receipt for the message it sends
      and returns it to the caller.
      The application can then, later,
      explicitly wait for the receipt, using 'waitReceipt'.
@@ -272,6 +265,9 @@ where
      A message may also be /negatively acknowledged/ (/nack/). 
      How the broker handles a /nack/, however,
      is not further specified by the Stomp protocol.
+     Some brokers respond with an error frame and
+     close the connection immediately after.
+     This may cause a surprising cascade of exceptions!
   -}
 
   {- $stomp_sample
@@ -324,7 +320,7 @@ where
      >       let p = case msgContent m of
      >                 Ping -> Pong
      >                 Pong -> Ping
-     >       putStrLn $ show p
+     >       print p
      >       writeQ oQ nullType [] p
      >       threadDelay 10000
   -}
@@ -382,14 +378,10 @@ where
   -- errors are communicated by throwing exceptions
   -- to the owner of the connection, where
   -- the owner is the thread that created the connection
-  -- by calling 'withConnection'.
+  -- calling 'withConnection'.
   -- It is therefore advisable to start different connections
   -- in different threads, so that each thread will receive
   -- only exceptions related to the connection it has opened.
-  -- 
-  -- Example:
-  --
-  -- > t <- forkIO $ withConnection "127.0.0.1" 61613 [] [] $ \c -> do
   ------------------------------------------------------------------------
   withConnection :: String -> Int -> [Copt] -> [F.Header] ->
                     (Con -> IO a) -> IO a
@@ -416,22 +408,49 @@ where
         withSender c ad ch $ do
           w <- newEmptyMVar
           withListener c ad cid w $ do
-            connectBroker mx t vers beat hs c
+            connectBroker t vers beat hs c
             whenConnected cid tm beat w act 
 
+  ---------------------------------------------------------------------
+  -- Start the sender threat
+  ---------------------------------------------------------------------
   withSender :: Connection -> AppData -> Chan F.Frame -> IO a -> IO a
-  withSender c ad ch = withThread c "sender" (sender ad ch) -- alert when we lose the sender!
+  withSender c ad ch = withThread c "sender" (sender ad ch) 
 
+  ---------------------------------------------------------------------
+  -- Start the listener threat
+  ---------------------------------------------------------------------
   withListener :: Connection -> AppData -> Con -> MVar () -> IO a -> IO a
-  withListener c ad cid m = withThread c "listener" (listen ad cid m) -- alert when we lose the listener!
+  withListener c ad cid m = withThread c "listener" (listen ad cid m) 
+
+  -----------------------------------------------------------------------
+  -- Connection listener
+  -----------------------------------------------------------------------
+  listen :: AppData -> Con -> MVar () -> IO ()
+  listen ad cid w = do 
+    c   <- getCon cid
+    ch  <- newChan
+    withThread c "receiver" (receiver ad ch (throwToOwner c)) $
+      forever $ do
+        f <- readChan ch
+        logReceive cid
+        case F.typeOf f of
+          F.Connected -> handleConnected cid f w
+          F.Message   -> handleMessage   cid f
+          F.Error     -> handleError     cid f
+          F.Receipt   -> handleReceipt   cid f
+          F.HeartBeat -> handleBeat      cid f
+          _           -> throwToOwner c $ 
+                             ProtocolException $ "Unexpected Frame: " ++
+                             show (F.typeOf f)
 
   ---------------------------------------------------------------------
-  -- the hard work on connecting to a broker
+  -- Send the Connect frame
   ---------------------------------------------------------------------
-  connectBroker :: Int -> F.FrameType -> 
+  connectBroker :: F.FrameType -> 
                    [F.Version] -> F.Heart -> [F.Header] ->
                    Connection -> IO ()
-  connectBroker mx t vs beat hs c = 
+  connectBroker t vs beat hs c = 
     let mk = case t of
                F.Connect -> F.mkConFrame
                F.Stomp   -> F.mkStmpFrame
@@ -441,8 +460,13 @@ where
                 (conUsr  c) (conPwd c) 
                 (conCli  c) vs beat hs of
           Left e  -> throwIO (ConnectException e)
-          Right f -> writeChan (conChn $ c) f 
+          Right f -> writeChan (conChn c) f 
 
+  ---------------------------------------------------------------------
+  -- Waiting for the Connected frame,
+  -- starting the user application and
+  -- disconnecting after
+  ---------------------------------------------------------------------
   whenConnected :: Con -> Int -> F.Heart -> MVar () -> (Con -> IO a) -> IO a
   whenConnected cid tm bt m act = do
     mbT <- if tm <= 0 then Just <$> takeMVar m 
@@ -466,9 +490,10 @@ where
                  disconnect c' (show rc)
                  addRec cid rc
                  waitCon cid rc (conWait c') `onException` rmRec cid rc)
+           period = snd . conBeat
 
   ---------------------------------------------------------------------
-  -- disconnect either on broker level or on tcp/ip level
+  -- disconnect from the broker
   ---------------------------------------------------------------------
   disconnect :: Connection -> String -> IO ()
   disconnect c r
@@ -476,13 +501,10 @@ where
                     Left  e -> throwIO (ConnectException $
                                    "Cannot create Disconnect Frame: " ++ e)
                     Right f -> writeChan (conChn c) f 
-    | otherwise = throwIO (ConnectException $ "Not connected")
-
-  period :: Connection -> Int
-  period = snd . conBeat
+    | otherwise = throwIO (ConnectException "Not connected")
 
   ------------------------------------------------------------------------
-  -- wait for receipt
+  -- wait for receipt on disconnect
   ------------------------------------------------------------------------
   waitCon :: Con -> Receipt -> Int -> IO ()
   waitCon cid rc delay = do
@@ -496,6 +518,42 @@ where
                             show cid ++ ")."
           else do threadDelay $ ms 1
                   waitCon cid rc (delay - 1)
+
+  -----------------------------------------------------------------------
+  -- Starting the internal worker threads:
+  -- - the new thread lives as long as the user action lives
+  -- - if the new thread terminates early, the owner is signalled
+  -- - if the new thread receives a synchronous exception,
+  --      the owner is signalled
+  -----------------------------------------------------------------------
+  withThread :: Connection -> String -> IO () -> IO r -> IO r
+  withThread c nm th act = do
+    m   <- newEmptyMVar
+    x   <- newMVar False
+    tid <- forkIO (theThread x `finally` putMVar m ())
+    (act >>= signalOk x) `finally` (killThread tid >> takeMVar m)
+    where theThread x = (th >> signalEnd x) `catches` hndls
+          hndls = [Handler (\e -> case e of
+                                    ThreadKilled -> throwIO e
+                                    _            -> throwIO e),
+                   Handler (\e -> throwToOwner c $ 
+                                    WorkerException (
+                                      nm ++ " terminated: " ++
+                                      show (e::SomeException)))
+                  ]
+          signalEnd x = do t <- readMVar x
+                           unless t $ throwToOwner c $ WorkerException (
+                                                         nm ++ " terminated")
+          signalOk x r = modifyMVar x $ \_ -> return (True,r)
+
+  -----------------------------------------------------------------------
+  -- Throw to owner
+  -- important: give the owner some time to react
+  --            before continuing and - probably - 
+  --            causing another exception
+  -----------------------------------------------------------------------
+  throwToOwner :: Connection -> StomplException -> IO ()
+  throwToOwner c = throwTo (conOwner c)
     
   ------------------------------------------------------------------------
   -- | A Queue for sending messages.
@@ -536,13 +594,14 @@ where
   data Qopt = 
             -- | A queue created with 'OWithReceipt' will request a receipt
             --   on all interactions with the broker.
-            --   The handling of receipts is usually transparent to applications, 
-            --   but, in the case of sending message, may be made visible 
-            --   by using 'writeQWith' instead of 'writeQ'.
+            --   The handling of receipts is usually not visible to applications, 
+            --   but may be made visible in the case of sending messages
+            --   using 'writeQWith'.
             --   'writeQWith' return the receipt identifier
             --   and the application can later invoke 'waitReceipt'
-            --   to wait for the broker confirming this receipt.
-            --   Note that a 'Reader' created with 'OWithReceipt' will 
+            --   to explicitly wait for the broker confirming this receipt.
+            --
+            --   A 'Reader' created with 'OWithReceipt' will 
             --   issue a request for receipt when subscribing to a Stomp queue.
             OWithReceipt 
             -- | A queue created with 'OWaitReceipt' will wait for the receipt
@@ -568,7 +627,7 @@ where
             --
             --   It is good practice to use /timeout/ with all calls
             --   that may wait for receipts, 
-            --   /ie/ 'newReader' and 'withReader' 
+            --   /i.e./ 'newReader' and 'withReader' 
             --   with options 'OWithReceipt' or 'OWaitReceipt',
             --   or 'writeQ' and 'writeQWith' with options 'OWaitReceipt',
             --   or 'ackWith' and 'nackWith'.
@@ -595,9 +654,15 @@ where
             | ONoContentLen 
     deriving (Show, Read, Eq) 
 
+  ------------------------------------------------------------------------
+  -- Option is element of option list
+  ------------------------------------------------------------------------
   hasQopt :: Qopt -> [Qopt] -> Bool
   hasQopt o os = o `elem` os
 
+  ------------------------------------------------------------------------
+  -- What ackMode ('F.Auto' by default)
+  ------------------------------------------------------------------------
   ackMode :: [Qopt] -> F.AckMode
   ackMode os = case find isMode os of
                  Just (OMode x) -> x
@@ -639,12 +704,11 @@ where
   --
   --     * the list of 'F.Header' coming with the message
   --
-  --     * the contents encoded as 'B.ByteString'.
+  --     * the content encoded as 'B.ByteString'.
   --
-  --   The simplest possible in-bound converter for plain strings
-  --   may be created like this:
+  --   A simple in-bound converter for plain strings is for instance:
   --
-  --   > let iconv _ _ _ = return . toString
+  --   > let iconv _ _ _ = return . unpack
   ------------------------------------------------------------------------
   type InBound  a = Mime.Type -> Int -> [F.Header] -> B.ByteString -> IO a
   ------------------------------------------------------------------------
@@ -656,7 +720,7 @@ where
   --   A simple example to create an out-bound converter 
   --   for plain strings could be:
   --
-  --   > let oconv = return . fromString
+  --   > let oconv = return . pack
   ------------------------------------------------------------------------
   type OutBound a = a -> IO B.ByteString
 
@@ -671,8 +735,7 @@ where
   --   * The connection handle 'Con'
   --
   --   * A queue name that should be unique in your application.
-  --     The queue name is useful for debugging, since it appears
-  --     in error messages.
+  --     The queue name is used only for debugging. 
   --
   --   * The Stomp destination, /i.e./ the name of the queue
   --     as it is known to the broker and other applications.
@@ -681,13 +744,12 @@ where
   --
   --   * A list of headers ('F.Header'), 
   --     which will be passed to the broker.
-  --     the 'F.Header' parameter is actually a breach in the abstraction
-  --     from the Stomp protocol. A header may be, for instance,
+  --     A header may be, for instance,
   --     a selector that restricts the subscription to this queue,
   --     such that only messages with certain attributes 
   --     (/i.e./ specific headers) are sent to the subscribing client.
   --     Selectors are broker-specific and typically expressed
-  --     as SQL or XPath.
+  --     in some kind of query language such as SQL or XPath.
   --
   --   * An in-bound converter.
   --
@@ -795,8 +857,8 @@ where
   -- | Creates a 'Writer' with limited lifetime. 
   --   The queue will live only in the scope of the action
   --   that is passed as last parameter. 
-  --   The function is useful for writers
-  --   that are used only temporarly, /e.g./ during initialisation.
+  --   The function should be used for writers with a lifetime
+  --   shorter than that of the connection.
   --
   --   'withWriter' returns the result of the action.
   --   Since the lifetime of the queue is limited to the action,
@@ -944,7 +1006,7 @@ where
   --   and returns it as 'Message'.
   --   The message cannot be read from the queue
   --   by another call to 'readQ' within the same connection.
-  --   Wether other connections will receive the message as well
+  --   Wether other connections will receive the message too
   --   depends on the broker and the queue patterns it implements.
   --   If the queue is currently empty,
   --   the thread will preempt until a message arrives.
@@ -1037,7 +1099,7 @@ where
   --   for emulations of client/server-like protocols:
   --   the client would pass the name of the queue
   --   where it expects the server response in a header;
-  --   the server would send the resply to the queue
+  --   the server would send the reply to the queue
   --   indicated in the header using 'writeAdHoc'.
   --   The additional 'String' parameter contains the destination.
   ------------------------------------------------------------------------
@@ -1375,47 +1437,6 @@ where
     return m {msgHdrs = F.getHeaders f}
 
   -----------------------------------------------------------------------
-  -- Connection listener
-  -----------------------------------------------------------------------
-  listen :: AppData -> Con -> MVar () -> IO ()
-  listen ad cid w = do 
-    c   <- getCon cid
-    ch  <- newChan
-    withThread c "receiver" (receiver ad ch (throwToOwner c)) $
-      forever $ do
-        f <- readChan ch
-        logReceive cid
-        case F.typeOf f of
-          F.Connected -> handleConnected cid f w
-          F.Message   -> handleMessage   cid f
-          F.Error     -> handleError     cid f
-          F.Receipt   -> handleReceipt   cid f
-          F.HeartBeat -> handleBeat      cid f
-          _           -> throwToOwner c $ 
-                             ProtocolException $ "Unexpected Frame: " ++
-                             show (F.typeOf f)
-
-  withThread :: Connection -> String -> IO () -> IO r -> IO r
-  withThread c nm th act = do
-    m   <- newEmptyMVar
-    x   <- newMVar False
-    tid <- forkIO ((theThread x) `finally` (putMVar m ()))
-    (act >>= signalOk x) `finally` (killThread tid >> takeMVar m)
-    where theThread x = (th >> signalEnd x) `catches` hndls
-          hndls = [Handler (\e -> case e of
-                                    ThreadKilled -> throwIO e
-                                    _            -> throwIO e),
-                   Handler (\e -> throwToOwner c $ 
-                                    WorkerException (
-                                      nm ++ " terminated: " ++
-                                      show (e::SomeException)))
-                  ]
-          signalEnd x = do t <- readMVar x
-                           unless t $ throwToOwner c $ WorkerException (
-                                                         nm ++ " terminated")
-          signalOk x r = modifyMVar x $ \_ -> return (True,r)
-
-  -----------------------------------------------------------------------
   -- Handle Connected Frame
   -----------------------------------------------------------------------
   handleConnected :: Con -> F.Frame -> MVar () -> IO ()
@@ -1461,15 +1482,6 @@ where
               else " (" ++ F.getReceipt f ++ ")" 
     let e = F.getMsg f ++ r ++ ": " ++ U.toString (F.getBody f)
     throwToOwner c (BrokerException e) 
-
-  -----------------------------------------------------------------------
-  -- Throw to owner
-  -- important: give the owner some time to react
-  --            before continuing and - probably - 
-  --            causing another exception
-  -----------------------------------------------------------------------
-  throwToOwner :: Connection -> StomplException -> IO ()
-  throwToOwner c e = throwTo (conOwner c) e
 
   -----------------------------------------------------------------------
   -- Handle Receipt Frame
@@ -1609,15 +1621,6 @@ where
 #endif
                   writeChan (conChn c) f
  
-
-  ---------------------------------------------------------------------
-  -- transform an error frame into a string
-  ---------------------------------------------------------------------
-  errToMsg :: F.Frame -> String
-  errToMsg f = F.getMsg f ++ if B.length (F.getBody f) == 0 
-                                   then "."
-                                   else ": " ++ U.toString (F.getBody f)
- 
   ---------------------------------------------------------------------
   -- frame constructors
   -- this needs review...
@@ -1637,10 +1640,16 @@ where
               F.mkBeatHdr  $ F.beatToVal beat] ++
              uHdr ++ pHdr ++ cHdr ++ hs
 
+  ---------------------------------------------------------------------
+  -- make Disconnect Frame
+  ---------------------------------------------------------------------
   mkDiscF :: String -> Either String F.Frame
   mkDiscF receipt =
     F.mkDisFrame $ mkReceipt receipt
 
+  ---------------------------------------------------------------------
+  -- make Subscribe Frame
+  ---------------------------------------------------------------------
   mkSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkSubF sub receipt hs = 
     F.mkSubFrame $ [F.mkIdHdr   $ show $ subId sub,
@@ -1648,18 +1657,27 @@ where
                     F.mkAckHdr  $ show $ subMode sub] ++ 
                    mkReceipt receipt ++ hs
 
+  ---------------------------------------------------------------------
+  -- make Unsubscribe Frame
+  ---------------------------------------------------------------------
   mkUnSubF :: Subscription -> String -> [F.Header] -> Either String F.Frame
   mkUnSubF sub receipt hs =
     let dh = if null (subName sub) then [] else [F.mkDestHdr $ subName sub]
     in  F.mkUSubFrame $ [F.mkIdHdr $ show $ subId sub] ++ dh ++ 
                         mkReceipt receipt ++ hs
 
+  ---------------------------------------------------------------------
+  -- make Send Frame
+  ---------------------------------------------------------------------
   mkSendF :: Message a -> String -> [F.Header] -> Either String F.Frame
   mkSendF msg receipt hs = 
     Right $ F.mkSend (msgDest msg) (show $ msgTx msg)  receipt 
                      (msgType msg) (msgLen msg) hs -- escape headers! 
                      (msgRaw  msg) 
 
+  ---------------------------------------------------------------------
+  -- make Ack Frame
+  ---------------------------------------------------------------------
   mkAckF :: Bool -> Message a -> String -> [F.Header] -> Either String F.Frame
   mkAckF ok msg receipt _ =
     let sh = if null $ show $ msgSub msg then [] 
@@ -1670,14 +1688,23 @@ where
         mk = if ok then F.mkAckFrame else F.mkNackFrame
     in mk $ F.mkIdHdr (msgAck msg) : (sh ++ rh ++ th)
 
+  ---------------------------------------------------------------------
+  -- make Begin Frame
+  ---------------------------------------------------------------------
   mkBeginF :: String -> String -> [F.Header] -> Either String F.Frame
   mkBeginF tx receipt _ = 
     F.mkBgnFrame $ F.mkTrnHdr tx : mkReceipt receipt
 
+  ---------------------------------------------------------------------
+  -- make Commit Frame
+  ---------------------------------------------------------------------
   mkCommitF :: String -> String -> [F.Header] -> Either String F.Frame
   mkCommitF tx receipt _ =
     F.mkCmtFrame $ F.mkTrnHdr tx : mkReceipt receipt
 
+  ---------------------------------------------------------------------
+  -- make Abort Frame
+  ---------------------------------------------------------------------
   mkAbortF :: String -> String -> [F.Header] -> Either String F.Frame
   mkAbortF tx receipt _ =
     F.mkAbrtFrame $ F.mkTrnHdr tx : mkReceipt receipt
