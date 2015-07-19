@@ -1,3 +1,17 @@
+__0.2.2__
+ 
+   Changes (minor):
+ 
+         - add these lines to the changelog...
+         
+__0.2.1__ 
+
+   Changes:
+
+         - New option to add a handler for error messages
+
+         - New option to add a wait interval to wait for the error handler
+
 __0.2.0__ 
    Changes:
 

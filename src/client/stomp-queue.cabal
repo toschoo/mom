@@ -1,5 +1,5 @@
 Name:            stomp-queue
-Version:         0.2.1
+Version:         0.2.2
 Cabal-Version:   >= 1.8
 Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2015
 License:         LGPL
