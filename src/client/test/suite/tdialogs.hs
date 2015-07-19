@@ -152,6 +152,8 @@ where
         t270  = mkTest "Nested Tx one missing Ack" $ testWith p testNstTxMissingAck
         t680  = mkTest "Nested Tx one m. Ack (se)" $ testSecure sPort testNstTxMissingAck
         t280  = mkTest "BrokerException          " $ testWith p testBrokerEx 
+        t285  = mkTest "Error Handler            " $ testError1 p
+        t286  = mkTest "No Error Handler         " $ testError2 p
         -- Nice test, but:
         -- since we are working with a bridge, the connection will not be closed
         -- after the error message -- and we only have one exception...
@@ -183,7 +185,7 @@ where
         [ t1,   t2,          t4,   t5,   t6, 
           t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
-         t210, t220, t230, t240, t250, t260, t270, t280, t290, t300,
+         t210, t220, t230, t240, t250, t260, t270, t280, t285, t286, t290, t300,
          t310, t320, t330, t340, t350, t360, t370, t380, t390, t400,
          t410, t420, t430,
          -- secure tests
@@ -991,6 +993,7 @@ where
 
   ------------------------------------------------------------------------
   -- Broker Exception
+  ------------------------------------------------------------------------
   -- the trick is that some brokers create an error message on nack
   -- we need two exception handlers,
   -- because the broker will close the connection
@@ -1029,6 +1032,49 @@ where
                                                else return (Fail 
                                                 "Two WorkerExceptions!")
               _  -> return $ Fail $ "Unexpected Exception: " ++ show e
+
+  ------------------------------------------------------------------------
+  -- Receiver sends error message
+  ------------------------------------------------------------------------
+  -- connect 
+  -- send anything (responder answers with error)
+  -- error handler is activated
+  ------------------------------------------------------------------------
+  testError1 :: Int -> IO TestResult
+  testError1 p = do
+    m <- newMVar False
+    withConnection host p [OWaitError 100,OEH (gotM m)] [] $ \c -> (
+      withWriter c "test" "/q/out" [] [] (return . U.fromString) $ \w -> 
+        withReader c "IN" "/q/out" [OMode Client] [] iconv $ \r -> do
+        writeQ w nullType [] "some message"
+        msg <- readQ r
+        catch (nack c msg >> threadDelay 1000000) 
+              (\e -> print (e::SomeException)))
+    withMVar m (\i -> if i then return Pass 
+                           else return (Fail "eh was not triggered!"))
+    where gotM m _ _ = modifyMVar_ m (\_ -> return True)
+
+  ------------------------------------------------------------------------
+  -- Receiver sends error message, counter example
+  ------------------------------------------------------------------------
+  -- connect 
+  -- send anything (responder answers with error)
+  -- no error handler 
+  ------------------------------------------------------------------------
+  testError2 :: Int -> IO TestResult
+  testError2 p = do
+    m <- newMVar False
+    withConnection host p [OWaitError 100] [] $ \c -> (
+      withWriter c "test" "/q/out" [] [] (return . U.fromString) $ \w -> 
+        withReader c "IN" "/q/out" [OMode Client] [] iconv $ \r -> do
+        writeQ w nullType [] "some message"
+        msg <- readQ r
+        catch (catch (nack c msg >> threadDelay 1000000) 
+                     (\e -> gotM m >> print (e::SomeException)))
+                     (\e -> gotM m >> print (e::SomeException))) -- double exception...
+    withMVar m (\i -> if i then return Pass 
+                           else return (Fail "eh was not triggered!"))
+    where gotM m = modifyMVar_ m (\_ -> return True)
 
   ------------------------------------------------------------------------
   -- Dead Worker

@@ -27,6 +27,7 @@ module Network.Mom.Stompl.Client.Queue (
                    Factory.Con, 
                    F.Heart,
                    Copt(..),
+                   EHandler,
                    -- * Queues
                    -- $stomp_queues
                    Reader, Writer, 
@@ -399,10 +400,10 @@ where
       me  <- myThreadId     -- connection owner
       now <- getCurrentTime -- heartbeat
       ch  <- newChan        -- sender
-      bracket (do addCon $ mkConnection cid host port 
-                                            mx   u p ci 
-                                            vers beat ch 
-                                            me now os
+      bracket (do addCon $ (mkConnection cid host port 
+                                             mx   u p ci 
+                                             vers beat ch 
+                                             me now os)
                   getCon cid)
               (\_ -> rmCon cid) $ \c -> 
         withSender c ad ch $ do
@@ -484,12 +485,15 @@ where
              updCon cid c {conBrk = True} 
              finally (act cid) (do
                c' <- getCon cid
-               -- wait for receipt on disconnect ----
-               unless (conWait c' <= 0) $ do
+               unless (conWait c' <= 0) $ do -- wait for receipt
                  rc <- mkUniqueRecc 
                  disconnect c' (show rc)
                  addRec cid rc
-                 waitCon cid rc (conWait c') `onException` rmRec cid rc)
+                 waitCon cid rc (conWait c') `onException` rmRec cid rc
+               -- if we not have waited for a receipt,
+               --    wait now for error handling to terminate
+               when (conWait c' <= 0 && conWaitE c' > 0) $
+                 threadDelay $ ms (conWaitE c'))
            period = snd . conBeat
 
   ---------------------------------------------------------------------
@@ -1478,10 +1482,12 @@ where
   handleError :: Con -> F.Frame -> IO ()
   handleError cid f = do
     c <- getCon cid
-    let r = if null (F.getReceipt f) then ""
-              else " (" ++ F.getReceipt f ++ ")" 
-    let e = F.getMsg f ++ r ++ ": " ++ U.toString (F.getBody f)
-    throwToOwner c (BrokerException e) 
+    case getEH c of 
+      Just eh -> eh cid f
+      Nothing -> let r | null (F.getReceipt f) = ""
+                       | otherwise             = " (" ++ F.getReceipt f ++ ")"
+                     e = F.getMsg f ++ r ++ ": " ++ U.toString (F.getBody f)
+                  in throwToOwner c (BrokerException e) 
 
   -----------------------------------------------------------------------
   -- Handle Receipt Frame

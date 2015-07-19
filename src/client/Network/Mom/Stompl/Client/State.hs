@@ -3,9 +3,11 @@ module State (
          msgContent, numeric, ms,
          Connection(..), mkConnection,
          connected, getVersion, 
+         EHandler,
+         getEH, 
          Copt(..),
          oHeartBeat, oMaxRecv,
-         oAuth, oCliId, oStomp, oTmo, oTLS,
+         oAuth, oCliId, oStomp, oTmo, oTLS,oEH,
          Transaction(..),
          Topt(..), hasTopt, tmo,
          TxState(..),
@@ -89,38 +91,48 @@ where
   type Receipt = Fac.Rec
 
   ------------------------------------------------------------------------
+  -- | Action executed when an Error Frame is received;
+  --   the typical use case is logging the text of the Error Frame.
+  ------------------------------------------------------------------------
+  type EHandler = Fac.Con -> F.Frame -> IO ()
+
+  ------------------------------------------------------------------------
   -- Connection
   ------------------------------------------------------------------------
   data Connection = Connection {
-                      conId      :: Fac.Con,
-                      conAddr    :: String,   -- the broker's IP address
-                      conPort    :: Int,      -- the broker's port
-                      conMax     :: Int,         -- max receive
-                      conUsr     :: String,      -- user
-                      conPwd     :: String,      -- passcode
-                      conCli     :: String,      -- client-id
-                      conSrv     :: String, -- server description
-                      conSes     :: String, -- session identifier (from broker)
-                      conVers    :: [F.Version], -- the accepted versions
-                                               -- the agreed version 
-                                               -- after connect
-                      conBeat    :: F.Heart, -- the heart beat
-                      conChn     :: Chan F.Frame, -- sender channel
+                      conId      :: Fac.Con,        -- Con handle
+                      conAddr    :: String,         -- the broker's IP address
+                      conPort    :: Int,            -- the broker's port
+                      conMax     :: Int,            -- max receive
+                      conUsr     :: String,         -- user
+                      conPwd     :: String,         -- passcode
+                      conCli     :: String,         -- client-id
+                      conSrv     :: String,         -- server description
+                      conSes     :: String,         -- session identifier 
+                      conVers    :: [F.Version],    -- accepted versions
+                      conBeat    :: F.Heart,        -- the heart beat
+                      conChn     :: Chan F.Frame,   -- sender channel
                       conBrk     :: Bool,
-                      conOwner   :: ThreadId,
-                      conHisBeat :: UTCTime,
-                      conMyBeat  :: UTCTime, 
-                      conWait    :: Int,
-                      conSubs    :: [SubEntry],
-                      conDests   :: [DestEntry], 
-                      conThrds   :: [ThreadEntry],
-                      conErrs    :: [F.Frame],
-                      conRecs    :: [Receipt],
-                      conAcks    :: [MsgId]}
+                      conOwner   :: ThreadId,       -- thread that created 
+                                                    -- the connection
+                      conEH      :: Maybe EHandler, -- Error Handler
+                      conHisBeat :: UTCTime,        -- broker's next beat
+                      conMyBeat  :: UTCTime,        -- our next beat
+                      conWait    :: Int,            -- wait for receipt
+                                                    -- before terminating
+                      conWaitE   :: Int,            -- wait on error handling
+                      conSubs    :: [SubEntry],     -- subscriptions
+                      conDests   :: [DestEntry],    -- destinations
+                      conThrds   :: [ThreadEntry],  -- threads with transactions
+                      conRecs    :: [Receipt],      -- expected receipts 
+                      conAcks    :: [MsgId]}        -- expected acks 
 
   instance Eq Connection where
     c1 == c2 = conId c1 == conId c2
 
+  -------------------------------------------------------------------------
+  -- Make a connection. Quite ugly.
+  -------------------------------------------------------------------------
   mkConnection :: Fac.Con -> String -> Int         -> 
                              Int    -> String      -> String   -> 
                              String -> [F.Version] -> F.Heart  -> 
@@ -128,7 +140,9 @@ where
                              UTCTime               -> [Copt]   -> Connection
   mkConnection cid host port mx usr pwd ci vs hs chn myself t os = 
     Connection cid host port mx usr pwd ci "" "" vs hs chn False 
-                   myself t t (oWaitBroker os) [] [] [] [] [] []
+                   myself (oEH os) t t 
+                          (oWaitBroker os) 
+                          (oWaitError  os) [] [] [] [] []
 
   -------------------------------------------------------------------------
   -- | Options passed to a connection
@@ -148,6 +162,13 @@ where
     --   If your broker shows a correct behaviour, 
     --   it is advisable to use this option.
     OWaitBroker Int |
+
+    -- | Wait /n/ milliseconds 
+    --   after the connection has been closed by the broker
+    --   to give the library some time to process
+    --   the error message (if one has been sent).
+    --   
+    OWaitError  Int |
 
     -- | The maximum size of TCP/IP packets.
     --   This option is currently ignored.
@@ -183,12 +204,21 @@ where
     -- | 'TLSClientConfig'
     --        (see 'Data.Conduit.Network.TLS' for details)
     --   for TLS connections.
-    --   If the parameter is not given, 
+    --   If the option is not given, 
     --      a plain TCP/IP connection is used.
-    OTLS TLSClientConfig
+    OTLS TLSClientConfig |
+
+    -- | Action to handle Error frames;
+    --   if the option is not given,
+    --   an exception is raised on arrival of an error frame.
+    --   If it is given, one should also pass a value
+    --   for OWaitError to give the error handler time
+    --   to execute.
+    OEH EHandler
 
   instance Show Copt where
     show (OWaitBroker i) = "OWaitBroker" ++ show i
+    show (OWaitError  i) = "OWaitError " ++ show i
     show (OMaxRecv    i) = "OMaxRecv "   ++ show i
     show (OHeartBeat  h) = "OHeartBeat " ++ show h
     show (OAuth     u p) = "OAuth " ++ u ++ "/" ++ p
@@ -196,9 +226,11 @@ where
     show  OStomp         = "OStomp"  
     show (OTmo        i) = "OTmo"        ++ show i
     show (OTLS        c) = "OTLS      "  ++ show (tlsClientUseTLS c)
+    show (OEH         _) = "OEHandler "  
 
   instance Eq Copt where
     (OWaitBroker i1) == (OWaitBroker i2) = i1 == i2
+    (OWaitError  i1) == (OWaitError  i2) = i1 == i2
     (OMaxRecv    i1) == (OMaxRecv    i2) = i1 == i2 
     (OHeartBeat  h1) == (OHeartBeat  h2) = h1 == h2
     (OAuth    u1 p1) == (OAuth    u2 p2) = u1 == u2 && p1 == p2
@@ -206,6 +238,7 @@ where
     (OTmo        i1) == (OTmo        i2) = i1 == i2
     (OTLS        c1) == (OTLS        c2) = tlsClientUseTLS c1 && 
                                            tlsClientUseTLS c2
+    (OEH          _) == (OEH          _) = True
     OStomp           == OStomp           = True
     _                == _                = False
 
@@ -214,6 +247,7 @@ where
   ------------------------------------------------------------------------
   is :: Copt -> Copt -> Bool
   is (OWaitBroker _) (OWaitBroker _) = True
+  is (OWaitError  _) (OWaitError  _) = True
   is (OMaxRecv    _) (OMaxRecv    _) = True
   is (OHeartBeat  _) (OHeartBeat  _) = True
   is (OAuth     _ _) (OAuth     _ _) = True
@@ -221,6 +255,7 @@ where
   is (OStomp       ) (OStomp      )  = True
   is (OTmo _       ) (OTmo _      )  = True
   is (OTLS      _  ) (OTLS      _ )  = True
+  is (OEH       _  ) (OEH       _ )  = True
   is _               _               = False
 
   noWait :: Int
@@ -241,6 +276,11 @@ where
   oWaitBroker :: [Copt] -> Int
   oWaitBroker os = case find (is $ OWaitBroker 0) os of
                      Just (OWaitBroker d) -> d
+                     _   -> noWait
+
+  oWaitError  :: [Copt] -> Int
+  oWaitError  os = case find (is $ OWaitError  0) os of
+                     Just (OWaitError d) -> d
                      _   -> noWait
 
   oMaxRecv :: [Copt] -> Int
@@ -275,9 +315,15 @@ where
 
   oTLS :: String -> Int -> [Copt] -> TLSClientConfig
   oTLS h p os = case find (is $ OTLS dcfg) os of
-                  Just (OTLS cfg) -> cfg
-                  _               -> dcfg
+                     Just (OTLS cfg) -> cfg
+                     _               -> dcfg
     where dcfg = (tlsClientConfig p $ B.pack h){tlsClientUseTLS=False}
+
+  oEH :: [Copt] -> Maybe EHandler
+  oEH os = case find (is $ OEH deh) os of
+             Just (OEH eh) -> Just eh
+             _             -> Nothing
+    where deh _ _ = return ()
 
   findCon :: Fac.Con -> [Connection] -> Maybe Connection
   findCon cid = find (\c -> conId c == cid)
@@ -309,6 +355,9 @@ where
   getVersion c = if null (conVers c) 
                    then defVersion
                    else head $ conVers c
+
+  getEH :: Connection -> Maybe EHandler
+  getEH = conEH 
 
   ------------------------------------------------------------------------
   -- Sub, Dest and Thread Entry
