@@ -1,15 +1,16 @@
 Name:            stomp-conduit
-Version:         0.0.3
+Version:         0.1.0
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2013 - 2014
+Copyright:       Copyright (c) Tobias Schoofs, 2013 - 2015
 License:         LGPL
-license-file:    license/lgpl-3.0.txt
+license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
 Homepage:        http://github.com/toschoo/mom
 Category:        Network, Message-oriented Middleware, Stomp, Client, Conduit
 Build-Type:      Simple
 Synopsis:        Stompl Conduit Client
+extra-source-files: changelog.md
 Description:
   The Stomp Protocol specifies message-oriented interoperability.
   Applications connect to a message broker to send (publish)
@@ -37,22 +38,6 @@ Description:
   on <http://github.com/toschoo/mom>.
   The Stomp specification can be found at
   <http://stomp.github.com>.
-
-  .
-
-  Release History:
-
-  .
-
-  [0.0.3] Correction in documentation
-
-  . 
-
-  [0.0.2] ControlMonad imported from Control.Monad.Trans.Resource
-
-  .
-
-  [0.0.1] Initial release
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,

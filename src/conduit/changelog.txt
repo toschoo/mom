@@ -1,8 +1,0 @@
-.
-
-[0.0.2] ControlMonad imported from Control.Monad.Trans.Resource
-
-.
-
-[0.0.1] Initial release
-
