@@ -1,15 +1,16 @@
 Name:            stomp-patterns
-Version:         0.0.1
+Version:         0.1.0
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2013
+Copyright:       Copyright (c) Tobias Schoofs, 2013 - 2015
 License:         LGPL
-license-file:    license/lgpl-3.0.txt
+license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
 Maintainer:      tobias dot schoofs at gmx dot net
 Homepage:        http://github.com/toschoo/mom
 Category:        Network, Message-oriented Middleware, Stomp, Client
 Build-Type:      Simple
 Synopsis:        Stompl MOM Stomp Patterns
+extra-source-files: changelog.md
 Description:
   The Stomp Protocol specifies a reduced message broker
   with queues usually read by one application and written
@@ -76,15 +77,6 @@ Description:
   rely heavily on 
   Pieter Hintjens, \"Code Connected\", O'Reilly, 2013
   (see also <http://hintjens.com/books>).
-
-  .
-
-  Release History:
-
-  .
-
-  [0.0.1] Initial release
-
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
