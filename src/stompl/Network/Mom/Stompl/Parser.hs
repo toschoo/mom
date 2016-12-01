@@ -10,8 +10,7 @@
 -------------------------------------------------------------------------------
 module Network.Mom.Stompl.Parser (
                         stompParser,
-                        stompAtOnce
-                      )
+                        stompAtOnce)
 where
 
   import           Data.Attoparsec.ByteString hiding (take, takeWhile, takeTill)
