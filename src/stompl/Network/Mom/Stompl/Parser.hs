@@ -213,7 +213,7 @@ where
               then failBodyLen l (B.length b)
               else do
                 _ <- word8 nul
-                body' l (b |> '\x00') 
+                body' l (b |> 0x00) 
 
   ------------------------------------------------------------------------
   -- escape header key and value;
@@ -235,10 +235,10 @@ where
                     _ <- word8 esc
                     x <- anyWord8
                     c <- case x of
-                           92  -> return '\\'
-                           99  -> return ':'
-                           110 -> return '\n'
-                           114 -> return '\r'
+                           92  -> return esc
+                           99  -> return col
+                           110 -> return eol
+                           114 -> return cr
                            _   -> fail $ "Unknown escape sequence: " ++ show x
                     go (t >|< n |> c)
 

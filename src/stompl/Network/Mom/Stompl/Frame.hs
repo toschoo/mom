@@ -73,9 +73,10 @@ where
   -- Todo:
   -- - conformance to protocol
 
-  import qualified Data.ByteString.Char8 as B
+  import qualified Data.ByteString       as B
   import qualified Data.ByteString.UTF8  as U
   import           Data.Char (toUpper, isDigit)
+  import           Data.Word8 (Word8)
   import           Data.List (find, sortBy, foldl', nub)
   import           Data.List.Split (splitWhen)
   import           Data.Maybe (catMaybes, fromMaybe)
@@ -1026,9 +1027,9 @@ where
   -- | append
   (>|<) :: B.ByteString -> B.ByteString -> B.ByteString
   -- | snoc
-  (|>)  :: B.ByteString -> Char         -> B.ByteString
+  (|>)  :: B.ByteString -> Word8        -> B.ByteString
   -- | cons
-  (<|)  :: Char         -> B.ByteString -> B.ByteString
+  (<|)  :: Word8        -> B.ByteString -> B.ByteString
   x >|< y = x `B.append` y
   x <|  y = x `B.cons` y
   x  |> y = x `B.snoc` y
@@ -1232,7 +1233,7 @@ where
               Receipt     -> "RECEIPT"
               Error       -> "ERROR"
               HeartBeat   -> ""
-    in B.pack (s ++ "\n")
+    in U.fromString s |> 0x0a
 
   ------------------------------------------------------------------------
   -- Convert headers to ByteString
@@ -1241,7 +1242,7 @@ where
   putHeaders f = 
     let hs = toHeaders f 
         s  = B.concat $ map putHeader hs
-     in s |> '\n'
+     in s |> 0x0a
 
   ------------------------------------------------------------------------
   -- Convert header to ByteString
@@ -1365,10 +1366,10 @@ where
   putBody :: Frame -> Body
   putBody f =
     case f of 
-      x@SndFrame {} -> frmBody x |> '\x00'
-      x@ErrFrame {} -> frmBody x |> '\x00'
-      x@MsgFrame {} -> frmBody x |> '\x00'
-      _             -> B.pack "\x00"
+      x@SndFrame {} -> frmBody x |> 0x00
+      x@ErrFrame {} -> frmBody x |> 0x00
+      x@MsgFrame {} -> frmBody x |> 0x00
+      _             -> B.singleton 0x00
 
   ------------------------------------------------------------------------
   -- find a header and return it as string value (with default)
