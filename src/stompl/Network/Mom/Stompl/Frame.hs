@@ -1053,7 +1053,7 @@ where
   getLen :: [Header] -> Either String Int
   getLen hs = 
     case lookup hdrLen hs of
-      Nothing -> Right (-1)
+      Nothing -> Right (-1) -- -1 means no content-length header!
       Just l  -> let len = cleanWhite l
                  in if numeric len then Right $ read len 
                       else Left $ "content-length is not numeric: " ++ l

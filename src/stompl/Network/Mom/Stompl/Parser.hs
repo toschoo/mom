@@ -14,11 +14,10 @@ module Network.Mom.Stompl.Parser (
 where
 
   import           Data.Attoparsec.ByteString hiding (take, takeWhile, takeTill)
-  import qualified Data.Attoparsec.ByteString as A   (takeWhile, takeTill)
+  import qualified Data.Attoparsec.ByteString as A
   import qualified Data.ByteString as B
   import qualified Data.ByteString.UTF8 as U
   import           Data.Word 
-
   import           Control.Applicative ((<|>), (<$>))
   import           Control.Monad (void)
   import           Network.Mom.Stompl.Frame
@@ -194,26 +193,19 @@ where
       _  -> fail $ "Expecting end-of-line: " ++ show c
 
   ------------------------------------------------------------------------
-  -- read text until null or,
-  -- if text length is given,
-  -- until text length
+  -- read text until end-of-body
   ------------------------------------------------------------------------
   body :: Int -> Parser B.ByteString
-  body x = body' x B.empty
-    where 
-      body' l i = do
-        n <- A.takeTill (== nul)
-        let b = i >|< n 
-        if l < 0 || l == B.length b
-          then do
-            _ <- word8 nul
-            return b
-          else 
-            if l < B.length b 
-              then failBodyLen l (B.length b)
-              else do
-                _ <- word8 nul
-                body' l (b |> 0x00) 
+  body l | l == 0    = eob B.empty
+         | l >  0    = A.take l >>= eob
+         | otherwise = A.takeTill (== nul) >>= eob
+
+  ------------------------------------------------------------------------
+  -- end-of-body: read nul and return the body 
+  ------------------------------------------------------------------------
+  eob :: B.ByteString -> Parser B.ByteString
+  eob b = do _ <- word8 nul
+             return b
 
   ------------------------------------------------------------------------
   -- escape header key and value;
@@ -261,9 +253,3 @@ where
   _c   =  99
   _r   = 114
   _n   = 110
-  
-  failBodyLen :: Int -> Int -> Parser a
-  failBodyLen l1 l2 = 
-    fail $ "Body longer than indicated by content-length: " ++
-           show l1 ++ " - " ++ show l2
-  

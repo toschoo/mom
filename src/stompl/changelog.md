@@ -1,3 +1,7 @@
+__0.5.0__ More efficient body parsing when length is given
+
+__0.4.0__ Bytestring instead of Bytestring.Char8
+
 __0.3.0__ State Linkage Exception in license
 
 __0.2.0__ The mime package (Codec.MIME) switched from String

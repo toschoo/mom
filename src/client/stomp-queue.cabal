@@ -1,7 +1,7 @@
 Name:            stomp-queue
-Version:         0.2.2
+Version:         0.2.3
 Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2015
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2016
 License:         LGPL
 license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
@@ -46,7 +46,7 @@ Library
                    conduit             >= 1.2.3.1,
                    conduit-extra       >= 1.1.6.2,
                    network-conduit-tls >= 1.1.0.2,
-                   stompl              >= 0.1.1,
+                   stompl              >= 0.4.0,
                    mime                >= 0.3.3,
                    time                >= 1.1.4
 

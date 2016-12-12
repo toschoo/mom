@@ -454,6 +454,11 @@ where
             [("destination", "/queue/test"),
              ("message-id", "msg-54321"),
              ("content-length", "22")], "msg5.txt"),
+     (TDesc "Message with huge body" 
+            Message (Just . id) Pass
+            [("destination", "/queue/test"),
+             ("message-id", "msg-54321"),
+             ("content-length", "1553418")], "msg6.txt"),
      (TDesc "Error 1.1 without content-length" 
             Error (Just . id) Pass
             [("message", "Malformed package received"),
@@ -520,10 +525,10 @@ where
     case stompAtOnce m of
       Left  e -> case dscRes d of
                    Fail -> do
-                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
+                     tell $ bad ++ " " ++ {- "(" ++ (U.toString m) ++ "): " ++ -} e ++ "\n"
                      return $ Left True
                    Pass -> do
-                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
+                     tell $ bad ++ " " ++ {- "(" ++ (U.toString m) ++ "): " ++ -} e ++ "\n"
                      return $ Left False
       Right f -> 
         case trans f of
