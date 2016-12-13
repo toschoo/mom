@@ -525,10 +525,10 @@ where
     case stompAtOnce m of
       Left  e -> case dscRes d of
                    Fail -> do
-                     tell $ bad ++ " " ++ {- "(" ++ (U.toString m) ++ "): " ++ -} e ++ "\n"
+                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
                      return $ Left True
                    Pass -> do
-                     tell $ bad ++ " " ++ {- "(" ++ (U.toString m) ++ "): " ++ -} e ++ "\n"
+                     tell $ bad ++ "(" ++ (U.toString m) ++ "): " ++ e ++ "\n"
                      return $ Left False
       Right f -> 
         case trans f of
@@ -629,7 +629,7 @@ where
     if verdict
       then 
         putStrLn "OK. All Tests passed"
-      else do
+      else
         putStrLn "Bad. Not all tests passed"
     return verdict
 

@@ -49,6 +49,9 @@ $(TDIR)/tframe:		$(TDIR)/tframe.hs $(SUBSRC)
 $(TDIR)/tparser:	$(TDIR)/tparser.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 
+$(TDIR)/bench1:		$(TDIR)/bench1.hs $(SUBSRC)
+			$(GHC) $(FLGS) $(INC) $@
+
 $(SMOKEDIR)/esc:	$(SMOKEDIR)/esc.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
 

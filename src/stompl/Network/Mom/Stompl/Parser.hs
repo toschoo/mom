@@ -21,7 +21,7 @@ where
   import           Control.Applicative ((<|>), (<$>))
   import           Control.Monad (void)
   import           Network.Mom.Stompl.Frame
-
+  
   ------------------------------------------------------------------------
   -- | Parses a ByteString at once with Attoparsec 'parseOnly'.
   --   May fail or conclude.

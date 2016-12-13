@@ -1,4 +1,4 @@
-__0.5.0__ More efficient body parsing when length is given
+__0.5.0__ Much More efficient body parsing when length is given
 
 __0.4.0__ Bytestring instead of Bytestring.Char8
 
