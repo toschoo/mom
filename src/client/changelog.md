@@ -1,3 +1,13 @@
+__0.3.1__
+  Changes:
+
+	- stompl version >= 0.5.0 is now mandatory
+          Rational: previous versions were very slow
+                    on parsing large messages.
+                    Version 0.5.0 solve this problem.
+                    Benchmarks show that messages of 1MB and
+                    beyond are parsed up to 10.000 times faster.
+
 __0.2.2__
  
    Changes (minor):

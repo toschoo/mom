@@ -1,5 +1,5 @@
 These library and tools were written by and are copyrighted to
-    (c) copyright 2011-2015    Tobias Schoofs 
+    (c) copyright 2011-2016    Tobias Schoofs 
 
 The library is licensed under the terms of the GNU Lesser
 General Public Licence (LGPL), which follows below,
