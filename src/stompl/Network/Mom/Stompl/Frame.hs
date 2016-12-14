@@ -1657,6 +1657,8 @@ where
   --
   --   * subscription id
   --
+  --   * ack id
+  --
   --   * The original 'Send' frame
   ------------------------------------------------------------------------
   sndToMsg :: String -> String -> String -> Frame -> Maybe Frame
