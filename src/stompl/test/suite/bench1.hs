@@ -3,24 +3,26 @@ module Main
 where
 
   import Network.Mom.Stompl.Parser
-  import Network.Mom.Stompl.Frame
 
   import qualified Data.ByteString      as B 
 
-  import System.Exit (exitSuccess, exitFailure)
+  import System.Exit (exitFailure)
   import System.Environment (getArgs)
 
-  import Control.Applicative ((<$>))
   import Control.Monad (when)
 
   import Data.Time.Clock.POSIX
 
-  testParse :: Int -> B.ByteString -> (Int,Int)
-  testParse x m = go x 0 0
-     where go 0 b g = (b,g)
-           go i b g = case stompAtOnce m of
-                        Left  _ -> go (i-1) (b+1) g
-                        Right _ -> go (i-1) b (g+1)
+  testParse :: Int -> B.ByteString -> IO (Int,Int,POSIXTime)
+  testParse x m = go x 0 0 0
+     where go 0 b g u = return (b,g,u)
+           go i b g u = do 
+             !t1 <- getPOSIXTime
+             let !r = stompAtOnce m
+             !t2 <- getPOSIXTime
+             case r of
+               Left  _ -> go (i-1) (b+1) g (u+t2-t1)
+               Right _ -> go (i-1) b (g+1) (u+t2-t1)
 
   main :: IO ()
   main = do
@@ -30,7 +32,7 @@ where
       exitFailure)
     let f = head os
     !m  <- B.readFile f
-    !t1 <- getPOSIXTime
-    let !(b,g) = testParse 100 m
-    !t2 <- getPOSIXTime
-    putStrLn ("good: " ++ show g ++ ", bad: " ++ show b ++ " in " ++ show (t2-t1))
+    (!b,!g,!u) <- testParse 1000 m
+    putStrLn ("good: "  ++ show g ++ 
+              ", bad: " ++ show b ++ 
+              " in "    ++ show u)

@@ -22,4 +22,4 @@ where
     withConnection "127.0.0.1" 61613 [] [] $ \c -> do
       let conv = return . B.pack
       q <- newWriter c "Test-Q" qn [] [] conv
-      writeQ q nullType [] m
+      writeQ q nullType [("message-id","msg-123")] m

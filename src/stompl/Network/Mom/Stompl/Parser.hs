@@ -204,8 +204,7 @@ where
   -- end-of-body: read nul and return the body 
   ------------------------------------------------------------------------
   eob :: B.ByteString -> Parser B.ByteString
-  eob b = do _ <- word8 nul
-             return b
+  eob b = void (word8 nul) >> return b
 
   ------------------------------------------------------------------------
   -- escape header key and value;
