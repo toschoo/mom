@@ -3,7 +3,7 @@ where
 
   import Network.Mom.Stompl.Client.Queue
  
-  import Control.Monad (forever, when)
+  import Control.Monad (when)
   import Control.Concurrent (threadDelay)
   import qualified Data.ByteString.UTF8  as U
   import Data.Char (toUpper)

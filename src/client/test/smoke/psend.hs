@@ -3,8 +3,8 @@ where
 
   import Network.Mom.Stompl.Client.Queue
   import qualified Protocol as P
-  import Factory
-  import State
+  -- import Network.Mom.Stompl.Client.Factory
+  -- import Network.Mom.Stompl.Client.State
   import qualified Data.ByteString.Char8 as B
   import System.Environment
   import System.Exit

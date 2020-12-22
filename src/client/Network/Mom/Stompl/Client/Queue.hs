@@ -24,7 +24,7 @@ module Network.Mom.Stompl.Client.Queue (
                    -- * Connections
                    -- $stomp_con
                    withConnection, 
-                   Factory.Con, 
+                   Fac.Con, 
                    F.Heart,
                    Copt(..),
                    EHandler,
@@ -44,7 +44,7 @@ module Network.Mom.Stompl.Client.Queue (
                    msgType, msgLen, msgHdrs,
                    -- * Receipts
                    -- $stomp_receipts
-                   Factory.Rec(..), Receipt,
+                   Fac.Rec(..), Receipt,
                    waitReceipt,
                    -- * Transactions
                    -- $stomp_trans
@@ -65,9 +65,9 @@ module Network.Mom.Stompl.Client.Queue (
 
 where
 
-  import           Stream
-  import           Factory  
-  import           State
+  import           Network.Mom.Stompl.Client.Stream
+  import           Network.Mom.Stompl.Client.Factory as Fac
+  import           Network.Mom.Stompl.Client.State
 
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
@@ -77,7 +77,7 @@ where
   import           Data.List (find)
   import           Data.Time.Clock
   import           Data.Maybe (isNothing)
-  import           Data.Conduit.Network
+  import           Data.Conduit.Network (AppData)
   import           Data.Conduit.Network.TLS
 
   import           Control.Concurrent 

@@ -13,16 +13,11 @@ import qualified Data.ByteString.UTF8 as U
 
 import qualified Data.ByteString.Lazy as UL -- mh?
 
-import Data.Monoid
-
 import Network.Mom.Stompl.Client.Queue
 
 import Codec.MIME.Type (nullType)
 
 import qualified Data.Aeson as JSON
-
-
-import Data.Time
 
 
 --import DataGenerator

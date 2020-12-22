@@ -1,5 +1,5 @@
 {-# Language BangPatterns,CPP #-}
-module State (
+module Network.Mom.Stompl.Client.State (
          msgContent, numeric, ms,
          Connection(..), mkConnection,
          connected, getVersion, 
@@ -28,7 +28,7 @@ module State (
          checkReceipt) 
 where
 
-  import qualified Factory  as Fac
+  import qualified Network.Mom.Stompl.Client.Factory  as Fac
 
   import qualified Network.Mom.Stompl.Frame as F
   import           Network.Mom.Stompl.Client.Exception
@@ -41,7 +41,7 @@ where
   import           Data.List (find)
   import           Data.Char (isDigit)
   import           Data.Time.Clock
-  
+
   import           Data.Conduit.Network.TLS (TLSClientConfig, 
                                              tlsClientConfig,
                                              tlsClientUseTLS)

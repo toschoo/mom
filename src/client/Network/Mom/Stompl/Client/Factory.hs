@@ -1,4 +1,4 @@
-module Factory (
+module Network.Mom.Stompl.Client.Factory (
         Con(..), mkUniqueConId,
         Sub(..), mkUniqueSubId,
         Tx (..), mkUniqueTxId,

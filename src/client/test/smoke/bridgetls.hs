@@ -6,15 +6,15 @@ where
   import           Data.Char (isDigit)
   import           Data.String (fromString)
   import qualified Data.Conduit as C
-  import           Data.Conduit (($$),(=$),(=$=))
+  import           Data.Conduit ((.|))
   import           Data.Conduit.Network
   import           Data.Conduit.Network.TLS
   import           Control.Monad (forever)
   import           Control.Monad.Trans (liftIO)
+  import           Control.Monad.IO.Class (MonadIO)
   import           Control.Concurrent
   import           System.Environment
   import           Network.Socket
-  import           Filesystem.Path.CurrentOS
 
   main :: IO ()
   main = do
@@ -29,30 +29,30 @@ where
 
   bridge :: Int -> Int -> IO ()
   bridge c s = let hp   = fromString "*"
-                   cfg  = tlsConfig hp c (decodeString "test/keys/broker.crt") 
-                                         (decodeString "test/keys/broker.ks")
+                   cfg  = tlsConfig hp c "test/keys/broker.crt"
+                                         "test/keys/broker.ks"
                 in runTCPServerTLS cfg session
     where session ad = do
             op <- newChan
             ip <- newChan
             _  <- forkIO (client s op ip)
             _  <- forkIO (response ad ip)
-            appSource ad $$ pipeSink op
+            C.runConduitRes (appSource ad .| pipeSink op)
 
   client :: Int -> Chan B.ByteString -> Chan B.ByteString -> IO ()
   client p op ip = let cl = clientSettings p (B.pack "localhost")
                     in runTCPClient cl $ \ad -> do
     _ <- forkIO (request ad op)
-    appSource ad $$ pipeSink ip
+    C.runConduitRes (appSource ad .| pipeSink ip)
 
   request :: AppData -> Chan B.ByteString -> IO ()
-  request ad op = pipeSource op $$ appSink ad
+  request ad op = C.runConduitRes (pipeSource op .| appSink ad)
 
   response :: AppData -> Chan B.ByteString -> IO ()
-  response ad ip = pipeSource ip $$ appSink ad
+  response ad ip = C.runConduitRes (pipeSource ip .| appSink ad)
 
-  pipeSink :: Chan B.ByteString -> C.Sink B.ByteString IO ()
+  pipeSink :: MonadIO m => Chan B.ByteString -> C.ConduitT B.ByteString C.Void m ()
   pipeSink ch = C.awaitForever (\i -> liftIO (writeChan ch i))
 
-  pipeSource :: Chan B.ByteString -> C.Source IO B.ByteString 
+  pipeSource :: MonadIO m => Chan B.ByteString -> C.ConduitT () B.ByteString m ()
   pipeSource ch = forever (liftIO (readChan ch) >>= C.yield)

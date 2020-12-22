@@ -29,7 +29,7 @@ where
  
   ping :: String -> IO ()
   ping qn = do 
-    withConnection "localhost" 61616 [] [] $ \c -> do
+    withConnection "localhost" 61613 [] [] $ \c -> do
       let iconv _ _ _ = strToPing . U.toString
       let oconv = return . U.fromString . show
       withReader  c "Q-IN"  qn [] [] iconv $ \inQ ->

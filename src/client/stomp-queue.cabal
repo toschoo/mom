@@ -43,17 +43,20 @@ Library
                    attoparsec          >= 0.9.1.1,
                    split               >= 0.1.4.1,
                    mtl                 >= 2.2.0.1,
-                   conduit             >= 1.2.3.1,
-                   conduit-extra       >= 1.1.6.2,
-                   network-conduit-tls >= 1.1.0.2,
                    stompl              >= 0.5.0,
-                   mime                >= 0.3.3,
-                   time                >= 1.1.4
+                   mime                >= 0.4.0.2,
+                   time                >= 1.1.4,
+                   conduit             >= 1.3.4,
+                   conduit-extra       >= 1.3.5,
+                   network-conduit-tls >= 1.3.2,
+                   resourcet           >= 1.2.4
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
                    
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, 
-                   Network.Mom.Stompl.Client.Exception,
-                   Network.Mom.Stompl.Client.Patterns
-  other-modules: Stream, State, Factory
+                   Network.Mom.Stompl.Client.Exception
+
+  other-modules: Network.Mom.Stompl.Client.Stream,
+                 Network.Mom.Stompl.Client.State,
+                 Network.Mom.Stompl.Client.Factory
 

@@ -17,8 +17,11 @@ SUBSRC = $(SUTDIR)/Client/Stream.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs 
 
+PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.0.2-packages.conf.d
+
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all
+FLGS = -DTEST -Wall -O2 $(PKG) --make -rtsopts 
+# -prof -auto-all -caf-all
 #-fforce-recomp
 # -D_DEBUG
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
@@ -28,8 +31,6 @@ INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 
 smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/send2 \
-        $(SMOKEDIR)/client1 \
-        $(SMOKEDIR)/server1 \
         $(SMOKEDIR)/sendtx \
         $(SMOKEDIR)/sendtx2 \
         $(SMOKEDIR)/sendf \
@@ -37,7 +38,6 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/sendjp \
         $(SMOKEDIR)/frost \
         $(SMOKEDIR)/luke \
-        $(SMOKEDIR)/psend \
         $(SMOKEDIR)/ping \
         $(SMOKEDIR)/ping2 \
         $(SMOKEDIR)/demo1 \
@@ -45,6 +45,11 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/tlssrv \
         $(SMOKEDIR)/tlsbridge \
         $(SMOKEDIR)/bridgetls
+
+# deprecated
+        # $(SMOKEDIR)/client1 \
+        # $(SMOKEDIR)/server1 \
+        # $(SMOKEDIR)/psend \
 
 $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -83,7 +88,7 @@ $(SMOKEDIR)/sendforever:	$(SMOKEDIR)/sendforever.hs $(SUBSRC)
 				$(GHC) $(FLGS) $(INC) $@
 
 $(SMOKEDIR)/ping:	$(SMOKEDIR)/ping.hs $(SUBSRC)
-			$(GHC) $(FLGS) $(INC) $@
+			$(GHC) $(FLGS) $@
 
 $(SMOKEDIR)/ping2:	$(SMOKEDIR)/ping2.hs $(SMOKEDIR)/Ping2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) -itest/smoke $@

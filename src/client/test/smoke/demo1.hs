@@ -25,7 +25,7 @@ consume r = forever $ do
   putStrLn $ "Message: " ++ msgContent m
 
 publish :: Writer String -> IO ()
-publish w = go 1
+publish w = go (1::Int)
   where go 0 = do writeQ     w    nullType [] msg -- this one is     for us
                   threadDelay delay >> go 1
         go 1 = do writeAdHoc w q2 nullType [] msg -- this one is not for us

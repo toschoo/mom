@@ -1,9 +1,12 @@
-module Stream
+module Network.Mom.Stompl.Client.Stream
 where
 
   import qualified Data.Conduit as C
-  import           Data.Conduit (($$),(=$))
-  import           Data.Conduit.Network
+  import           Data.Conduit ((.|), ($$),(=$))
+
+  import           Data.Conduit.Network (AppData)  
+  import           Data.Conduit.Network  as N
+  import           Data.Conduit.Network.TLS
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U
@@ -14,6 +17,7 @@ where
 
   import           Control.Monad (forever)
   import           Control.Monad.Trans (liftIO)
+  import           Control.Monad.IO.Class (MonadIO)
   import           Control.Concurrent
 
   import qualified Data.Attoparsec.ByteString as A 
@@ -35,37 +39,37 @@ where
   --                and send it through a socket 
   ------------------------------------------------------------------------
   sender :: AppData -> Chan F.Frame -> IO ()
-  sender ad ip =  pipeSource ip $$ stream =$ appSink ad
+  sender ad ip =  C.runConduitRes (pipeSource ip .| stream .| N.appSink ad)
 
   ------------------------------------------------------------------------
   -- Receiver thread: get a ByteStream through a socket,
   --                  parse it to a Frame and send it through a pipe
   ------------------------------------------------------------------------
   receiver :: AppData -> Chan F.Frame -> EH -> IO ()
-  receiver ad ip eh = appSource ad $$ parseC eh =$ pipeSink ip 
+  receiver ad ip eh = C.runConduitRes (appSource ad .| parseC eh .| pipeSink ip) 
 
   ------------------------------------------------------------------------
   -- Put a frame into a pipe (a channel)
   ------------------------------------------------------------------------
-  pipeSink :: Chan F.Frame -> C.Sink F.Frame IO ()
+  pipeSink :: MonadIO m => Chan F.Frame -> C.ConduitT F.Frame C.Void m ()
   pipeSink ch = C.awaitForever (liftIO . writeChan ch)
 
   ------------------------------------------------------------------------
   -- Read a frame from a pipe (a channel)
   ------------------------------------------------------------------------
-  pipeSource :: Chan F.Frame -> C.Source IO F.Frame
+  pipeSource :: MonadIO m => Chan F.Frame -> C.ConduitT () F.Frame m ()
   pipeSource ch = forever (liftIO (readChan ch) >>= C.yield)
 
   ------------------------------------------------------------------------
   -- Convert a frame to a ByteString
   ------------------------------------------------------------------------
-  stream :: C.ConduitM F.Frame B.ByteString IO ()
+  stream :: MonadIO m => C.ConduitT F.Frame B.ByteString m () 
   stream = C.awaitForever (C.yield . F.putFrame)
 
   ------------------------------------------------------------------------
   -- Parse a Frame from a ByteString
   ------------------------------------------------------------------------
-  parseC :: EH -> C.ConduitM B.ByteString F.Frame IO ()
+  parseC :: MonadIO m => EH -> C.ConduitT B.ByteString F.Frame m ()
   parseC eh = goOn
     where goOn = go (A.parse stompParser) 0 -- start with a clean parser
           go prs step = do
