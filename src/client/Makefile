@@ -17,8 +17,8 @@ SUBSRC = $(SUTDIR)/Client/Stream.hs \
          $(SUTDIR)/Client/State.hs \
          $(SUTDIR)/Client/Queue.hs 
 
-# PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.0.2-packages.conf.d
-PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.6.5-packages.conf.d
+PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.0.2-packages.conf.d
+# PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.6.5-packages.conf.d
 
 GHC = ghc
 FLGS = -DTEST -Wall -O2 $(PKG) --make -rtsopts 

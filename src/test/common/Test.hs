@@ -28,7 +28,7 @@ where
   instance Read TestResult where
     readsPrec _ s = case s of
                       "Pass" -> [(Pass, "")]
-                      f      -> 
+                      _      -> 
                         let pre = takeWhile (/= ':') s
                             msg = drop 1 $ dropWhile (/= ':') s
                         in if pre == "Fail"
@@ -110,7 +110,7 @@ where
         return $ t %& t'
 
   exec :: Monad m => Int -> Stop -> Test m -> TestRunner m TestResult
-  exec i u x = do
+  exec i _ x = do
     let s  = fst x
     let mt = snd x
     t <- lift mt

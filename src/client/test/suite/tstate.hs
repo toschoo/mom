@@ -12,11 +12,9 @@ where
   import Data.Maybe
 
   import System.Exit
-  import System.IO.Unsafe
 
-  import State
-  import Factory
-  import qualified Network.Mom.Stompl.Frame as F
+  import Network.Mom.Stompl.Client.State
+  import Network.Mom.Stompl.Client.Factory
 
   --------------------------------------------------------
   -- Arbitrary 

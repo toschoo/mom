@@ -110,7 +110,7 @@ where
                   Right _ -> return sock
 
   disconnect :: S.Socket -> IO ()
-  disconnect = S.sClose 
+  disconnect = S.close 
 
   send :: Writer -> S.Socket -> F.Frame -> IO ()
   send wr sock f = do

@@ -12,12 +12,15 @@ where
   import           Control.Exception (bracket, SomeException, throwIO)
   import qualified Control.Exception as Ex (catch) 
   import qualified Data.ByteString.Char8 as B
+  import           Data.Word (Word8)
 
   maxRcv :: Int
   maxRcv = 1024
 
-  host :: String
-  host = "127.0.0.1"
+  type Host = (Word8, Word8, Word8, Word8)
+
+  host :: Host
+  host = (127,0,0,1)
 
   port :: Int
   port = 22222
@@ -29,16 +32,15 @@ where
   main = bracket (do s <- mkSocket host (fromIntegral port::S.PortNumber)
                      S.listen s 32
                      return s)
-                 S.sClose
+                 S.close
                  (forever . listen)
 
-  mkSocket :: String -> S.PortNumber -> IO S.Socket
+  mkSocket :: Host -> S.PortNumber -> IO S.Socket
   mkSocket h p = do
     proto <- getProtocolNumber "tcp"
     sock  <- S.socket S.AF_INET S.Stream proto
-    addr  <- S.inet_addr h
-    Ex.catch (S.bindSocket sock (S.SockAddrInet p addr))
-             (\e -> S.sClose sock >> throwIO (e::SomeException))
+    Ex.catch (S.bind sock (S.SockAddrInet p $ S.tupleToHostAddress h)) -- addr))
+             (\e -> S.close sock >> throwIO (e::SomeException))
     return sock
 
   listen :: S.Socket -> IO ()
@@ -53,11 +55,11 @@ where
     case mbF of
       Left e  -> do
         putStrLn $ "Error: " ++ e
-        S.sClose s
+        S.close s
       Right f ->
         case F.typeOf f of
           F.Connect    -> connect s rc f
-          F.Disconnect -> S.sClose s
+          F.Disconnect -> S.close s
           F.Send       -> handleSend s f >> session beats s rc
           _ | not beats && F.typeOf f == F.HeartBeat -> session beats s rc
             | otherwise -> do
@@ -66,7 +68,7 @@ where
                 if l == B.length b then session beats s rc
                   else do
                     putStrLn "Cannot send Frame!"
-                    S.sClose s
+                    S.close s
 
   handleSend :: S.Socket -> F.Frame -> IO ()
   handleSend s _ = let nonsense = B.pack "MESSAGE\n\nrubbish\n\NUL"
@@ -79,7 +81,7 @@ where
                          F.mkBeatHdr $ getBeat fc] of
        Left  e -> do
          putStrLn $ "Cannot make CondFrame: " ++ e
-         S.sClose s
+         S.close s
        Right f -> do
          let b = F.putFrame f
          l <- SB.send s b
@@ -88,7 +90,7 @@ where
                 in  session beats s rc
            else do
              putStrLn "Cannot send Connected!"
-             S.sClose s
+             S.close s
 
   getBeat :: F.Frame -> String
   getBeat = F.beatToVal . F.getBeat 

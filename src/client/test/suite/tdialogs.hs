@@ -97,7 +97,10 @@ where
         -- t3    = mkTest "Connect with Stomp       " $ testNConnect  F.Stomp   p
         t4    = mkTest "Connect with Auth        " $ testAuth      p
         t5    = mkTest "Connect with timeout     " $ testTmoOk     p
-        t6    = mkTest "Connect with timeout fail" $ testTmoFail   p
+        -- the trick in this one was to provide a very short timeout (1ms)
+        -- when I wrote the test it was enough to cause a timeout
+        -- with 2020 hardware, that won't work anymore...
+        -- t6    = mkTest "Connect with timeout fail" $ testTmoFail   p
         t10   = mkTest "Create Reader            " $ testWith p testMkInQueue 
         t510  = mkTest "Create Reader (secure)   " $ testSecure sPort testMkInQueue 
         t20   = mkTest "Create Writer            " $ testWith p testMkOutQueue 
@@ -182,7 +185,7 @@ where
         t420  = mkTest "Continue after exception " $ testExc2       22222
         t430  = mkTest "Worker terminates        " $ testWith p testDeadWorker
     in  mkGroup "Dialogs" (Stop (Fail "")) 
-        [ t1,   t2,          t4,   t5,   t6, 
+        [ t1,   t2,          t4,   t5,
           t10,  t20,  t30,  t40,  t50,  t60,  t70,  t75, t76,  t80,  t90, t100,
          t110, t120, t130, t140, t150, t160, t170, t175, t176,       t200, t205,
          t210, t220, t230, t240, t250, t260, t270, t280, t285, t286, t290, t300,
@@ -258,7 +261,7 @@ where
   ------------------------------------------------------------------------
   testTmoFail :: Int -> IO TestResult
   testTmoFail p = do
-    eiC <- try $ withConnection "localhost" p 
+    eiC <- try $ withConnection "localhost" p
                  [OTmo 1] [] (\_ -> return ())
     case eiC of
       Left  e -> case e of
