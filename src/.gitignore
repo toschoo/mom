@@ -1,2 +1,4 @@
 **/.cabal-sandbox/
 **/cabal.sandbox.config
+**/.ghc.*
+**/dist-newstyle/

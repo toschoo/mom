@@ -2,11 +2,10 @@ module Network.Mom.Stompl.Client.Stream
 where
 
   import qualified Data.Conduit as C
-  import           Data.Conduit ((.|), ($$),(=$))
+  import           Data.Conduit ((.|))
 
   import           Data.Conduit.Network (AppData)  
   import           Data.Conduit.Network  as N
-  import           Data.Conduit.Network.TLS
 
   import qualified Data.ByteString.Char8 as B
   import qualified Data.ByteString.UTF8  as U

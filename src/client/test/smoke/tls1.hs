@@ -1,24 +1,19 @@
 module Main
 where
 
-  import           Network.Mom.Stompl.Client.Queue
   import           Network.Mom.Stompl.Frame
   import qualified Data.ByteString.Char8 as B
   import           Data.Char (isDigit)
   import qualified Data.Conduit as C
-  import qualified Data.Conduit.List as CL
-  import           Data.Conduit (($$))
-  import           Data.Conduit.Network
+  import           Data.Conduit ((.|))
   import           Data.Conduit.Network.TLS
   import           Control.Concurrent
   import           Control.Exception (finally)
-  import           Control.Monad (forever)
-  import           Control.Monad.Trans (liftIO)
+  import           Control.Monad.Trans (liftIO, MonadIO)
   import           System.Environment
   import           Network.Socket
   import           Network.Connection
   import           Data.Conduit.Network
-  import           Codec.MIME.Type (nullType)
 
   main :: IO ()
   main = do
@@ -34,27 +29,27 @@ where
   cnc = mkConnect "guest" "guest" "" (0,0) [(1,3)] "" []
 
   sendf :: AppData -> Frame -> IO ()
-  sendf ad f = C.yield (putFrame f) $$ appSink ad
+  sendf ad f = C.runConduitRes (C.yield (putFrame f) .| appSink ad)
 
   recvf :: AppData -> IO B.ByteString
   recvf ad = do
     ch <- newChan
     m  <- newEmptyMVar
-    t  <- forkIO (finally (appSource ad $$ pipeSink ch) 
+    t  <- forkIO (finally (C.runConduitRes $ appSource ad .| pipeSink ch) 
                           (putMVar m ()))
     r  <- readChan ch
     killThread t
     takeMVar m
     return r
     
-  pipeSink :: Chan B.ByteString -> C.Sink B.ByteString IO ()
+  pipeSink :: MonadIO m => Chan B.ByteString -> C.ConduitT B.ByteString C.Void m ()
   pipeSink ch = C.awaitForever (\i -> liftIO (writeChan ch i))
 
-  outSink :: C.Sink B.ByteString IO ()
+  outSink :: MonadIO m => C.ConduitT B.ByteString C.Void m ()
   outSink = C.awaitForever (\i -> liftIO (print i))
 
   conAndSend :: Int -> String -> String -> IO ()
-  conAndSend p qn f = let tlss = TLSSettingsSimple {
+  conAndSend p _  _ = let tlss = TLSSettingsSimple {
                                    settingDisableCertificateValidation = True,
                                    settingDisableSession               = False,
                                    settingUseServerName                = False}
@@ -70,7 +65,7 @@ where
                                -- forever $ threadDelay 10000000
 
   receiver :: AppData -> IO ()
-  receiver ad = appSource ad $$ outSink
+  receiver ad = C.runConduitRes (appSource ad .| outSink)
     {-
     withConnection "127.0.0.1" p [] [] $ \c -> do
       let conv = return 
