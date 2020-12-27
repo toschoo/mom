@@ -1,3 +1,7 @@
+__0.5.0__
+  Changes:
+        - new conduit version (> 1.0)
+
 __0.3.1__
   Changes:
 

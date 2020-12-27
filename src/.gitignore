@@ -2,3 +2,6 @@
 **/cabal.sandbox.config
 **/.ghc.*
 **/dist-newstyle/
+**/*.o
+**/*.hi
+**/.*.swp

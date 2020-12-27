@@ -1,7 +1,7 @@
 Name:            stomp-queue
-Version:         0.3.1
-Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2016
+Version:         0.5.0
+Cabal-Version:   >= 1.24
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2020
 License:         LGPL
 license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
@@ -52,6 +52,8 @@ Library
                    resourcet           >= 1.2.4
 
   hs-source-dirs: Network/Mom/Stompl/Client, .
+
+  default-language: Haskell98
                    
   Exposed-Modules: Network.Mom.Stompl.Client.Queue, 
                    Network.Mom.Stompl.Client.Exception
