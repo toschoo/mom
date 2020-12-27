@@ -22,7 +22,6 @@ where
   import           Data.Time.Clock
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO)
   import           Control.Monad (void)
   import           Codec.MIME.Type (nullType)

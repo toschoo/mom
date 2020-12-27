@@ -1,3 +1,6 @@
+__0.5.0__
+  New versions of conduit, stompl and stomp-queue
+
 __0.1.0__ 
 
   Static Linking Exception in License

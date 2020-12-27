@@ -56,7 +56,6 @@ where
   import           Network.Mom.Stompl.Client.Queue 
   import           Network.Mom.Stompl.Patterns.Basic
   import           Codec.MIME.Type (nullType)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catches)
   import           Control.Monad (forever, unless)
 

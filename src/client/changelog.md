@@ -1,3 +1,7 @@
+__0.5.1__
+  Changes:
+        - new stompl version (>= 0.6.0)
+
 __0.5.0__
   Changes:
         - new conduit version (> 1.0)

@@ -1,8 +1,8 @@
 Name:            stompl
 Category:        Message-Oriented Middleware, Network, Stomp, Parser
-Version:         0.5.0
-Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2016
+Version:         0.6.0
+Cabal-Version:   >= 1.20
+Copyright:       Copyright (c) Tobias Schoofs, 2011 - 2020
 License:         LGPL
 license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
@@ -43,7 +43,8 @@ Library
                    split       >= 0.1.4.1,
                    mime        >= 0.4,
                    text        >= 1.0
-                   -- 3.0.3.2,
+
+  default-language: Haskell98
                    
   Exposed-Modules: Network.Mom.Stompl.Frame, Network.Mom.Stompl.Parser
 

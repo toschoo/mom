@@ -5,7 +5,6 @@ where
   import Network.Mom.Stompl.Patterns.Basic
   import qualified Data.ByteString.Char8 as B
   import Network.Socket
-  import Control.Monad (forever)
   import Control.Concurrent
   import Codec.MIME.Type (nullType)
 
@@ -18,7 +17,7 @@ where
       withPub c "Test1" "Pub1" "/q/source/pub1" onerr
                 ("unknown", [], [], oconv) (go 1) 
     where oconv       = return . B.pack . show
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr e m   = putStrLn $ " error in " ++ m ++ show e
           go :: Int -> PubA Int -> IO ()
           go i p      = do publish p nullType [] i 
                            print i

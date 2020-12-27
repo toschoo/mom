@@ -194,7 +194,6 @@ where
   import qualified Network.Mom.Stompl.Frame as F
   import           System.Timeout
   import           Codec.MIME.Type (Type)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catches, finally)
   import           Control.Concurrent 
   import           Control.Monad (forever, unless, when, void)

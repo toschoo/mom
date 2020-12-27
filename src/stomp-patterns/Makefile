@@ -15,17 +15,18 @@ SUBSRC = $(SUTDIR)/Patterns/Basic.hs \
 	 $(SUTDIR)/Patterns/Balancer.hs \
 	 $(SUTDIR)/Patterns/Bridge.hs 
 
+PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.0.2-packages.conf.d
+
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
+FLGS = -DTEST -Wall -O2 $(PKG) --make -rtsopts
+# -prof -auto-all -caf-all 
 #-fforce-recomp
 INC  = -i./test/src -i../client/Network/Mom/Stompl/Client \
 		    -i../client \
 		    -i./Network/Mom/Stompl/Patterns \
 		    -i./test/suite
 
-smoke:	$(SMOKEDIR)/listen2 \
-        $(SMOKEDIR)/send2 \
-        $(SMOKEDIR)/client1 \
+smoke:	$(SMOKEDIR)/client1 \
         $(SMOKEDIR)/push1 \
         $(SMOKEDIR)/sub1 \
         $(SMOKEDIR)/sub2 \
@@ -44,18 +45,8 @@ smoke:	$(SMOKEDIR)/listen2 \
         $(SMOKEDIR)/fwd1 \
         $(SMOKEDIR)/srb1 \
         $(SMOKEDIR)/tsb1 \
-        $(SMOKEDIR)/deskcl1 \
-        $(SMOKEDIR)/sendtx \
-        $(SMOKEDIR)/sendtx2 \
-        $(SMOKEDIR)/sendf \
-        $(SMOKEDIR)/sendforever \
-        $(SMOKEDIR)/sendjp \
-        $(SMOKEDIR)/frost \
-        $(SMOKEDIR)/luke \
-        $(SMOKEDIR)/psend \
-        $(SMOKEDIR)/ping \
-        $(SMOKEDIR)/multi1 \
-        $(SMOKEDIR)/demo1
+        $(SMOKEDIR)/deskcl1
+
 
 $(SMOKEDIR)/listen2:	$(SMOKEDIR)/listen2.hs $(SUBSRC)
 			$(GHC) $(FLGS) $(INC) $@
@@ -234,6 +225,7 @@ clean:
 	rm -f $(SMOKEDIR)/contx1
 	rm -f $(SMOKEDIR)/*.hi
 	rm -f $(SMOKEDIR)/*.o
+	rm -rf log/
 
 dist-clean:	clean
 		cabal clean

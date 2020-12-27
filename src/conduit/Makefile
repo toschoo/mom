@@ -13,8 +13,12 @@ CLIENT = Client
 
 SUBSRC = $(SUTDIR)/Client/Conduit.hs 
 
+PKG = -package-db .cabal-sandbox/x86_64-linux-ghc-8.0.2-packages.conf.d
+
 GHC = ghc
-FLGS = -DTEST -Wall -O2 --make -rtsopts -prof -auto-all -caf-all 
+FLGS = -DTEST -Wall -O2 $(PKG) --make -rtsopts
+
+# -prof -auto-all -caf-all 
 #-fforce-recomp
 INC  = -i./test/src -i./Network/Mom/Stompl/Client \
 		    -i../broker/Network/Mom/Stompl \

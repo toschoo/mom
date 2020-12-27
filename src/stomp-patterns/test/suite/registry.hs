@@ -12,10 +12,8 @@ where
   import           Network.Mom.Stompl.Client.Queue
 
   import           Data.List (find, nub, sort, partition)
-  import           Data.Maybe
   import           Data.Time
   import           Codec.MIME.Type (nullType)
-  import           Prelude hiding (catch)
   import           Control.Applicative ((<$>))
   import           Control.Concurrent
   import           Control.Monad (void,when)

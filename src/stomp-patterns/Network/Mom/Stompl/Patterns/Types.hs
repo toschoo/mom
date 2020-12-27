@@ -6,7 +6,6 @@ where
   import           Data.Time.Clock
   import qualified Data.ByteString.Char8 as B
   import           Data.Typeable (Typeable)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO, 
                                       Exception, SomeException, Handler(..),
                                       AsyncException(..),

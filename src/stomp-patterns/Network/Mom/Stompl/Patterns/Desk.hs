@@ -54,7 +54,6 @@ where
   import           Data.List (intercalate)
   import           Data.List.Split (endBy)
   import           Codec.MIME.Type (nullType)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catches)
   import           Control.Monad (forever)
   import           Control.Applicative ((<$>))

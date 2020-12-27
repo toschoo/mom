@@ -19,6 +19,6 @@ where
                       outmsg onerr $ forever $ threadDelay 1000000
     where iconv :: InBound Int
           iconv _ _ _ = return . read . B.unpack 
-          onerr c e m = putStrLn $ show c ++ " error in " ++ m ++ show e
+          onerr   e m = putStrLn $ "error in " ++ m ++ show e
           outmsg    m = print (msgContent m)
 

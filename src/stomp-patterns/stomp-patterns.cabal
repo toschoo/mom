@@ -1,7 +1,7 @@
 Name:            stomp-patterns
-Version:         0.1.0
-Cabal-Version:   >= 1.8
-Copyright:       Copyright (c) Tobias Schoofs, 2013 - 2015
+Version:         0.5.0
+Cabal-Version:   >= 1.20
+Copyright:       Copyright (c) Tobias Schoofs, 2013 - 2020
 License:         LGPL
 license-file:    license/lgpl-3.0ex.txt
 Author:          Tobias Schoofs
@@ -80,14 +80,16 @@ Description:
 
 Library
   Build-Depends:   base        >= 4.0 && <= 5.0,
-                   stomp-queue >= 0.1.4,
-                   stompl      >= 0.1.0,
+                   stomp-queue >= 0.5.1,
+                   stompl      >= 0.6.0,
                    mtl         >= 2.1.2,
                    mime        >= 0.3.3,
                    bytestring  >= 0.10.4.0,
                    time        >= 1.4,
                    containers  >= 0.4.2.1,
                    split       >= 0.2.2
+
+  default-language: Haskell98
 
   hs-source-dirs: Network/Mom/Stompl/Patterns, .
                    

@@ -25,7 +25,7 @@ where
   import qualified Data.Conduit as C
   import           Codec.MIME.Type (Type)
   import           Control.Monad.Trans (liftIO)
-  import           Control.Monad.Trans.Resource (MonadResource)
+  import           Control.Monad.IO.Class (MonadIO)
   import           System.Timeout
 
   import           Network.Mom.Stompl.Client.Queue
@@ -44,8 +44,8 @@ where
   --
   --   * Int: Timeout in microseconds
   ------------------------------------------------------------------------
-  qSource :: MonadResource m => 
-             Reader i -> Int -> C.Producer m (Message i)
+  qSource :: MonadIO m => 
+             Reader i -> Int -> C.ConduitT () (Message i) m ()
   qSource r tmo = go
     where go = liftIO (timeout tmo $ readQ r) >>= mbYield
           mbYield mbX = case mbX of
@@ -65,8 +65,8 @@ where
   --
   --   * ['Header']: Headers to add to each message.
   ------------------------------------------------------------------------
-  qSink :: MonadResource m => 
-           Writer o -> Type -> [Header] -> C.Consumer o m ()
+  qSink :: MonadIO m => 
+           Writer o -> Type -> [Header] -> C.ConduitT o C.Void m ()
   qSink w t hs = C.awaitForever $ \x -> liftIO (writeQ w t hs x)
 
   -- header to mark the last segment of a multipart message -------------
@@ -84,8 +84,8 @@ where
   --
   --   For parameters, please refer to 'qSource'. 
   ------------------------------------------------------------------------
-  qMultiSource :: MonadResource m =>
-                  Reader i -> Int -> C.Producer m (Message i)
+  qMultiSource :: MonadIO m =>
+                  Reader i -> Int -> C.ConduitT () (Message i) m ()
   qMultiSource r tmo = loop
     where loop = do
             mbX <- liftIO (timeout tmo $ readQ r)
@@ -105,8 +105,8 @@ where
   --
   --   For parameters, please refer to 'qSink'. 
   ------------------------------------------------------------------------
-  qMultiSink :: MonadResource m =>
-                Writer o -> Type -> [Header] -> C.Consumer o m ()
+  qMultiSink :: MonadIO m =>
+                Writer o -> Type -> [Header] -> C.ConduitT o C.Void m ()
   qMultiSink w t hs = do
     mbX <- C.await
     case mbX of

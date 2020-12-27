@@ -38,7 +38,6 @@ where
   import           Network.Mom.Stompl.Patterns.Basic 
   import           Network.Mom.Stompl.Client.Queue 
   import           Codec.MIME.Type (nullType)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO) 
 
   -----------------------------------------------------------------------

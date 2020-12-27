@@ -15,7 +15,6 @@ where
   import           Network.Mom.Stompl.Client.Queue
 
   import           Control.Concurrent
-  import           Prelude hiding (catch)
   import           Control.Monad (when)
   import           Codec.MIME.Type (nullType)
 

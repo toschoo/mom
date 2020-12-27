@@ -1,3 +1,5 @@
+__0.6.0__ cabal >= 1.20
+
 __0.5.0__ Much More efficient body parsing when length is given
 
 __0.4.0__ Bytestring instead of Bytestring.Char8

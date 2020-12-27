@@ -15,7 +15,6 @@ where
   import qualified Data.Sequence as S
   import           Data.Foldable (toList)
   import           Codec.MIME.Type (nullType)
-  import           Prelude hiding (catch)
   import           Control.Exception (throwIO, catches)
   import           Control.Concurrent 
   import           Control.Monad (forever)
